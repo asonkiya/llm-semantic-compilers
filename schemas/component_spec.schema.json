@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cgir.dev/schemas/component_spec.schema.json",
+  "title": "ComponentSpec",
+  "type": "object",
+  "required": ["id", "kind", "inputs", "outputs", "effects", "calls", "trace"],
+  "properties": {
+    "id": { "type": "string" },
+    "kind": {
+      "enum": [
+        "pure_function",
+        "state_transformer",
+        "effect_adapter",
+        "orchestrator",
+        "unknown"
+      ]
+    },
+    "language": { "type": "string" },
+    "signature": { "type": "string" },
+    "inputs": { "type": "array", "items": { "type": "string" } },
+    "outputs": { "type": "array", "items": { "type": "string" } },
+    "effects": { "type": "array", "items": { "type": "string" } },
+    "calls": { "type": "array", "items": { "type": "string" } },
+    "reads": { "type": "array", "items": { "type": "string" } },
+    "writes": { "type": "array", "items": { "type": "string" } },
+    "purity": { "type": "number", "minimum": 0, "maximum": 1 },
+    "algorithm": { "type": "array", "items": { "type": "string" } },
+    "trace": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}
