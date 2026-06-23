@@ -15,10 +15,16 @@ Forward-looking sequencing. The grouping mirrors `Code-IR.md` §Architecture: **
 **Sprint 1 (P1):**
 - Intra-procedural CFG: `Statement` / `Assignment` / `Branch` / `Loop` / `Return` nodes connected by `CONTROLS` edges; Function is the entry, Return is a sink; loops emit back-edges; `if` without `else` falls through. Wired between `call_graph` and `effects` in the pipeline.
 
-**Sprint 2 (P1, in progress):**
+**Sprint 2 (P1):**
 - Assignment `writes` attribute recorded by CFG (LHS identifier names, recursing through tuple/list patterns; subscript/attribute LHS skipped).
-- Reaching-definitions worklist analysis (`analyses/reaching_defs.py`): forward may-analysis over `CONTROLS` edges, with parameters as initial defs and `Assignment.attrs["writes"]` driving gen/kill. First **pure-graph** analysis — does not take `repo_path`, does not re-parse source. Not wired into the CLI yet (no consumer until PDG).
+- Reaching-definitions worklist analysis (`analyses/reaching_defs.py`): forward may-analysis over `CONTROLS` edges, with parameters as initial defs and `Assignment.attrs["writes"]` driving gen/kill. First **pure-graph** analysis — does not take `repo_path`, does not re-parse source.
 - First opportunistic step on the grammar-agnostic core refactor: extracted duplicated `_parser` / `_locate_function` from `call_graph`, `effects`, `cfg` into `analyses/_python_ast.py`.
+
+**Sprint 3 (P1, in progress):**
+- CFG extended with per-node `reads` (per-stmt sub-expression: RHS / condition / iterable / returned value), `controlled_by` (id of immediately enclosing Branch/Loop), and Assignment `mutates` (attribute/subscript LHS base names).
+- PDG (`analyses/pdg.py`): emits `FLOWS_TO` (data dependence, gated by reaching-defs) and `DEPENDS_ON` (control dependence from `controlled_by`). Second pure-graph analysis.
+- Slicer recognizes `state_transformer` when any Assignment child has non-empty `mutates`.
+- Reaching-defs and PDG now wired into the CLI scan pipeline.
 
 ## P1 — Trust & explainability
 
@@ -27,8 +33,8 @@ The theme: make every `ComponentSpec` defensible. Today a function is "pure" if 
 | # | Milestone tag | Why this comes first | Notes |
 |---|---|---|---|
 | ~~1~~ | ~~`P1-cfg`~~ | **Done (Sprint 1).** Unblocks 2 and 3. | `src/cgir/analyses/cfg.py`; 11 tests (later +4 for `writes` attr) in `tests/unit/test_cfg.py`. |
-| ~~2~~ | ~~`P1-reaching-defs`~~ | **Done (Sprint 2).** Unblocks 3 and `WRITES`/`MUTATES` edges. | `src/cgir/analyses/reaching_defs.py`; 9 tests in `tests/unit/test_reaching_defs.py`. Pure-graph; not wired into CLI until PDG consumes it. |
-| 3 | `P1-pdg` | Combines CFG + reaching defs into the spec's `FLOWS_TO` / `CONTROLS` / `DEPENDS_ON` edges. Refines `kind` classification. | **Now unblocked.** Once landed, the slicer can claim `state_transformer` for functions that mutate locals/params, *and* this is the right time to wire reaching-defs into the CLI pipeline. |
+| ~~2~~ | ~~`P1-reaching-defs`~~ | **Done (Sprint 2).** Unblocks 3 and `WRITES`/`MUTATES` edges. | `src/cgir/analyses/reaching_defs.py`; 9 tests in `tests/unit/test_reaching_defs.py`. Pure-graph; wired into CLI in Sprint 3 alongside PDG. |
+| ~~3~~ | ~~`P1-pdg`~~ | **Done (Sprint 3).** `FLOWS_TO` (data dep) + `DEPENDS_ON` (control dep). Lights up `state_transformer` in the slicer. | `src/cgir/analyses/pdg.py`; 10 tests in `tests/unit/test_pdg.py`. CFG extended with `reads`/`mutates`/`controlled_by` attrs to drive it. |
 | 4 | Extended effects taxonomy (`net`, `fs`, `nondeterm`) | No milestone tag — drop tags into `effects.DIRECT_EFFECT_TAGS` and teach `_walk_body_for_effects` to detect them. | Start with the obvious imports (`requests`, `urllib`, `socket`, `os.path`, `pathlib.Path.write_text`, `time`, `random`, `datetime.now`). |
 | 5 | Statement-granularity trace map | Today `trace_map.py` indexes function ranges. With the CFG in place we can resolve `path:line` to a specific Statement/Assignment/Branch/Loop node and the spec field that depends on it. | Refines `cgir trace` output. Now unblocked. |
 | 6 | `P1-regenerate` | Turn the prompt-pack into a real Anthropic SDK call. Add prompt caching from day one. | Skill `claude-api` lists the patterns to follow. |

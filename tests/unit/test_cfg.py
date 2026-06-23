@@ -331,3 +331,170 @@ def test_attribute_assignment_records_no_writes(repo: Path) -> None:
     g = _ingest_with_cfg(repo)
     [assign] = _assignments(g, "func:m.f")
     assert assign.attrs.get("writes") == []
+
+
+# --- CFG node reads (feed PDG data dep) -------------------------------------
+
+
+def test_assignment_records_rhs_reads(repo: Path) -> None:
+    _write(repo, "m.py", "def f(y, z):\n    x = y + z\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert set(assign.attrs.get("reads") or []) == {"y", "z"}
+
+
+def test_return_records_expression_reads(repo: Path) -> None:
+    _write(repo, "m.py", "def f(x):\n    return x\n")
+    g = _ingest_with_cfg(repo)
+    [ret] = (c for c in g.children("func:m.f") if c.kind == NodeKind.Return)
+    assert ret.attrs.get("reads") == ["x"]
+
+
+def test_branch_records_condition_reads(repo: Path) -> None:
+    _write(repo, "m.py", "def f(c):\n    if c:\n        x = 1\n")
+    g = _ingest_with_cfg(repo)
+    branches = [c for c in g.children("func:m.f") if c.kind == NodeKind.Branch]
+    assert branches[0].attrs.get("reads") == ["c"]
+
+
+def test_for_loop_records_iterable_reads(repo: Path) -> None:
+    _write(repo, "m.py", "def f(items):\n    for i in items:\n        use(i)\n")
+    g = _ingest_with_cfg(repo)
+    loops = [c for c in g.children("func:m.f") if c.kind == NodeKind.Loop]
+    assert loops[0].attrs.get("reads") == ["items"]
+
+
+def test_while_loop_records_condition_reads(repo: Path) -> None:
+    _write(repo, "m.py", "def f(x):\n    while x > 0:\n        x = x - 1\n")
+    g = _ingest_with_cfg(repo)
+    loops = [c for c in g.children("func:m.f") if c.kind == NodeKind.Loop]
+    assert loops[0].attrs.get("reads") == ["x"]
+
+
+def test_reads_excludes_attribute_names(repo: Path) -> None:
+    """For ``obj.x``, only ``obj`` is a read; ``x`` is an attribute name."""
+    _write(repo, "m.py", "def f(obj):\n    y = obj.x\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert assign.attrs.get("reads") == ["obj"]
+
+
+def test_reads_excludes_called_function_name(repo: Path) -> None:
+    """``add_tax(price, rate)``: reads are the args, not the callee name."""
+    _write(repo, "m.py", "def f(price, rate):\n    result = add_tax(price, rate)\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert set(assign.attrs.get("reads") or []) == {"price", "rate"}
+
+
+# --- mutates (attribute / subscript LHS) ------------------------------------
+
+
+def test_attribute_assignment_records_mutates_not_writes(repo: Path) -> None:
+    _write(repo, "m.py", "def f(obj):\n    obj.x = 1\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert assign.attrs.get("writes") == []
+    assert assign.attrs.get("mutates") == ["obj"]
+
+
+def test_subscript_assignment_records_mutates_not_writes(repo: Path) -> None:
+    _write(repo, "m.py", "def f(xs):\n    xs[0] = 1\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert assign.attrs.get("writes") == []
+    assert assign.attrs.get("mutates") == ["xs"]
+
+
+def test_simple_assignment_records_no_mutates(repo: Path) -> None:
+    _write(repo, "m.py", "def f():\n    x = 1\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert assign.attrs.get("mutates") == []
+
+
+# --- controlled_by (drives PDG control dep) ---------------------------------
+
+
+def test_top_level_stmt_has_no_controller(repo: Path) -> None:
+    _write(repo, "m.py", "def f():\n    x = 1\n    return x\n")
+    g = _ingest_with_cfg(repo)
+    for c in _cfg_children(g, "func:m.f"):
+        assert c.attrs.get("controlled_by") is None
+
+
+def test_if_body_stmt_controlled_by_branch(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(c):
+            if c:
+                x = 1
+            return x
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    branches = [c for c in g.children(func_id) if c.kind == NodeKind.Branch]
+    assigns = [c for c in g.children(func_id) if c.kind == NodeKind.Assignment]
+    assert assigns[0].attrs.get("controlled_by") == branches[0].id
+
+
+def test_else_body_stmts_share_branch_as_controller(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(c):
+            if c:
+                x = 1
+            else:
+                x = 2
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    branches = [c for c in g.children(func_id) if c.kind == NodeKind.Branch]
+    assigns = [c for c in g.children(func_id) if c.kind == NodeKind.Assignment]
+    assert {a.attrs.get("controlled_by") for a in assigns} == {branches[0].id}
+
+
+def test_loop_body_stmt_controlled_by_loop(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(items):
+            for i in items:
+                use(i)
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    loops = [c for c in g.children(func_id) if c.kind == NodeKind.Loop]
+    stmts = [c for c in g.children(func_id) if c.kind == NodeKind.Statement]
+    assert stmts[0].attrs.get("controlled_by") == loops[0].id
+
+
+def test_nested_branch_uses_inner_branch_as_controller(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(a, b):
+            if a:
+                if b:
+                    x = 1
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    branches = sorted(
+        (c for c in g.children(func_id) if c.kind == NodeKind.Branch),
+        key=lambda n: n.start_line or 0,
+    )
+    outer, inner = branches
+    [assign] = (c for c in g.children(func_id) if c.kind == NodeKind.Assignment)
+    assert assign.attrs.get("controlled_by") == inner.id
+    assert inner.attrs.get("controlled_by") == outer.id

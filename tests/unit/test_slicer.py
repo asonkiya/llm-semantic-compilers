@@ -1,6 +1,8 @@
 from pathlib import Path
+from textwrap import dedent
 
 from cgir.analyses.call_graph import build_call_graph
+from cgir.analyses.cfg import build as build_cfg
 from cgir.analyses.effects import classify
 from cgir.analyses.purity import score
 from cgir.analyses.symbols import build_symbol_tables
@@ -13,6 +15,7 @@ def test_pricing_add_tax_spec(python_sample_repo: Path) -> None:
     graph = TreeSitterSource().ingest(python_sample_repo)
     tables = build_symbol_tables(graph)
     build_call_graph(graph, tables, python_sample_repo)
+    build_cfg(graph, python_sample_repo)
     effects = classify(graph, python_sample_repo)
     purity = score(graph, effects)
 
@@ -32,3 +35,34 @@ def test_pricing_add_tax_spec(python_sample_repo: Path) -> None:
     quote = specs["orchestrator.quote"]
     assert "pricing.add_tax" in quote.calls
     assert quote.kind == ComponentKind.pure_function
+
+
+def test_method_mutating_self_is_state_transformer(tmp_path: Path) -> None:
+    """A method whose body mutates ``self.<attr>`` classifies as state_transformer.
+
+    Drives the slicer to use the new ``Assignment.attrs["mutates"]`` populated
+    by the CFG pass — distinguishing a state-mutating method from a true
+    ``pure_function``.
+    """
+    repo = tmp_path
+    (repo / "m.py").write_text(
+        dedent(
+            """
+            class C:
+                def set_x(self, v):
+                    self.x = v
+            """
+        ).lstrip()
+    )
+
+    graph = TreeSitterSource().ingest(repo)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, repo)
+    build_cfg(graph, repo)
+    effects = classify(graph, repo)
+    purity = score(graph, effects)
+
+    specs = {
+        spec.id: spec for spec in slice_components(graph, effects=effects, purity_scores=purity)
+    }
+    assert specs["m.C.set_x"].kind == ComponentKind.state_transformer

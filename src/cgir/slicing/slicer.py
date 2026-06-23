@@ -31,7 +31,8 @@ def slice_components(
         )
         node_effects = effects.get(node.id, [])
         purity_score = purity_scores.get(node.id, PLACEHOLDER_SCORE)
-        kind = _classify(node_effects, purity_score)
+        mutates_state = _has_mutations(graph, node.id)
+        kind = _classify(node_effects, purity_score, mutates_state)
 
         trace = []
         if node.path is not None and node.start_line is not None:
@@ -64,12 +65,26 @@ def _callee_label(graph: RepoGraph, node_id: str) -> str:
     return str(qual) if isinstance(qual, str) else node.name
 
 
-def _classify(effects: list[str], purity_score: float) -> ComponentKind:
+def _has_mutations(graph: RepoGraph, func_id: str) -> bool:
+    """True if any Assignment child mutates an existing object (attr/subscript LHS).
+
+    Populated by :mod:`cgir.analyses.cfg` via ``Assignment.attrs["mutates"]``.
+    """
+    for child in graph.children(func_id, NodeKind.Assignment):
+        mutates = child.attrs.get("mutates") if child.attrs else None
+        if isinstance(mutates, list) and mutates:
+            return True
+    return False
+
+
+def _classify(effects: list[str], purity_score: float, mutates_state: bool) -> ComponentKind:
     tags = set(effects)
     if tags & DIRECT_EFFECT_TAGS:
         return ComponentKind.effect_adapter
     if TRANSITIVE_TAG in tags:
         return ComponentKind.orchestrator
+    if mutates_state:
+        return ComponentKind.state_transformer
     if purity_score == 1.0:
         return ComponentKind.pure_function
     return ComponentKind.unknown
