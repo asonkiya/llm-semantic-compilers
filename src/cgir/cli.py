@@ -11,6 +11,7 @@ import typer
 from cgir.analyses import effects as effects_pass
 from cgir.analyses import purity as purity_pass
 from cgir.analyses.call_graph import build_call_graph
+from cgir.analyses.cfg import build as build_cfg
 from cgir.analyses.symbols import build_symbol_tables
 from cgir.config import CGIRConfig
 from cgir.export import json_export
@@ -39,6 +40,7 @@ def scan(
     graph = source.ingest(config.repo_path)
     tables = build_symbol_tables(graph)
     build_call_graph(graph, tables, config.repo_path)
+    build_cfg(graph, config.repo_path)
     effects = effects_pass.classify(graph, config.repo_path)
     purity_scores = purity_pass.score(graph, effects)
     specs = slice_components(graph, effects=effects, purity_scores=purity_scores)

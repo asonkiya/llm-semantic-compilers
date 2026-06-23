@@ -10,10 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import tree_sitter_python
-from tree_sitter import Language, Parser
 from tree_sitter import Node as TSNode
 
+from cgir.analyses._python_ast import locate_function, python_parser
 from cgir.analyses.symbols import SymbolTable, module_of
 from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
@@ -21,7 +20,7 @@ from cgir.ir.nodes import NodeKind
 
 
 def build_call_graph(graph: RepoGraph, tables: dict[str, SymbolTable], repo_path: Path) -> None:
-    parser = _parser()
+    parser = python_parser()
     for func in list(graph.nodes()):
         if func.kind not in {NodeKind.Function, NodeKind.Method}:
             continue
@@ -36,7 +35,7 @@ def build_call_graph(graph: RepoGraph, tables: dict[str, SymbolTable], repo_path
         except OSError:
             continue
         tree = parser.parse(source)
-        func_ts = _locate_function(tree.root_node, func.name, (func.start_line or 1) - 1)
+        func_ts = locate_function(tree.root_node, func.name, (func.start_line or 1) - 1)
         if func_ts is None:
             continue
         for callee_name in _call_names(func_ts, source):
@@ -44,29 +43,6 @@ def build_call_graph(graph: RepoGraph, tables: dict[str, SymbolTable], repo_path
             if target is None:
                 continue
             graph.add_edge(Edge(src=func.id, dst=target, kind=EdgeKind.CALLS))
-
-
-def _parser() -> Parser:
-    language = Language(tree_sitter_python.language())
-    parser = Parser()
-    parser.language = language
-    return parser
-
-
-def _locate_function(root: TSNode, name: str, start_row: int) -> TSNode | None:
-    stack: list[TSNode] = [root]
-    while stack:
-        node = stack.pop()
-        if node.type == "function_definition" and node.start_point[0] == start_row:
-            name_node = node.child_by_field_name("name")
-            if (
-                name_node is not None
-                and name_node.text is not None
-                and name_node.text.decode("utf-8", errors="replace") == name
-            ):
-                return node
-        stack.extend(node.children)
-    return None
 
 
 def _call_names(func_node: TSNode, source: bytes) -> list[str]:
