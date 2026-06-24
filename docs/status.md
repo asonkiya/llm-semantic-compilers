@@ -21,8 +21,10 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | IR core (Node/Edge/RepoGraph) | done | `src/cgir/ir/` |
 | Runtime config | done | `src/cgir/config.py` |
 | GraphSource ABC | done | `src/cgir/sources/base.py` |
-| Tree-sitter Python ingester | done | `src/cgir/sources/tree_sitter_source.py` |
-| Symbol resolution + import resolution | done | `src/cgir/analyses/symbols.py` |
+| Tree-sitter Python ingester (with default ignore-dirs and `--exclude`) | done | `src/cgir/sources/tree_sitter_source.py` (`DEFAULT_IGNORE_DIRS`) |
+| Decorated function / class definitions surfaced | done | `tree_sitter_source._dispatch_top_level`, `_dispatch_in_class` |
+| Symbol resolution + absolute and relative import resolution | done | `src/cgir/analyses/symbols.py`, `tree_sitter_source._resolve_from_module` |
+| CLI per-kind histogram + `--exclude` flag | done | `src/cgir/cli.py:_print_kind_histogram` |
 | Call graph (CALLS edges) | done | `src/cgir/analyses/call_graph.py` |
 | Effects classifier (`io`, `raise`, transitive) | done | `src/cgir/analyses/effects.py` |
 | Purity scorer (1.0 / 0.7 / 0.0) | done | `src/cgir/analyses/purity.py` |
@@ -49,14 +51,14 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 70 tests, all green:
+`pytest -q` runs 90 tests, all green:
 
 | File | Covers |
 |---|---|
 | `tests/unit/test_ir_graph.py` | RepoGraph add/query, JSON serialization |
 | `tests/unit/test_component_spec.py` | Schema round-trip + invalid-kind rejection |
-| `tests/unit/test_tree_sitter_source.py` | File / function / parameter ingest counts |
-| `tests/unit/test_symbols.py` *(planned next)* | — |
+| `tests/unit/test_tree_sitter_source.py` | File / function / parameter ingest counts; default ignore-dirs (venv, node_modules, build, dist, __pycache__, site-packages); custom ignore extends default; dot-prefix dirs; decorated functions (@property, @staticmethod, @classmethod, multi-decorator stack, decorated class) |
+| `tests/unit/test_symbols.py` | Local function/class bindings; absolute `from a.b import c`; relative imports (`.x`, `..x`); relative imports drive `CALLS`; unresolved external imports stay opaque; `IMPORTS` edge target attribute |
 | `tests/unit/test_call_graph.py` | Cross-file `CALLS` resolution |
 | `tests/unit/test_effects.py` | Pure / io / raise / transitive / per-function coverage |
 | `tests/unit/test_purity.py` | 1.0 / 0.7 / 0.0 tiers, pure caller stays pure |
@@ -83,6 +85,16 @@ The `test_symbols.py` row is intentional debt — symbol resolution is exercised
 | Sprint 2 | Shared tree-sitter helper | Refactor step after Sprint 2 green: extracted duplicated `_parser` / `_locate_function` from `call_graph`, `effects`, `cfg` into `analyses/_python_ast.py`. First opportunistic step on the grammar-agnostic core refactor (see `roadmap.md` "Beyond"). |
 | Sprint 3 | P1-pdg | Red-green TDD — extended CFG with `reads`/`mutates`/`controlled_by` attrs (16 new test_cfg.py tests); added `test_pdg.py` (10 tests) for `FLOWS_TO` (data dep) and `DEPENDS_ON` (control dep). Second pure-graph analysis. Wired reaching-defs + PDG into the CLI scan pipeline. |
 | Sprint 3 | `state_transformer` classification | Slicer reads `Assignment.attrs["mutates"]` to detect functions that mutate via attribute or subscript LHS. `tests/unit/test_slicer.py` pins a method `set_x(self, v): self.x = v` as `state_transformer`. |
+| Sprint 4 | Real-world usability fixes | Ingester now skips `DEFAULT_IGNORE_DIRS` ({venv, node_modules, build, dist, __pycache__, site-packages, .tox, .pytest_cache, .mypy_cache, .ruff_cache, target, out, env}) and accepts a `--exclude` flag for custom names. Decorated functions and classes (`@property`/`@staticmethod`/`@classmethod`/multi-decorator stacks) are now surfaced. Relative imports (`from .x import y`, `from ..a.b import c`) resolve to absolute targets and feed the `CALLS` resolver. CLI scan prints a per-kind histogram after writing the index. Smoke-tested on the CGIR codebase itself: `cgir scan .` produces 219 components with sane distribution and runs in ~1s. |
+
+## Known precision gaps
+
+Real codebases will hit these — flag rather than guess:
+
+- **Method-call mutations not detected.** `xs.append(x)`, `self.config.update(...)`, etc. are calls (no LHS), so they don't trigger `mutates`. Functions that mutate via method calls stay classified as `pure_function`.
+- **Augmented assignments aren't extracted.** `x += 1` and `self.counter += 1` are tree-sitter `augmented_assignment` nodes; the CFG only handles plain `assignment`. So they're not in `writes`/`mutates`/`reads`. Affects reaching-defs and PDG precision inside any function using `+=` / `-=` / `*=` / etc.
+- **Body of `with` / `try` / `match` is opaque.** Statements inside these constructs become a single CFG `Statement` node and their inner statements never enter the graph. Lifted in Sprint 5.
+- **Effects taxonomy is minimal.** Only `io` (print/input/open) and `raise` are detected directly; `net`, `fs`, `nondeterm` are documented but not yet wired into `_walk_body_for_effects`.
 
 ## Outstanding tags
 

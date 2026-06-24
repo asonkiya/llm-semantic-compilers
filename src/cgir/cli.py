@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
@@ -34,10 +35,17 @@ def scan(
     out: Annotated[
         Path | None, typer.Option("--out", help="Output directory (default <repo>/.cgir)")
     ] = None,
+    exclude: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--exclude",
+            help="Additional directory names to skip during ingest (repeatable).",
+        ),
+    ] = None,
 ) -> None:
     """Scan a repository and write the RepoGraph + ComponentSpec index."""
     config = CGIRConfig.for_scan(repo, out)
-    source = TreeSitterSource()
+    source = TreeSitterSource(ignore_dirs=set(exclude or []))
     graph = source.ingest(config.repo_path)
     tables = build_symbol_tables(graph)
     build_call_graph(graph, tables, config.repo_path)
@@ -50,6 +58,21 @@ def scan(
     json_export.write_index(config.out_dir, graph, specs)
     trace_map.write(config.out_dir / "trace_map.json")
     typer.echo(f"Wrote {len(specs)} components to {config.out_dir}")
+    _print_kind_histogram(specs)
+
+
+def _print_kind_histogram(specs: list[ComponentSpec]) -> None:
+    if not specs:
+        return
+    counts = Counter(spec.kind.value for spec in specs)
+    # Stable display order: pure → orchestrator → state → effect → unknown.
+    order = ["pure_function", "orchestrator", "state_transformer", "effect_adapter", "unknown"]
+    for kind in order:
+        if counts.get(kind):
+            typer.echo(f"  {kind}: {counts[kind]}")
+    for kind, n in counts.items():
+        if kind not in order:
+            typer.echo(f"  {kind}: {n}")
 
 
 @app.command()

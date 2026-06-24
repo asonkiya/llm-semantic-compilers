@@ -2,7 +2,7 @@
 
 Walks a repo, parses every ``.py`` file with tree-sitter, and emits the
 ``Repository → File → Module → (Class → Method | Function)`` containment
-spine plus ``Parameter`` children and per-function ``Import`` siblings.
+spine plus ``Parameter`` children and per-module ``Import`` siblings.
 
 This pass only builds the structural skeleton. Symbol resolution and the
 ``CALLS`` edges live in :mod:`cgir.analyses.symbols` and
@@ -12,6 +12,7 @@ can plug in at the same seam.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 import tree_sitter_python
@@ -23,6 +24,30 @@ from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
 from cgir.sources.base import GraphSource
 
+DEFAULT_IGNORE_DIRS: frozenset[str] = frozenset(
+    {
+        # Virtual environments
+        "venv",
+        "env",
+        # Build / dist artefacts
+        "build",
+        "dist",
+        "target",
+        "out",
+        # Python caches
+        "__pycache__",
+        "site-packages",
+        # Tool caches (dot-prefixed names are also covered by the dot-prefix
+        # filter below; listed here for completeness when authors rename them)
+        ".tox",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        # Other ecosystems sometimes vendored into Python repos
+        "node_modules",
+    }
+)
+
 
 def _python_parser() -> Parser:
     language = Language(tree_sitter_python.language())
@@ -32,8 +57,9 @@ def _python_parser() -> Parser:
 
 
 class TreeSitterSource(GraphSource):
-    def __init__(self) -> None:
+    def __init__(self, ignore_dirs: Iterable[str] | None = None) -> None:
         self._parser = _python_parser()
+        self._ignore: frozenset[str] = DEFAULT_IGNORE_DIRS | frozenset(ignore_dirs or ())
 
     def ingest(self, repo_path: Path) -> RepoGraph:
         repo_path = repo_path.resolve()
@@ -43,10 +69,18 @@ class TreeSitterSource(GraphSource):
             Node(id=repo_id, kind=NodeKind.Repository, name=repo_path.name, path=str(repo_path))
         )
         for py_file in sorted(repo_path.rglob("*.py")):
-            if any(part.startswith(".") for part in py_file.relative_to(repo_path).parts):
+            if self._should_skip(py_file.relative_to(repo_path)):
                 continue
             self._ingest_file(graph, repo_path, repo_id, py_file)
         return graph
+
+    def _should_skip(self, rel: Path) -> bool:
+        for part in rel.parts:
+            if part.startswith("."):
+                return True
+            if part in self._ignore:
+                return True
+        return False
 
     def _ingest_file(
         self, graph: RepoGraph, repo_path: Path, repo_id: str, file_path: Path
@@ -98,12 +132,28 @@ class TreeSitterSource(GraphSource):
         root: TSNode,
     ) -> None:
         for child in root.children:
-            if child.type == "function_definition":
-                self._add_function(graph, module_id, module_name, rel_path, source, child)
-            elif child.type == "class_definition":
-                self._add_class(graph, module_id, module_name, rel_path, source, child)
-            elif child.type in {"import_statement", "import_from_statement"}:
-                self._add_imports(graph, module_id, rel_path, source, child)
+            self._dispatch_top_level(graph, module_id, module_name, rel_path, source, child)
+
+    def _dispatch_top_level(
+        self,
+        graph: RepoGraph,
+        module_id: str,
+        module_name: str,
+        rel_path: str,
+        source: bytes,
+        ts_node: TSNode,
+    ) -> None:
+        if ts_node.type == "function_definition":
+            self._add_function(graph, module_id, module_name, rel_path, source, ts_node)
+        elif ts_node.type == "class_definition":
+            self._add_class(graph, module_id, module_name, rel_path, source, ts_node)
+        elif ts_node.type == "decorated_definition":
+            inner = _undecorated(ts_node)
+            if inner is None:
+                return
+            self._dispatch_top_level(graph, module_id, module_name, rel_path, source, inner)
+        elif ts_node.type in {"import_statement", "import_from_statement"}:
+            self._add_imports(graph, module_id, module_name, rel_path, source, ts_node)
 
     def _add_function(
         self,
@@ -163,8 +213,23 @@ class TreeSitterSource(GraphSource):
         if body is None:
             return
         for child in body.children:
-            if child.type == "function_definition":
-                self._add_function(graph, node_id, qual, rel_path, source, child)
+            self._dispatch_in_class(graph, node_id, qual, rel_path, source, child)
+
+    def _dispatch_in_class(
+        self,
+        graph: RepoGraph,
+        class_id: str,
+        class_qual: str,
+        rel_path: str,
+        source: bytes,
+        ts_node: TSNode,
+    ) -> None:
+        if ts_node.type == "function_definition":
+            self._add_function(graph, class_id, class_qual, rel_path, source, ts_node)
+        elif ts_node.type == "decorated_definition":
+            inner = _undecorated(ts_node)
+            if inner is not None and inner.type == "function_definition":
+                self._add_function(graph, class_id, class_qual, rel_path, source, inner)
 
     def _add_parameters(
         self,
@@ -201,11 +266,12 @@ class TreeSitterSource(GraphSource):
         self,
         graph: RepoGraph,
         module_id: str,
+        current_module: str,
         rel_path: str,
         source: bytes,
         ts_node: TSNode,
     ) -> None:
-        for target in _import_targets(ts_node, source):
+        for target in _import_targets(ts_node, source, current_module):
             import_id = f"import:{module_id}::{target}"
             graph.add_node(
                 Node(
@@ -222,6 +288,14 @@ class TreeSitterSource(GraphSource):
             graph.add_edge(
                 Edge(src=module_id, dst=import_id, kind=EdgeKind.IMPORTS, attrs={"target": target})
             )
+
+
+def _undecorated(decorated_ts: TSNode) -> TSNode | None:
+    """Return the function/class wrapped by a ``decorated_definition``."""
+    for child in decorated_ts.named_children:
+        if child.type in {"function_definition", "class_definition"}:
+            return child
+    return None
 
 
 def _identifier_text(node: TSNode | None, source: bytes) -> str | None:
@@ -259,7 +333,7 @@ def _param_name(node: TSNode, source: bytes) -> str | None:
     return None
 
 
-def _import_targets(node: TSNode, source: bytes) -> list[str]:
+def _import_targets(node: TSNode, source: bytes, current_module: str) -> list[str]:
     targets: list[str] = []
     if node.type == "import_statement":
         for child in node.children:
@@ -269,12 +343,43 @@ def _import_targets(node: TSNode, source: bytes) -> list[str]:
                     targets.append(name)
     elif node.type == "import_from_statement":
         module_node = node.child_by_field_name("module_name")
-        module = _identifier_text(module_node, source) or ""
+        module = _resolve_from_module(module_node, source, current_module) if module_node else ""
         for child in node.children_by_field_name("name"):
             name = _identifier_text(_name_child(child), source)
             if name:
                 targets.append(f"{module}.{name}" if module else name)
     return targets
+
+
+def _resolve_from_module(module_node: TSNode, source: bytes, current_module: str) -> str:
+    """Return the absolute dotted name of an ``import_from_statement`` module.
+
+    Handles both absolute (``from a.b import x``) and relative
+    (``from .a import x``, ``from ..a.b import x``) forms.
+    """
+    if module_node.type == "relative_import":
+        dots = 0
+        sub_name = ""
+        for child in module_node.children:
+            if child.type == "import_prefix":
+                # import_prefix's text is one or more "." characters.
+                raw = source[child.start_byte : child.end_byte]
+                dots = raw.count(b".")
+            elif child.type == "dotted_name":
+                sub_name = _identifier_text(child, source) or ""
+        if dots == 0:
+            return sub_name
+        parts = current_module.split(".")
+        # Drop the module itself; each extra dot peels off one more package level.
+        package_parts = parts[:-1]
+        up = dots - 1
+        if up > 0:
+            package_parts = package_parts[:-up] if up <= len(package_parts) else []
+        absolute = list(package_parts)
+        if sub_name:
+            absolute.extend(sub_name.split("."))
+        return ".".join(absolute)
+    return _identifier_text(module_node, source) or ""
 
 
 def _name_child(node: TSNode) -> TSNode:
@@ -285,4 +390,4 @@ def _name_child(node: TSNode) -> TSNode:
     return node
 
 
-__all__ = ["TreeSitterSource"]
+__all__ = ["DEFAULT_IGNORE_DIRS", "TreeSitterSource"]
