@@ -96,3 +96,24 @@ def test_export_graphml(tmp_path: Path, python_sample_repo: Path) -> None:
     result = CliRunner().invoke(app, ["export", "--format", "graphml", "--out", str(out_dir)])
     assert result.exit_code == 0, result.output
     assert (out_dir / "repo_graph.graphml").exists()
+
+
+# --- stats (Sprint 7) ----------------------------------------------------------
+
+
+def test_stats_prints_summary(tmp_path: Path, python_sample_repo: Path) -> None:
+    out_dir = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(app, ["stats", "--index", str(out_dir)])
+    assert result.exit_code == 0, result.output
+    assert "Components: 2" in result.output
+    assert "pure_function" in result.output
+    assert "pricing.add_tax" in result.output  # most-called on the fixture
+
+
+def test_stats_json_output(tmp_path: Path, python_sample_repo: Path) -> None:
+    out_dir = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(app, ["stats", "--index", str(out_dir), "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["total"] == 2
+    assert payload["kinds"]["pure_function"] == 2

@@ -28,6 +28,7 @@ cgir trace pricing.py:1 --index /tmp/cgir-out
 cgir viz --index /tmp/cgir-out                      # self-contained viz.html
 cgir viz --index /tmp/cgir-out --format mermaid     # Markdown-embeddable flowchart
 cgir export --format graphml --out /tmp/cgir-out    # Gephi / yEd
+cgir stats --index /tmp/cgir-out                    # kinds, purity, hotspots
 ```
 
 ## Docs

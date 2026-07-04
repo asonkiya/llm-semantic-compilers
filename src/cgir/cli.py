@@ -22,6 +22,7 @@ from cgir.export.mermaid import render_call_graph
 from cgir.ir.component_spec import ComponentSpec
 from cgir.ir.graph import RepoGraph
 from cgir.regenerate import regenerate as run_regenerate
+from cgir.report.stats import compute_stats, render_text
 from cgir.slicing import slice_components
 from cgir.sources import TreeSitterSource
 from cgir.trace import TraceMap, build_trace_map
@@ -110,6 +111,19 @@ def viz(
         typer.echo(render_call_graph(specs), nl=False)
     else:
         raise typer.BadParameter(f"Unknown format: {fmt}")
+
+
+@app.command()
+def stats(
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+    as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON.")] = False,
+) -> None:
+    """Summarize the scanned codebase: kinds, purity, effects, hotspots."""
+    result = compute_stats(_load_specs(index_dir))
+    if as_json:
+        typer.echo(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        typer.echo(render_text(result), nl=False)
 
 
 def _load_graph(index_dir: Path) -> RepoGraph:
