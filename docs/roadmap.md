@@ -50,7 +50,7 @@ The theme: stop holding the graph in process memory, and accept secondary analyz
 |---|---|---|---|
 | 1 | `P2-joern-bridge` | CPG-style overlays give us real interprocedural data-flow without re-implementing it. | Implement as a `GraphSource` that shells out to Joern's CLI and normalizes its CPG into our `Node`/`Edge` vocabulary. |
 | 2 | `P2-codeql-bridge` | Secondary analyzer + export bridge. Useful for differential testing against Joern. | Same pattern as Joern: shell out, normalize. |
-| 3 | `P2-graphml` | Cheap export for Gephi / yEd / Neo4j importers. | Use `networkx.write_graphml` on `RepoGraph._g`. |
+| 3 | ~~`P2-graphml`~~ **done (Sprint 6)** | Cheap export for Gephi / yEd / Neo4j importers. | Landed in `export/graphml.py` — flattens attrs to GraphML-safe scalars. `cgir export --format graphml`. |
 | 4 | `P2-neo4j` | Persistent backend for repos that don't fit in process memory. | Translate `to_jsonable()` into Cypher MERGEs; provide a `Neo4jRepoGraph` that implements the same `RepoGraph` interface so passes don't notice. |
 
 Acceptance for "P2 done": `cgir scan` runs on a 100k-LOC repo with the Neo4j backend in under five minutes, and Joern/CodeQL adapters produce specs that pass differential tests against the Tree-sitter pipeline.

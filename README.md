@@ -15,7 +15,7 @@ The Python-target pipeline runs end-to-end:
 - `path:line → component_id` trace map
 - Prompt-pack rendering (LLM call still stubbed)
 
-CFG/PDG/reaching-defs, Joern/CodeQL adapters, Neo4j export, real LLM regeneration, and the FastAPI surface are stubbed with `milestone:` tags. Run `grep -rn "milestone:\|STUB:" src/` for the prioritized backlog, or see [`docs/roadmap.md`](./docs/roadmap.md).
+The Python pipeline (ingest → symbols → call graph → CFG → reaching-defs → PDG → effects → purity → slice → export) runs end-to-end, with GraphML/HTML/Mermaid visualization. Joern/CodeQL adapters, Neo4j export, real LLM regeneration, and the FastAPI surface are stubbed with `milestone:` tags. Run `grep -rn "milestone:\|STUB:" src/` for the prioritized backlog, or see [`docs/roadmap.md`](./docs/roadmap.md).
 
 ## Quickstart
 
@@ -25,6 +25,9 @@ pytest -q
 cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 cgir component pricing.add_tax --index /tmp/cgir-out
 cgir trace pricing.py:1 --index /tmp/cgir-out
+cgir viz --index /tmp/cgir-out                      # self-contained viz.html
+cgir viz --index /tmp/cgir-out --format mermaid     # Markdown-embeddable flowchart
+cgir export --format graphml --out /tmp/cgir-out    # Gephi / yEd
 ```
 
 ## Docs

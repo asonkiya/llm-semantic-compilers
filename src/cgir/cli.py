@@ -16,8 +16,11 @@ from cgir.analyses.cfg import build as build_cfg
 from cgir.analyses.pdg import build as build_pdg
 from cgir.analyses.symbols import build_symbol_tables
 from cgir.config import CGIRConfig
-from cgir.export import json_export
+from cgir.export import graphml as graphml_export
+from cgir.export import html_viz, json_export
+from cgir.export.mermaid import render_call_graph
 from cgir.ir.component_spec import ComponentSpec
+from cgir.ir.graph import RepoGraph
 from cgir.regenerate import regenerate as run_regenerate
 from cgir.slicing import slice_components
 from cgir.sources import TreeSitterSource
@@ -85,10 +88,45 @@ def export(
         typer.echo(f"JSON outputs already at {out}; nothing to do.")
         return
     if fmt == "graphml":
-        raise NotImplementedError("milestone: P2-graphml")
+        path = graphml_export.write(out, _load_graph(out))
+        typer.echo(f"Wrote {path}")
+        return
     if fmt == "neo4j":
         raise NotImplementedError("milestone: P2-neo4j")
     raise typer.BadParameter(f"Unknown format: {fmt}")
+
+
+@app.command()
+def viz(
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+    fmt: Annotated[str, typer.Option("--format", help="One of: html | mermaid")] = "html",
+) -> None:
+    """Render the component graph — a self-contained HTML page or Mermaid text."""
+    specs = _load_specs(index_dir)
+    if fmt == "html":
+        path = html_viz.write(index_dir, specs)
+        typer.echo(f"Wrote {path} — open it in a browser.")
+    elif fmt == "mermaid":
+        typer.echo(render_call_graph(specs), nl=False)
+    else:
+        raise typer.BadParameter(f"Unknown format: {fmt}")
+
+
+def _load_graph(index_dir: Path) -> RepoGraph:
+    graph_path = index_dir / "repo_graph.json"
+    if not graph_path.exists():
+        raise typer.BadParameter(f"No graph at {graph_path}; run `cgir scan` first")
+    return RepoGraph.from_jsonable(json.loads(graph_path.read_text()))
+
+
+def _load_specs(index_dir: Path) -> list[ComponentSpec]:
+    components_dir = index_dir / "components"
+    if not components_dir.is_dir():
+        raise typer.BadParameter(f"No components at {components_dir}; run `cgir scan` first")
+    return [
+        ComponentSpec.from_dict(json.loads(p.read_text()))
+        for p in sorted(components_dir.glob("*.json"))
+    ]
 
 
 @app.command()

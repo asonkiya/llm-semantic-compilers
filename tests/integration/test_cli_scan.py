@@ -63,3 +63,36 @@ def test_scan_exclude_flag(tmp_path: Path) -> None:
     ids = {entry["id"] for entry in index}
     assert "keep.keep" in ids
     assert not any("skip" in i for i in ids)
+
+
+# --- viz + graphml export (Sprint 6) ------------------------------------------
+
+
+def _scanned_index(tmp_path: Path, python_sample_repo: Path) -> Path:
+    out_dir = tmp_path / "cgir-out"
+    result = CliRunner().invoke(app, ["scan", str(python_sample_repo), "--out", str(out_dir)])
+    assert result.exit_code == 0, result.output
+    return out_dir
+
+
+def test_viz_writes_html(tmp_path: Path, python_sample_repo: Path) -> None:
+    out_dir = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(app, ["viz", "--index", str(out_dir)])
+    assert result.exit_code == 0, result.output
+    html = (out_dir / "viz.html").read_text()
+    assert "pricing.add_tax" in html
+
+
+def test_viz_mermaid_prints_flowchart(tmp_path: Path, python_sample_repo: Path) -> None:
+    out_dir = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(app, ["viz", "--index", str(out_dir), "--format", "mermaid"])
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("flowchart")
+    assert "orchestrator_quote --> pricing_add_tax" in result.output
+
+
+def test_export_graphml(tmp_path: Path, python_sample_repo: Path) -> None:
+    out_dir = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(app, ["export", "--format", "graphml", "--out", str(out_dir)])
+    assert result.exit_code == 0, result.output
+    assert (out_dir / "repo_graph.graphml").exists()

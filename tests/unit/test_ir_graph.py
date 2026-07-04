@@ -20,3 +20,31 @@ def test_to_jsonable_round_trip_shape() -> None:
     payload = g.to_jsonable()
     assert payload["nodes"][0]["kind"] == "Module"
     assert payload["edges"] == []
+
+
+def test_from_jsonable_round_trip() -> None:
+    """to_jsonable → from_jsonable reconstructs nodes, edges, kinds, attrs."""
+    g = RepoGraph()
+    g.add_node(Node(id="m", kind=NodeKind.Module, name="m", path="m.py"))
+    g.add_node(
+        Node(
+            id="func:m.f",
+            kind=NodeKind.Function,
+            name="f",
+            path="m.py",
+            start_line=1,
+            end_line=2,
+            attrs={"qualname": "m.f", "writes": ["x"]},
+        )
+    )
+    g.add_edge(Edge(src="m", dst="func:m.f", kind=EdgeKind.CONTAINS))
+
+    restored = RepoGraph.from_jsonable(g.to_jsonable())
+
+    assert len(restored) == 2
+    func = restored.get_node("func:m.f")
+    assert func.kind == NodeKind.Function
+    assert func.start_line == 1
+    assert func.attrs["writes"] == ["x"]
+    [edge] = restored.out_edges("m", EdgeKind.CONTAINS)
+    assert edge.dst == "func:m.f"

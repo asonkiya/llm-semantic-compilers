@@ -78,6 +78,33 @@ class RepoGraph:
     def __len__(self) -> int:
         return int(self._g.number_of_nodes())
 
+    @classmethod
+    def from_jsonable(cls, data: dict[str, Any]) -> RepoGraph:
+        """Inverse of :meth:`to_jsonable` — rebuild a graph from its JSON dump."""
+        graph = cls()
+        for n in data.get("nodes", []):
+            graph.add_node(
+                Node(
+                    id=n["id"],
+                    kind=NodeKind(n["kind"]),
+                    name=n["name"],
+                    path=n.get("path"),
+                    start_line=n.get("start_line"),
+                    end_line=n.get("end_line"),
+                    attrs=dict(n.get("attrs") or {}),
+                )
+            )
+        for e in data.get("edges", []):
+            graph.add_edge(
+                Edge(
+                    src=e["src"],
+                    dst=e["dst"],
+                    kind=EdgeKind(e["kind"]),
+                    attrs=dict(e.get("attrs") or {}),
+                )
+            )
+        return graph
+
     def to_jsonable(self) -> dict[str, Any]:
         nodes = []
         for node in self.nodes():
