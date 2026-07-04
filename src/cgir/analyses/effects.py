@@ -28,9 +28,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from tree_sitter import Node as TSNode
-from tree_sitter import Parser
 
-from cgir.analyses._python_ast import locate_function, python_parser
+from cgir.analyses._python_ast import SourceCache, locate_function, python_parser
 from cgir.ir.edges import EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import NodeKind
@@ -94,12 +93,12 @@ _NONDETERM_METHOD_SUFFIXES: tuple[str, ...] = (".now", ".utcnow", ".today")
 
 def classify(graph: RepoGraph, repo_path: Path) -> dict[str, list[str]]:
     """Return ``{function_id: sorted([effect_tag, ...])}`` for every function/method."""
-    parser = python_parser()
+    cache = SourceCache(python_parser(), repo_path)
     func_nodes = [n for n in graph.nodes() if n.kind in {NodeKind.Function, NodeKind.Method}]
 
     effects: dict[str, set[str]] = {}
     for func in func_nodes:
-        effects[func.id] = _direct_effects(parser, repo_path, func)
+        effects[func.id] = _direct_effects(cache, func)
 
     # Propagate transitively over CALLS edges until fixed point.
     changed = True
@@ -117,7 +116,7 @@ def classify(graph: RepoGraph, repo_path: Path) -> dict[str, list[str]]:
     return {nid: sorted(tags) for nid, tags in effects.items()}
 
 
-def _direct_effects(parser: Parser, repo_path: Path, func: object) -> set[str]:
+def _direct_effects(cache: SourceCache, func: object) -> set[str]:
     # ``func`` is a :class:`cgir.ir.nodes.Node`; typed loosely to avoid an
     # import cycle with the slicer.
     path = getattr(func, "path", None)
@@ -125,12 +124,11 @@ def _direct_effects(parser: Parser, repo_path: Path, func: object) -> set[str]:
     name = getattr(func, "name", None)
     if path is None or start_line is None or name is None:
         return set()
-    try:
-        source = (repo_path / path).read_bytes()
-    except OSError:
+    parsed = cache.get(path)
+    if parsed is None:
         return set()
-    tree = parser.parse(source)
-    func_ts = locate_function(tree.root_node, name, start_line - 1)
+    source, root = parsed
+    func_ts = locate_function(root, name, start_line - 1)
     if func_ts is None:
         return set()
     return _walk_body_for_effects(func_ts, source)

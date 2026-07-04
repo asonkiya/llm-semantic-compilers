@@ -154,20 +154,40 @@ function step() {
   if (alpha < 0.005) return;
   alpha *= 0.985;
   const vis = nodes.filter(n => kindVisible[n.kind]);
-  // repulsion
-  for (let i = 0; i < vis.length; i++) {
-    const a = vis[i];
-    for (let j = i + 1; j < vis.length; j++) {
-      const b = vis[j];
-      let dx = a.x - b.x, dy = a.y - b.y;
-      let d2 = dx * dx + dy * dy;
-      if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
-      if (d2 > 250000) continue;
-      const f = (2600 / d2) * alpha;
-      const d = Math.sqrt(d2);
-      const fx = (dx / d) * f, fy = (dy / d) * f;
-      if (!a.fixed) { a.vx += fx; a.vy += fy; }
-      if (!b.fixed) { b.vx -= fx; b.vy -= fy; }
+  // repulsion — exact for small graphs, sampled for large ones so a
+  // several-thousand-node repo stays interactive
+  if (vis.length > 1200) {
+    const K = 25, boost = 3;
+    for (let i = 0; i < vis.length; i++) {
+      const a = vis[i];
+      if (a.fixed) continue;
+      for (let k = 0; k < K; k++) {
+        const b = vis[(Math.random() * vis.length) | 0];
+        if (b === a) continue;
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
+        if (d2 > 250000) continue;
+        const f = (2600 * boost / d2) * alpha;
+        const d = Math.sqrt(d2);
+        a.vx += (dx / d) * f; a.vy += (dy / d) * f;
+      }
+    }
+  } else {
+    for (let i = 0; i < vis.length; i++) {
+      const a = vis[i];
+      for (let j = i + 1; j < vis.length; j++) {
+        const b = vis[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
+        if (d2 > 250000) continue;
+        const f = (2600 / d2) * alpha;
+        const d = Math.sqrt(d2);
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        if (!a.fixed) { a.vx += fx; a.vy += fy; }
+        if (!b.fixed) { b.vx -= fx; b.vy -= fy; }
+      }
     }
   }
   // springs

@@ -1,6 +1,7 @@
 """Build CALLS edges from resolved symbol tables.
 
-Re-parses each function/method body with tree-sitter, finds ``call``
+Walks each function/method body with tree-sitter (files parsed once via
+:class:`~cgir.analyses._python_ast.SourceCache`), finds ``call``
 expressions, and resolves the callee name through the owning module's
 symbol table. Unresolved calls are dropped — third-party effects show
 up via :mod:`cgir.analyses.effects` instead.
@@ -12,7 +13,7 @@ from pathlib import Path
 
 from tree_sitter import Node as TSNode
 
-from cgir.analyses._python_ast import locate_function, python_parser
+from cgir.analyses._python_ast import SourceCache, locate_function, python_parser
 from cgir.analyses.symbols import SymbolTable, module_of
 from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
@@ -20,7 +21,7 @@ from cgir.ir.nodes import NodeKind
 
 
 def build_call_graph(graph: RepoGraph, tables: dict[str, SymbolTable], repo_path: Path) -> None:
-    parser = python_parser()
+    cache = SourceCache(python_parser(), repo_path)
     for func in list(graph.nodes()):
         if func.kind not in {NodeKind.Function, NodeKind.Method}:
             continue
@@ -30,12 +31,11 @@ def build_call_graph(graph: RepoGraph, tables: dict[str, SymbolTable], repo_path
         table = tables.get(module_id)
         if table is None:
             continue
-        try:
-            source = (repo_path / func.path).read_bytes()
-        except OSError:
+        parsed = cache.get(func.path)
+        if parsed is None:
             continue
-        tree = parser.parse(source)
-        func_ts = locate_function(tree.root_node, func.name, (func.start_line or 1) - 1)
+        source, root = parsed
+        func_ts = locate_function(root, func.name, (func.start_line or 1) - 1)
         if func_ts is None:
             continue
         for callee_name in _call_names(func_ts, source):

@@ -44,6 +44,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | PDG: `FLOWS_TO` (data dep) + `DEPENDS_ON` (control dep) | done | `src/cgir/analyses/pdg.py` |
 | `state_transformer` classification (attribute/subscript assignment) | done | `src/cgir/slicing/slicer.py:_has_mutations` |
 | Shared tree-sitter helper (first opportunistic step on grammar-agnostic refactor) | done | `src/cgir/analyses/_python_ast.py` |
+| Parse-once `SourceCache` in call_graph / cfg / effects (4x scan speedup) | done | `src/cgir/analyses/_python_ast.py:SourceCache` |
 | Extended effects taxonomy (`net`, `fs`, `nondeterm`, lexical matching) | done | `src/cgir/analyses/effects.py` (`_classify_dotted_call`) |
 | Regeneration with injectable generator seam + Anthropic backend (`--live`) | done | `src/cgir/regenerate/regenerator.py` (`anthropic_generator`, prompt caching on) |
 | GraphML export (`cgir export --format graphml`) | done | `src/cgir/export/graphml.py` |
@@ -60,7 +61,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 173 tests, all green:
+`pytest -q` runs 176 tests, all green:
 
 | File | Covers |
 |---|---|
@@ -100,6 +101,7 @@ The `test_symbols.py` row is intentional debt — symbol resolution is exercised
 | Sprint 3 | P1-pdg | Red-green TDD — extended CFG with `reads`/`mutates`/`controlled_by` attrs (16 new test_cfg.py tests); added `test_pdg.py` (10 tests) for `FLOWS_TO` (data dep) and `DEPENDS_ON` (control dep). Second pure-graph analysis. Wired reaching-defs + PDG into the CLI scan pipeline. |
 | Sprint 3 | `state_transformer` classification | Slicer reads `Assignment.attrs["mutates"]` to detect functions that mutate via attribute or subscript LHS. `tests/unit/test_slicer.py` pins a method `set_x(self, v): self.x = v` as `state_transformer`. |
 | Sprint 4 | Real-world usability fixes | Ingester now skips `DEFAULT_IGNORE_DIRS` ({venv, node_modules, build, dist, __pycache__, site-packages, .tox, .pytest_cache, .mypy_cache, .ruff_cache, target, out, env}) and accepts a `--exclude` flag for custom names. Decorated functions and classes (`@property`/`@staticmethod`/`@classmethod`/multi-decorator stacks) are now surfaced. Relative imports (`from .x import y`, `from ..a.b import c`) resolve to absolute targets and feed the `CALLS` resolver. CLI scan prints a per-kind histogram after writing the index. Smoke-tested on the CGIR codebase itself: `cgir scan .` produces 219 components with sane distribution and runs in ~1s. |
+| Sprint 10 | Real-codebase validation + parse cache | Scanned networkx (~6.7k components) from site-packages: no crashes, sane distribution. Found the per-function re-parse hot spot (each pass parsed a file once *per function* in it); added `SourceCache` (parse-once per file per pass) to call_graph/cfg/effects — 58s → 14.7s on networkx with byte-identical output. HTML viz physics now samples repulsion pairs above 1,200 nodes so large graphs stay interactive. |
 | Sprint 9 | `P1-regenerate` | Red-green TDD — 4 new tests. `regenerate(spec, lang, generator=None)`: the LLM call is an injectable `Callable[[str], str]`, so everything is testable offline. `anthropic_generator()` (lazy import, `cgir[llm]` extra, `CGIR_MODEL` override, prompt caching on the system prompt from day one per roadmap) backs `cgir regenerate --live`; without `--live` it's an explicit dry run that prints the prompt-pack. API `/regenerate` stays dry-run. |
 | Sprint 8 | `P1-api` | Red-green TDD — 8 new tests. Extracted the scan pipeline into `cgir/pipeline.py:scan_repo` (per roadmap: one driver, CLI and API as thin surfaces). FastAPI routes: `POST /scan`, `GET /components`, `GET /components/{id}`, `GET /trace`, `POST /regenerate`, `GET /stats`. Missing-index reads answer 409 (vs 404 for unknown components). `CLAUDE.md` pipeline pointer updated to `pipeline.py`. |
 | Sprint 7 | `cgir stats` structure report | Red-green TDD — 10 new tests. `report/stats.py:compute_stats` is a pure function over specs (JSON-able result); `render_text` for the terminal. Reports totals, per-kind counts, purity buckets (pure/tainted/impure + mean), effect tag counts, most-called components, top fan-out, and external-call hotspots. `cgir stats --index <dir> [--json]`. |

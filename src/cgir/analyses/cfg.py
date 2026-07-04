@@ -54,25 +54,24 @@ from pathlib import Path
 
 from tree_sitter import Node as TSNode
 
-from cgir.analyses._python_ast import locate_function, python_parser
+from cgir.analyses._python_ast import SourceCache, locate_function, python_parser
 from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
 
 
 def build(graph: RepoGraph, repo_path: Path) -> None:
-    parser = python_parser()
+    cache = SourceCache(python_parser(), repo_path)
     for func in list(graph.nodes()):
         if func.kind not in {NodeKind.Function, NodeKind.Method}:
             continue
         if func.path is None or func.start_line is None:
             continue
-        try:
-            source = (repo_path / func.path).read_bytes()
-        except OSError:
+        parsed = cache.get(func.path)
+        if parsed is None:
             continue
-        tree = parser.parse(source)
-        func_ts = locate_function(tree.root_node, func.name, func.start_line - 1)
+        source, root = parsed
+        func_ts = locate_function(root, func.name, func.start_line - 1)
         if func_ts is None:
             continue
         body = func_ts.child_by_field_name("body")
