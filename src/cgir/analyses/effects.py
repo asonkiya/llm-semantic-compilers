@@ -44,7 +44,9 @@ _IO_BUILTINS: frozenset[str] = frozenset({"print", "input", "open"})
 
 _NET_PREFIXES: tuple[str, ...] = (
     "requests.",
-    "urllib.",
+    # urllib.parse is pure string manipulation — only the request side is net.
+    "urllib.request.",
+    "urllib.error.",
     "socket.",
     "http.client.",
     "httpx.",

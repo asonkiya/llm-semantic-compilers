@@ -413,6 +413,14 @@ _MUTATOR_METHODS: frozenset[str] = frozenset(
         "update",
         "write",
         "writelines",
+        # DB-session style mutators (SQLAlchemy et al.) — found on real repos
+        # where `db.delete(ch)` classified pure while `db.add(ch)` didn't.
+        "delete",
+        "commit",
+        "rollback",
+        "flush",
+        "merge",
+        "expunge",
     }
 )
 

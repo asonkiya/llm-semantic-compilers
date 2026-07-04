@@ -298,6 +298,22 @@ def test_aliased_bare_call_is_nondeterm(repo: Path) -> None:
     assert "nondeterm" in effects["func:m.make_id"]
 
 
+def test_urllib_parse_is_not_net(repo: Path) -> None:
+    """urllib.parse is pure string manipulation — must not trip the net prefix."""
+    _write(
+        repo,
+        "m.py",
+        """
+        import urllib.parse
+
+        def join(base, href):
+            return urllib.parse.urljoin(base, href)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert effects["func:m.join"] == []
+
+
 def test_unrelated_bare_call_stays_untagged(repo: Path) -> None:
     _write(
         repo,
