@@ -162,16 +162,28 @@ def regenerate_cmd(
     component_id: Annotated[str, typer.Argument(metavar="ID")],
     lang: Annotated[str, typer.Option("--lang")] = "typescript",
     index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Call the Anthropic API (requires cgir[llm] + API key)."),
+    ] = False,
 ) -> None:
-    """Print the prompt-pack + a stub regeneration for a component."""
+    """Print the prompt-pack for a component; --live generates real code."""
     spec_path = index_dir / "components" / f"{component_id}.json"
     if not spec_path.exists():
         raise typer.BadParameter(f"No spec at {spec_path}")
     spec = ComponentSpec.from_dict(json.loads(spec_path.read_text()))
-    result = run_regenerate(spec, lang)
+    generator = None
+    if live:
+        from cgir.regenerate.regenerator import anthropic_generator
+
+        try:
+            generator = anthropic_generator()
+        except RuntimeError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    result = run_regenerate(spec, lang, generator=generator)
     typer.echo("--- PROMPT ---")
     typer.echo(result.prompt)
-    typer.echo("--- STUB OUTPUT ---")
+    typer.echo("--- OUTPUT (live) ---" if result.live else "--- OUTPUT (dry run) ---")
     typer.echo(result.code)
 
 

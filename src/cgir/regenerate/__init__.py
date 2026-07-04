@@ -1,4 +1,4 @@
-"""Prompt-pack + regeneration. LLM call is a P1 stub."""
+"""Prompt-pack + regeneration. The LLM call is an injectable generator seam."""
 
 from cgir.regenerate.prompt_pack import build_prompt
 from cgir.regenerate.regenerator import regenerate

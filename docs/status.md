@@ -45,7 +45,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | `state_transformer` classification (attribute/subscript assignment) | done | `src/cgir/slicing/slicer.py:_has_mutations` |
 | Shared tree-sitter helper (first opportunistic step on grammar-agnostic refactor) | done | `src/cgir/analyses/_python_ast.py` |
 | Extended effects taxonomy (`net`, `fs`, `nondeterm`, lexical matching) | done | `src/cgir/analyses/effects.py` (`_classify_dotted_call`) |
-| LLM-driven regeneration | stub | `src/cgir/regenerate/regenerator.py` (`P1-regenerate`) |
+| Regeneration with injectable generator seam + Anthropic backend (`--live`) | done | `src/cgir/regenerate/regenerator.py` (`anthropic_generator`, prompt caching on) |
 | GraphML export (`cgir export --format graphml`) | done | `src/cgir/export/graphml.py` |
 | Interactive HTML viz (`cgir viz`) — self-contained, no network | done | `src/cgir/export/html_viz.py` |
 | Mermaid call-graph (`cgir viz --format mermaid`) | done | `src/cgir/export/mermaid.py` |
@@ -60,7 +60,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 169 tests, all green:
+`pytest -q` runs 173 tests, all green:
 
 | File | Covers |
 |---|---|
@@ -82,6 +82,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | `tests/unit/test_stats.py` | Totals/files, kind counts, purity buckets + mean, effect counts, most-called ranking, fan-out ranking, external-call counting, empty-input shape |
 | `tests/integration/test_cli_scan.py` | Full CLI pipeline writes correct outputs; `cgir viz` (html + mermaid), `cgir export --format graphml`, and `cgir stats` (text + `--json`) run off an existing index |
 | `tests/integration/test_api.py` | `POST /scan` → list/get components, trace hit + 404 miss, regenerate prompt-pack, stats; 409 on unscanned index; 404 on unknown component |
+| `tests/unit/test_regenerator.py` | Injected generator drives live result; generator receives the prompt-pack; dry run without generator (no STUB markers); missing `anthropic` raises install hint |
 
 The `test_symbols.py` row is intentional debt — symbol resolution is exercised transitively by the call-graph tests but doesn't have a direct red-green pair yet. Pick it up before any change to `analyses/symbols.py`.
 
@@ -99,6 +100,7 @@ The `test_symbols.py` row is intentional debt — symbol resolution is exercised
 | Sprint 3 | P1-pdg | Red-green TDD — extended CFG with `reads`/`mutates`/`controlled_by` attrs (16 new test_cfg.py tests); added `test_pdg.py` (10 tests) for `FLOWS_TO` (data dep) and `DEPENDS_ON` (control dep). Second pure-graph analysis. Wired reaching-defs + PDG into the CLI scan pipeline. |
 | Sprint 3 | `state_transformer` classification | Slicer reads `Assignment.attrs["mutates"]` to detect functions that mutate via attribute or subscript LHS. `tests/unit/test_slicer.py` pins a method `set_x(self, v): self.x = v` as `state_transformer`. |
 | Sprint 4 | Real-world usability fixes | Ingester now skips `DEFAULT_IGNORE_DIRS` ({venv, node_modules, build, dist, __pycache__, site-packages, .tox, .pytest_cache, .mypy_cache, .ruff_cache, target, out, env}) and accepts a `--exclude` flag for custom names. Decorated functions and classes (`@property`/`@staticmethod`/`@classmethod`/multi-decorator stacks) are now surfaced. Relative imports (`from .x import y`, `from ..a.b import c`) resolve to absolute targets and feed the `CALLS` resolver. CLI scan prints a per-kind histogram after writing the index. Smoke-tested on the CGIR codebase itself: `cgir scan .` produces 219 components with sane distribution and runs in ~1s. |
+| Sprint 9 | `P1-regenerate` | Red-green TDD — 4 new tests. `regenerate(spec, lang, generator=None)`: the LLM call is an injectable `Callable[[str], str]`, so everything is testable offline. `anthropic_generator()` (lazy import, `cgir[llm]` extra, `CGIR_MODEL` override, prompt caching on the system prompt from day one per roadmap) backs `cgir regenerate --live`; without `--live` it's an explicit dry run that prints the prompt-pack. API `/regenerate` stays dry-run. |
 | Sprint 8 | `P1-api` | Red-green TDD — 8 new tests. Extracted the scan pipeline into `cgir/pipeline.py:scan_repo` (per roadmap: one driver, CLI and API as thin surfaces). FastAPI routes: `POST /scan`, `GET /components`, `GET /components/{id}`, `GET /trace`, `POST /regenerate`, `GET /stats`. Missing-index reads answer 409 (vs 404 for unknown components). `CLAUDE.md` pipeline pointer updated to `pipeline.py`. |
 | Sprint 7 | `cgir stats` structure report | Red-green TDD — 10 new tests. `report/stats.py:compute_stats` is a pure function over specs (JSON-able result); `render_text` for the terminal. Reports totals, per-kind counts, purity buckets (pure/tainted/impure + mean), effect tag counts, most-called components, top fan-out, and external-call hotspots. `cgir stats --index <dir> [--json]`. |
 | Sprint 6 | Visualization (`P2-graphml` + `cgir viz`) | Red-green TDD — 18 new tests. `RepoGraph.from_jsonable` lets `viz`/`export` run off an existing `.cgir` index without rescanning. GraphML export flattens attrs to scalars for Gephi/yEd. `cgir viz` writes a fully self-contained `viz.html` (embedded JSON + vanilla-JS canvas force layout: drag, zoom, pan, tooltip, detail panel, search, kind legend — zero network requests). `cgir viz --format mermaid` prints a Markdown-embeddable flowchart, subgraph per file, styled by component kind. |
@@ -118,7 +120,8 @@ Real codebases will hit these — flag rather than guess:
 
 `grep -rn "milestone:\|STUB:" src/` is the canonical backlog. As of this commit it lists:
 
-- `P1-regenerate`
 - `P2-neo4j`, `P2-joern-bridge`, `P2-codeql-bridge`
+
+P0 and P1 are complete.
 
 See [`roadmap.md`](./roadmap.md) for sequencing.

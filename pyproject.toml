@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 api = ["fastapi>=0.110", "uvicorn>=0.27"]
+llm = ["anthropic>=0.40"]
 dev = [
   "pytest>=8.0",
   "pytest-cov>=5.0",
@@ -54,7 +55,7 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 
 [[tool.mypy.overrides]]
-module = ["tree_sitter.*", "tree_sitter_python.*", "networkx.*"]
+module = ["tree_sitter.*", "tree_sitter_python.*", "networkx.*", "anthropic.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
