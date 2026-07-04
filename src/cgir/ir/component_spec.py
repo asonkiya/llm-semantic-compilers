@@ -33,6 +33,7 @@ COMPONENT_SPEC_SCHEMA: dict[str, Any] = {
         "outputs": {"type": "array", "items": {"type": "string"}},
         "effects": {"type": "array", "items": {"type": "string"}},
         "calls": {"type": "array", "items": {"type": "string"}},
+        "constructs": {"type": "array", "items": {"type": "string"}},
         "reads": {"type": "array", "items": {"type": "string"}},
         "writes": {"type": "array", "items": {"type": "string"}},
         "purity": {"type": "number", "minimum": 0, "maximum": 1},
@@ -59,6 +60,7 @@ class ComponentSpec:
     outputs: list[str] = field(default_factory=list)
     effects: list[str] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
+    constructs: list[str] = field(default_factory=list)
     trace: list[str] = field(default_factory=list)
     language: str | None = None
     signature: str | None = None

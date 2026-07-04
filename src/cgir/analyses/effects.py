@@ -2,15 +2,25 @@
 
 Effect taxonomy:
     io              calls into ``print``, ``input``, ``open``
-    raise           contains a ``raise`` statement
-    net             calls into ``requests`` / ``urllib`` / ``socket`` /
-                    ``http.client`` / ``httpx`` / ``aiohttp``
+    raise           contains a ``raise`` statement (informational — see below)
+    net             calls into ``requests`` / ``urllib.request`` / ``socket``
+                    / ``http.client`` / ``httpx`` / ``aiohttp``
     fs              calls into ``shutil``, destructive ``os.*`` functions,
                     or pathlib-style read/write methods (``.write_text``,
                     ``.read_bytes``, ``.unlink``, ...)
     nondeterm       calls into ``random`` / ``secrets``, clock reads
                     (``time.time``, ``datetime.now``), ``uuid.uuid4``, ...
-    calls_effectful (transitive only) — a callee has a direct effect
+    db              database access — method calls like ``query`` /
+                    ``execute`` / ``commit`` on receivers named like
+                    ``db`` / ``session`` / ``conn`` / ``cursor``
+    calls_effectful (transitive only) — a callee has an *impure* effect
+
+``raise`` is recorded but **not impure** (settled Sprint 13): exceptions
+are control flow / part of the contract, so a raise-only function keeps
+purity 1.0, classifies by its other traits, and does not taint callers.
+:data:`IMPURE_EFFECT_TAGS` is the gate used by purity, classification,
+and the transitive closure; :data:`DIRECT_EFFECT_TAGS` is everything we
+detect directly.
 
 The transitive tag is split out from the direct ones so :mod:`cgir.slicing`
 can distinguish ``effect_adapter`` (does IO itself) from ``orchestrator``
@@ -37,8 +47,35 @@ from cgir.ir.edges import EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
 
-DIRECT_EFFECT_TAGS: frozenset[str] = frozenset({"io", "raise", "net", "fs", "nondeterm"})
+DIRECT_EFFECT_TAGS: frozenset[str] = frozenset({"io", "raise", "net", "fs", "nondeterm", "db"})
+IMPURE_EFFECT_TAGS: frozenset[str] = DIRECT_EFFECT_TAGS - {"raise"}
 TRANSITIVE_TAG = "calls_effectful"
+
+_DB_RECEIVERS: frozenset[str] = frozenset(
+    {"db", "database", "session", "conn", "connection", "cursor", "engine", "tx", "txn"}
+)
+_DB_METHODS: frozenset[str] = frozenset(
+    {
+        "add",
+        "add_all",
+        "begin",
+        "commit",
+        "delete",
+        "execute",
+        "executemany",
+        "fetchall",
+        "fetchmany",
+        "fetchone",
+        "flush",
+        "get",
+        "merge",
+        "query",
+        "refresh",
+        "rollback",
+        "scalar",
+        "scalars",
+    }
+)
 
 _IO_BUILTINS: frozenset[str] = frozenset({"print", "input", "open"})
 
@@ -108,7 +145,8 @@ def classify(graph: RepoGraph, repo_path: Path) -> dict[str, list[str]]:
         aliases = alias_maps.get(module_id, {}) if module_id else {}
         effects[func.id] = _direct_effects(cache, func, aliases)
 
-    # Propagate transitively over CALLS edges until fixed point.
+    # Propagate transitively over CALLS edges until fixed point. Only
+    # *impure* effects taint callers — raise-only callees don't.
     changed = True
     while changed:
         changed = False
@@ -116,7 +154,7 @@ def classify(graph: RepoGraph, repo_path: Path) -> dict[str, list[str]]:
             for edge in graph.out_edges(func.id, EdgeKind.CALLS):
                 callee = effects.get(edge.dst, set())
                 if (
-                    callee & DIRECT_EFFECT_TAGS or TRANSITIVE_TAG in callee
+                    callee & IMPURE_EFFECT_TAGS or TRANSITIVE_TAG in callee
                 ) and TRANSITIVE_TAG not in effects[func.id]:
                     effects[func.id].add(TRANSITIVE_TAG)
                     changed = True
@@ -188,6 +226,9 @@ def _classify_dotted_call(dotted: str) -> str | None:
     if any(ch in dotted for ch in "()[] \n"):
         # A computed receiver (call/subscript chain) — skip rather than guess.
         return None
+    parts = dotted.split(".")
+    if len(parts) >= 2 and parts[-1] in _DB_METHODS and parts[-2] in _DB_RECEIVERS:
+        return "db"
     if dotted.startswith(_NET_PREFIXES):
         return "net"
     if (

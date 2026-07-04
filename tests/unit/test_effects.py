@@ -327,3 +327,60 @@ def test_unrelated_bare_call_stays_untagged(repo: Path) -> None:
     )
     effects = classify(_ingest(repo), repo)
     assert effects["func:m.go"] == []
+
+
+# --- db tag (settled Sprint 13) ------------------------------------------------
+
+
+def test_db_query_is_db_effect(repo: Path) -> None:
+    _write(repo, "m.py", "def find(db, i):\n    return db.query(i).first()\n")
+    effects = classify(_ingest(repo), repo)
+    assert "db" in effects["func:m.find"]
+
+
+def test_session_commit_is_db_effect(repo: Path) -> None:
+    _write(repo, "m.py", "def save(session):\n    session.commit()\n")
+    effects = classify(_ingest(repo), repo)
+    assert "db" in effects["func:m.save"]
+
+
+def test_cursor_execute_is_db_effect(repo: Path) -> None:
+    _write(repo, "m.py", "def run(cursor, sql):\n    cursor.execute(sql)\n")
+    effects = classify(_ingest(repo), repo)
+    assert "db" in effects["func:m.run"]
+
+
+def test_nested_db_receiver_is_db_effect(repo: Path) -> None:
+    """`self.db.execute(...)` — the receiver segment right before the method."""
+    _write(repo, "m.py", "class R:\n    def run(self, sql):\n        self.db.execute(sql)\n")
+    effects = classify(_ingest(repo), repo)
+    assert "db" in effects["method:m.R.run"]
+
+
+def test_non_db_receiver_is_not_tagged(repo: Path) -> None:
+    """`config.get(...)` must not trip the db heuristic — receiver-gated."""
+    _write(repo, "m.py", "def read(config, key):\n    return config.get(key)\n")
+    effects = classify(_ingest(repo), repo)
+    assert effects["func:m.read"] == []
+
+
+# --- raise is not impure (settled Sprint 13) -----------------------------------
+
+
+def test_raise_only_callee_does_not_taint_caller(repo: Path) -> None:
+    """Calling a raise-only validator must not mark the caller calls_effectful."""
+    _write(repo, "checks.py", "def ensure(c):\n    if not c:\n        raise ValueError('no')\n")
+    _write(
+        repo,
+        "caller.py",
+        """
+        from checks import ensure
+
+        def use(x):
+            ensure(x)
+            return x
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "raise" in effects["func:checks.ensure"]
+    assert "calls_effectful" not in effects["func:caller.use"]

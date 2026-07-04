@@ -24,6 +24,26 @@ def test_validates_round_trip() -> None:
     assert ComponentSpec.from_dict(data).to_dict() == spec.to_dict()
 
 
+def test_constructs_field_round_trips() -> None:
+    """Sprint 13 schema addition: which in-repo types a component constructs."""
+    spec = ComponentSpec(
+        id="routes.create_chapter",
+        kind=ComponentKind.effect_adapter,
+        inputs=["db", "payload"],
+        outputs=["Chapter"],
+        effects=["db"],
+        calls=[],
+        constructs=["models.chapter.Chapter"],
+        trace=["routes.py:10"],
+        language="python",
+        purity=0.0,
+    )
+    spec.validate()
+    data = json.loads(spec.to_json())
+    restored = ComponentSpec.from_dict(data)
+    assert restored.constructs == ["models.chapter.Chapter"]
+
+
 def test_rejects_bad_kind() -> None:
     with pytest.raises(ValidationError):
         bad = {

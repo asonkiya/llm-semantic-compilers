@@ -126,15 +126,85 @@ def test_mutating_a_global_is_state_transformation(tmp_path: Path) -> None:
     assert specs["m.remember"].kind == ComponentKind.state_transformer
 
 
-def test_db_session_delete_is_state_transformer(tmp_path: Path) -> None:
-    """`db.delete(ch)` mutates the session — found misclassified pure on a real repo."""
+def test_raise_only_route_is_not_effect_adapter(tmp_path: Path) -> None:
+    """Raising HTTPException alone must not lump a route in with real I/O."""
+    specs = _specs_for(
+        tmp_path,
+        """
+        def get_item(i):
+            if i < 0:
+                raise ValueError("bad")
+            return i
+        """,
+    )
+    assert specs["m.get_item"].kind == ComponentKind.pure_function
+    assert "raise" in specs["m.get_item"].effects
+
+
+def test_db_function_is_effect_adapter(tmp_path: Path) -> None:
+    specs = _specs_for(tmp_path, "def find(db, i):\n    return db.query(i).first()\n")
+    assert specs["m.find"].kind == ComponentKind.effect_adapter
+    assert "db" in specs["m.find"].effects
+
+
+def test_constructor_with_init_resolves_to_init(tmp_path: Path) -> None:
+    """`C(...)` where C defines __init__ lands in calls as m.C.__init__."""
+    specs = _specs_for(
+        tmp_path,
+        """
+        class C:
+            def __init__(self, x):
+                self.x = x
+
+        def make(x):
+            return C(x)
+        """,
+    )
+    assert "m.C.__init__" in specs["m.make"].calls
+    assert specs["m.make"].constructs == []
+
+
+def test_constructor_without_init_lands_in_constructs(tmp_path: Path) -> None:
+    """`C(...)` with no __init__ (dataclass/ORM style) records constructs."""
+    specs = _specs_for(
+        tmp_path,
+        """
+        class C:
+            pass
+
+        def make():
+            return C()
+        """,
+    )
+    assert specs["m.make"].constructs == ["m.C"]
+    assert "m.C" not in specs["m.make"].calls
+
+
+def test_outputs_from_return_annotation(tmp_path: Path) -> None:
+    specs = _specs_for(tmp_path, "def add(a: int, b: int) -> float:\n    return a + b\n")
+    assert specs["m.add"].outputs == ["float"]
+
+
+def test_outputs_empty_without_annotation(tmp_path: Path) -> None:
+    specs = _specs_for(tmp_path, "def add(a, b):\n    return a + b\n")
+    assert specs["m.add"].outputs == []
+
+
+def test_db_session_delete_is_effect_adapter(tmp_path: Path) -> None:
+    """`db.delete(ch)` is DB access — effect_adapter with the db tag (Sprint 13).
+
+    Originally found misclassified as pure on a real repo; briefly pinned as
+    state_transformer before the settled taxonomy made DB access an effect.
+    """
     specs = _specs_for(tmp_path, "def remove(db, ch):\n    db.delete(ch)\n")
-    assert specs["m.remove"].kind == ComponentKind.state_transformer
+    assert specs["m.remove"].kind == ComponentKind.effect_adapter
+    assert "db" in specs["m.remove"].effects
 
 
-def test_db_session_commit_is_state_transformer(tmp_path: Path) -> None:
-    specs = _specs_for(tmp_path, "def save(db):\n    db.commit()\n")
-    assert specs["m.save"].kind == ComponentKind.state_transformer
+def test_delete_on_non_db_receiver_is_state_transformer(tmp_path: Path) -> None:
+    """The `delete`/`remove` mutator entries still fire without a DB receiver."""
+    specs = _specs_for(tmp_path, "def drop(registry, key):\n    registry.remove(key)\n")
+    assert specs["m.drop"].kind == ComponentKind.state_transformer
 
 
 def test_rhs_pop_is_state_transformer(tmp_path: Path) -> None:

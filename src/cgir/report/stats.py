@@ -26,12 +26,15 @@ def compute_stats(specs: list[ComponentSpec], top_n: int = TOP_N) -> dict[str, A
 
     internal_callers: Counter[str] = Counter()
     external_callers: Counter[str] = Counter()
+    constructed: Counter[str] = Counter()
     for s in specs:
         for callee in set(s.calls):
             if callee in known_ids:
                 internal_callers[callee] += 1
             else:
                 external_callers[callee] += 1
+        for type_name in set(s.constructs):
+            constructed[type_name] += 1
 
     pure = sum(1 for s in specs if s.purity == 1.0)
     tainted = sum(1 for s in specs if s.purity == 0.7)
@@ -52,6 +55,9 @@ def compute_stats(specs: list[ComponentSpec], top_n: int = TOP_N) -> dict[str, A
         "top_fan_out": [{"id": s.id, "calls": len(s.calls)} for s in fan_out[:top_n] if s.calls],
         "external_calls": [
             {"id": callee, "callers": n} for callee, n in external_callers.most_common(top_n)
+        ],
+        "top_constructed": [
+            {"id": type_name, "constructors": n} for type_name, n in constructed.most_common(top_n)
         ],
     }
 
@@ -78,6 +84,7 @@ def render_text(stats: dict[str, Any]) -> str:
     for title, key, count_key in (
         ("Most called", "most_called", "callers"),
         ("Top fan-out", "top_fan_out", "calls"),
+        ("Constructed types", "top_constructed", "constructors"),
         ("External calls", "external_calls", "callers"),
     ):
         entries = stats[key]

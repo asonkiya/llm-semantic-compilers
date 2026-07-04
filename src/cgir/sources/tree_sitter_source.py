@@ -178,7 +178,11 @@ class TreeSitterSource(GraphSource):
                 path=rel_path,
                 start_line=ts_node.start_point[0] + 1,
                 end_line=ts_node.end_point[0] + 1,
-                attrs={"qualname": qual, "signature": _signature_text(ts_node, source)},
+                attrs={
+                    "qualname": qual,
+                    "signature": _signature_text(ts_node, source),
+                    "returns": _return_annotation_text(ts_node, source),
+                },
             )
         )
         graph.add_edge(Edge(src=parent_id, dst=node_id, kind=EdgeKind.CONTAINS))
@@ -302,6 +306,12 @@ def _identifier_text(node: TSNode | None, source: bytes) -> str | None:
     if node is None:
         return None
     return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
+
+
+def _return_annotation_text(func_node: TSNode, source: bytes) -> str | None:
+    """The declared return type (``-> float`` gives ``"float"``), if any."""
+    return_node = func_node.child_by_field_name("return_type")
+    return _identifier_text(return_node, source)
 
 
 def _signature_text(func_node: TSNode, source: bytes) -> str:

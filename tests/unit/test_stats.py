@@ -96,8 +96,17 @@ def test_external_calls_counted() -> None:
     assert {"id": "json.dumps", "callers": 1} in stats["external_calls"]
 
 
+def test_top_constructed_counts_types() -> None:
+    specs = _sample()
+    specs[1].constructs = ["models.Chapter"]
+    specs[2].constructs = ["models.Chapter", "models.Novel"]
+    stats = compute_stats(specs)
+    assert stats["top_constructed"][0] == {"id": "models.Chapter", "constructors": 2}
+
+
 def test_empty_specs() -> None:
     stats = compute_stats([])
     assert stats["total"] == 0
     assert stats["kinds"] == {}
     assert stats["purity"]["mean"] == 0.0
+    assert stats["top_constructed"] == []

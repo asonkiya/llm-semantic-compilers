@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cgir.analyses.effects import DIRECT_EFFECT_TAGS, TRANSITIVE_TAG
+from cgir.analyses.effects import IMPURE_EFFECT_TAGS, TRANSITIVE_TAG
 from cgir.analyses.purity import PLACEHOLDER_SCORE
 from cgir.ir.component_spec import ComponentKind, ComponentSpec
 from cgir.ir.edges import EdgeKind
@@ -26,9 +26,7 @@ def slice_components(
 
         qual = str(node.attrs.get("qualname") or node.name)
         inputs = [param.name for param in graph.children(node.id, NodeKind.Parameter)]
-        calls = sorted(
-            {_callee_label(graph, edge.dst) for edge in graph.out_edges(node.id, EdgeKind.CALLS)}
-        )
+        calls, constructs = _split_callees(graph, node.id)
         node_effects = effects.get(node.id, [])
         purity_score = purity_scores.get(node.id, PLACEHOLDER_SCORE)
         mutates_state = _has_mutations(graph, node.id)
@@ -39,15 +37,17 @@ def slice_components(
             trace.append(f"{node.path}:{node.start_line}")
 
         signature = node.attrs.get("signature") if node.attrs else None
+        returns = node.attrs.get("returns") if node.attrs else None
 
         specs.append(
             ComponentSpec(
                 id=qual,
                 kind=kind,
                 inputs=inputs,
-                outputs=[],
+                outputs=[returns] if isinstance(returns, str) and returns else [],
                 effects=list(node_effects),
                 calls=calls,
+                constructs=constructs,
                 trace=trace,
                 language=language,
                 signature=signature if isinstance(signature, str) else None,
@@ -57,6 +57,31 @@ def slice_components(
 
     specs.sort(key=lambda s: s.id)
     return specs
+
+
+def _split_callees(graph: RepoGraph, func_id: str) -> tuple[list[str], list[str]]:
+    """Partition CALLS edges into (calls, constructs).
+
+    A call whose target is a Class node is a construction: it resolves to
+    the class's ``__init__`` component when one is defined, else the class
+    qualname lands in ``constructs`` (dataclass / ORM style).
+    """
+    calls: set[str] = set()
+    constructs: set[str] = set()
+    for edge in graph.out_edges(func_id, EdgeKind.CALLS):
+        callee = graph.get_node(edge.dst)
+        if callee.kind == NodeKind.Class:
+            init = next(
+                (m for m in graph.children(callee.id, NodeKind.Method) if m.name == "__init__"),
+                None,
+            )
+            if init is not None:
+                calls.add(_callee_label(graph, init.id))
+            else:
+                constructs.add(_callee_label(graph, callee.id))
+        else:
+            calls.add(_callee_label(graph, edge.dst))
+    return sorted(calls), sorted(constructs)
 
 
 def _callee_label(graph: RepoGraph, node_id: str) -> str:
@@ -93,7 +118,7 @@ def _has_mutations(graph: RepoGraph, func_id: str) -> bool:
 
 def _classify(effects: list[str], purity_score: float, mutates_state: bool) -> ComponentKind:
     tags = set(effects)
-    if tags & DIRECT_EFFECT_TAGS:
+    if tags & IMPURE_EFFECT_TAGS:
         return ComponentKind.effect_adapter
     if TRANSITIVE_TAG in tags:
         return ComponentKind.orchestrator
