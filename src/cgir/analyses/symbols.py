@@ -47,9 +47,27 @@ def build_symbol_tables(graph: RepoGraph) -> dict[str, SymbolTable]:
             target = str(child.attrs.get("target") or child.name)
             alias = child.attrs.get("alias")
             local = alias if isinstance(alias, str) else target.rsplit(".", 1)[-1]
-            table.bindings[local] = qualname_index.get(target)
+            table.bindings[local] = _resolve_target(qualname_index, target)
 
     return tables
+
+
+def _resolve_target(qualname_index: dict[str, str], target: str) -> str | None:
+    """Exact qualname match, else a *unique* suffix match.
+
+    The suffix fallback bridges source-root prefixes: a repo whose package
+    lives in ``backend/`` (or ``src/``) has module qualnames like
+    ``backend.app.repos.chapter`` while its code imports
+    ``app.repos.chapter``. Ambiguous suffixes stay unresolved — don't guess.
+    """
+    hit = qualname_index.get(target)
+    if hit is not None:
+        return hit
+    suffix = "." + target
+    candidates = {nid for qual, nid in qualname_index.items() if qual.endswith(suffix)}
+    if len(candidates) == 1:
+        return next(iter(candidates))
+    return None
 
 
 def _qualname_index(graph: RepoGraph) -> dict[str, str]:

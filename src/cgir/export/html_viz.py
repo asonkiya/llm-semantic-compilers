@@ -210,8 +210,8 @@ function step() {
   vis.forEach(n => {
     const c = fileCenters[n.file];
     if (c.count > 1 && !n.fixed) {
-      n.vx += ((c.x / c.count) - n.x) * 0.006 * alpha;
-      n.vy += ((c.y / c.count) - n.y) * 0.006 * alpha;
+      n.vx += ((c.x / c.count) - n.x) * 0.02 * alpha;
+      n.vy += ((c.y / c.count) - n.y) * 0.02 * alpha;
     }
     if (!n.fixed) {
       n.vx += (W / 2 - n.x) * 0.0016 * alpha;
@@ -231,6 +231,36 @@ function draw() {
   ctx.save();
   ctx.translate(view.x, view.y);
   ctx.scale(view.scale, view.scale);
+
+  // file cluster hulls: same-file components render as one visible unit
+  const groups = {};
+  nodes.forEach(n => {
+    if (!kindVisible[n.kind]) return;
+    (groups[n.file] = groups[n.file] || []).push(n);
+  });
+  Object.entries(groups).forEach(([file, members]) => {
+    if (members.length < 2) return;
+    let cx = 0, cy = 0;
+    members.forEach(m => { cx += m.x; cy += m.y; });
+    cx /= members.length; cy /= members.length;
+    let r = 0;
+    members.forEach(m => {
+      const d = Math.hypot(m.x - cx, m.y - cy) + m.r;
+      if (d > r) r = d;
+    });
+    r += 20;
+    ctx.fillStyle = "rgba(90,110,170,0.08)";
+    ctx.strokeStyle = "rgba(90,110,170,0.28)";
+    ctx.lineWidth = 1 / view.scale;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (view.scale > 0.45) {
+      ctx.fillStyle = "#7484b8";
+      ctx.font = `${12 / view.scale}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText(file, cx, cy - r - 6 / view.scale);
+      ctx.textAlign = "left";
+    }
+  });
 
   const neighbor = new Set();
   const focus = selected || hovered;

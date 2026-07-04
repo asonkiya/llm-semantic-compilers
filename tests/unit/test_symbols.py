@@ -174,6 +174,59 @@ def test_unaliased_import_has_no_alias_attr(repo: Path) -> None:
     assert imp.attrs.get("alias") is None
 
 
+# --- source-root suffix resolution (Sprint 12) -------------------------------
+
+
+def test_import_resolves_across_source_root_prefix(repo: Path) -> None:
+    """`from app.repos import chapter` resolves when the app lives in backend/.
+
+    Real-repo finding: scanning a repo whose Python package is rooted in a
+    subdirectory (backend/, src/) gives modules qualnames like
+    ``backend.app.repos.chapter``, but the code imports ``app.repos.chapter``.
+    A unique-suffix match must bridge the gap.
+    """
+    _write(repo, "backend/app/repos/chapter.py", "def get_chapter(db, i):\n    return None\n")
+    _write(repo, "backend/app/api/routes.py", "from app.repos import chapter\n")
+    graph = _ingest(repo)
+    tables = build_symbol_tables(graph)
+    assert (
+        resolve(tables, "module:backend.app.api.routes", "chapter")
+        == "module:backend.app.repos.chapter"
+    )
+
+
+def test_ambiguous_suffix_stays_unresolved(repo: Path) -> None:
+    """Two candidate modules with the same suffix: refuse to guess."""
+    _write(repo, "a/pkg/util.py", "def f():\n    pass\n")
+    _write(repo, "b/pkg/util.py", "def f():\n    pass\n")
+    _write(repo, "main.py", "from pkg import util\n")
+    graph = _ingest(repo)
+    tables = build_symbol_tables(graph)
+    assert resolve(tables, "module:main", "util") is None
+
+
+def test_module_attribute_call_resolves_to_function(repo: Path) -> None:
+    """`chapter.get_chapter(...)` follows the module binding into the function."""
+    _write(repo, "backend/app/repos/chapter.py", "def get_chapter(db, i):\n    return None\n")
+    _write(
+        repo,
+        "backend/app/api/routes.py",
+        """
+        from app.repos import chapter
+
+        def read_chapter(db, i):
+            return chapter.get_chapter(db, i)
+        """,
+    )
+    graph = _ingest(repo)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, repo)
+    callees = {
+        e.dst for e in graph.out_edges("func:backend.app.api.routes.read_chapter", EdgeKind.CALLS)
+    }
+    assert "func:backend.app.repos.chapter.get_chapter" in callees
+
+
 # --- IMPORTS edges (sanity) ------------------------------------------------
 
 

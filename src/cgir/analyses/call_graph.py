@@ -39,10 +39,30 @@ def build_call_graph(graph: RepoGraph, tables: dict[str, SymbolTable], repo_path
         if func_ts is None:
             continue
         for callee_name in _call_names(func_ts, source):
-            target = table.bindings.get(callee_name)
+            target = _resolve_callee(tables, table, callee_name)
             if target is None:
                 continue
             graph.add_edge(Edge(src=func.id, dst=target, kind=EdgeKind.CALLS))
+
+
+def _resolve_callee(tables: dict[str, SymbolTable], table: SymbolTable, dotted: str) -> str | None:
+    """Resolve a (possibly dotted) callee through the local symbol table.
+
+    ``chapter.get_chapter`` where ``chapter`` binds to a module resolves
+    into that module's own table — the edge lands on the function, not the
+    module. Non-module attribute bases (``self.repo.get``) stay at the
+    binding of the head, which is usually unbound and dropped.
+    """
+    head, _, rest = dotted.partition(".")
+    target = table.bindings.get(head)
+    if target is None:
+        return None
+    if rest and target.startswith("module:"):
+        sub = tables.get(target)
+        if sub is None:
+            return None
+        return sub.bindings.get(rest.split(".", 1)[0])
+    return target
 
 
 def _call_names(func_node: TSNode, source: bytes) -> list[str]:
@@ -62,7 +82,9 @@ def _call_names(func_node: TSNode, source: bytes) -> list[str]:
                 elif function_field.type == "attribute":
                     text = source[function_field.start_byte : function_field.end_byte]
                     decoded = text.decode("utf-8", errors="replace")
-                    head = decoded.split(".", 1)[0]
-                    names.append(head)
+                    if "(" in decoded or "[" in decoded or "\n" in decoded:
+                        # Computed receiver: keep just the head identifier.
+                        decoded = decoded.split(".", 1)[0]
+                    names.append(decoded)
         stack.extend(node.children)
     return names
