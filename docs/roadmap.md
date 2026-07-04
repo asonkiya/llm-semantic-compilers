@@ -38,7 +38,7 @@ The theme: make every `ComponentSpec` defensible. Today a function is "pure" if 
 | 4 | Extended effects taxonomy (`net`, `fs`, `nondeterm`) | No milestone tag — drop tags into `effects.DIRECT_EFFECT_TAGS` and teach `_walk_body_for_effects` to detect them. | Start with the obvious imports (`requests`, `urllib`, `socket`, `os.path`, `pathlib.Path.write_text`, `time`, `random`, `datetime.now`). |
 | 5 | Statement-granularity trace map | Today `trace_map.py` indexes function ranges. With the CFG in place we can resolve `path:line` to a specific Statement/Assignment/Branch/Loop node and the spec field that depends on it. | Refines `cgir trace` output. Now unblocked. |
 | 6 | `P1-regenerate` | Turn the prompt-pack into a real Anthropic SDK call. Add prompt caching from day one. | Skill `claude-api` lists the patterns to follow. |
-| 7 | `P1-api` | Replace 501 stubs in `api/server.py` with the real endpoints backed by the same passes the CLI uses. | Keep the CLI as the single pipeline driver — the API should call the same functions. |
+| 7 | ~~`P1-api`~~ **done (Sprint 8)** | Replace 501 stubs in `api/server.py` with the real endpoints backed by the same passes the CLI uses. | Landed: `cgir/pipeline.py:scan_repo` is the single driver; CLI and FastAPI are thin surfaces over it. |
 
 Acceptance for "P1 done": every `ComponentSpec` field has a real classifier behind it (no `PLACEHOLDER_SCORE` defaults firing in practice), `cgir regenerate` round-trips Python → TypeScript for the fixture, and the FastAPI surface mirrors the CLI.
 

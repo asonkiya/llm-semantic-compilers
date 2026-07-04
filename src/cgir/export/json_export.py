@@ -9,6 +9,15 @@ from cgir.ir.component_spec import ComponentSpec
 from cgir.ir.graph import RepoGraph
 
 
+def read_specs(index_dir: Path) -> list[ComponentSpec]:
+    """Load every ComponentSpec from an existing index directory."""
+    components_dir = index_dir / "components"
+    return [
+        ComponentSpec.from_dict(json.loads(p.read_text()))
+        for p in sorted(components_dir.glob("*.json"))
+    ]
+
+
 def write_index(out_dir: Path, graph: RepoGraph, specs: list[ComponentSpec]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "repo_graph.json").write_text(

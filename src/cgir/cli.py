@@ -1,4 +1,8 @@
-"""CLI entry point — matches the command shape in Code-IR.md §Analysis/workflow."""
+"""CLI entry point — matches the command shape in Code-IR.md §Analysis/workflow.
+
+The scan pipeline itself lives in :mod:`cgir.pipeline`; this module (and the
+HTTP API) are thin surfaces over it.
+"""
 
 from __future__ import annotations
 
@@ -9,23 +13,16 @@ from typing import Annotated
 
 import typer
 
-from cgir.analyses import effects as effects_pass
-from cgir.analyses import purity as purity_pass
-from cgir.analyses.call_graph import build_call_graph
-from cgir.analyses.cfg import build as build_cfg
-from cgir.analyses.pdg import build as build_pdg
-from cgir.analyses.symbols import build_symbol_tables
-from cgir.config import CGIRConfig
 from cgir.export import graphml as graphml_export
-from cgir.export import html_viz, json_export
+from cgir.export import html_viz
+from cgir.export.json_export import read_specs
 from cgir.export.mermaid import render_call_graph
 from cgir.ir.component_spec import ComponentSpec
 from cgir.ir.graph import RepoGraph
+from cgir.pipeline import scan_repo
 from cgir.regenerate import regenerate as run_regenerate
 from cgir.report.stats import compute_stats, render_text
-from cgir.slicing import slice_components
-from cgir.sources import TreeSitterSource
-from cgir.trace import TraceMap, build_trace_map
+from cgir.trace import TraceMap
 
 app = typer.Typer(
     add_completion=False,
@@ -48,21 +45,9 @@ def scan(
     ] = None,
 ) -> None:
     """Scan a repository and write the RepoGraph + ComponentSpec index."""
-    config = CGIRConfig.for_scan(repo, out)
-    source = TreeSitterSource(ignore_dirs=set(exclude or []))
-    graph = source.ingest(config.repo_path)
-    tables = build_symbol_tables(graph)
-    build_call_graph(graph, tables, config.repo_path)
-    build_cfg(graph, config.repo_path)
-    build_pdg(graph)
-    effects = effects_pass.classify(graph, config.repo_path)
-    purity_scores = purity_pass.score(graph, effects)
-    specs = slice_components(graph, effects=effects, purity_scores=purity_scores)
-    trace_map = build_trace_map(graph)
-    json_export.write_index(config.out_dir, graph, specs)
-    trace_map.write(config.out_dir / "trace_map.json")
-    typer.echo(f"Wrote {len(specs)} components to {config.out_dir}")
-    _print_kind_histogram(specs)
+    result = scan_repo(repo, out, exclude)
+    typer.echo(f"Wrote {len(result.specs)} components to {result.out_dir}")
+    _print_kind_histogram(result.specs)
 
 
 def _print_kind_histogram(specs: list[ComponentSpec]) -> None:
@@ -134,13 +119,9 @@ def _load_graph(index_dir: Path) -> RepoGraph:
 
 
 def _load_specs(index_dir: Path) -> list[ComponentSpec]:
-    components_dir = index_dir / "components"
-    if not components_dir.is_dir():
-        raise typer.BadParameter(f"No components at {components_dir}; run `cgir scan` first")
-    return [
-        ComponentSpec.from_dict(json.loads(p.read_text()))
-        for p in sorted(components_dir.glob("*.json"))
-    ]
+    if not (index_dir / "components").is_dir():
+        raise typer.BadParameter(f"No components at {index_dir}; run `cgir scan` first")
+    return read_specs(index_dir)
 
 
 @app.command()

@@ -1,1 +1,1 @@
-"""HTTP API surface — milestone: P1-api."""
+"""HTTP API surface — a thin FastAPI layer over :mod:`cgir.pipeline`."""

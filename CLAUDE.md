@@ -28,7 +28,7 @@ Full command catalogue and CI workflow are in [`docs/development.md`](./docs/dev
 
 - **Red-green TDD for milestones.** Every `milestone:` or `# STUB:` tag is a TDD entry point. Cycle: write failing tests pinning the public contract → implement until green → refactor. Detail in [`docs/development.md`](./docs/development.md). Don't skip the red phase — even in auto mode.
 - **Milestone-tag hygiene.** Backlog is `grep -rn "milestone:\|STUB:" src/`. Completing a milestone means the tag *literally disappears*. Don't leave both real and stub paths in source.
-- **Pipeline order is fixed.** New analyses wire into `src/cgir/cli.py:scan` in the order `ingest → symbols → call_graph → effects → purity → slice → export`. New graph backends subclass `GraphSource` in `src/cgir/sources/base.py`.
+- **Pipeline order is fixed.** New analyses wire into `src/cgir/pipeline.py:scan_repo` in the order `ingest → symbols → call_graph → cfg → pdg → effects → purity → slice → export`. The CLI and the HTTP API are thin surfaces over that one driver. New graph backends subclass `GraphSource` in `src/cgir/sources/base.py`.
 - **Vocabulary is fixed by the spec.** `NodeKind` and `EdgeKind` enums in `src/cgir/ir/` come straight from `Code-IR.md` §Data model. Don't add ad-hoc kinds without updating the spec first.
 - **`ComponentSpec` is the agent-facing contract.** Schema lives in two places: `schemas/component_spec.schema.json` (published) and `src/cgir/ir/component_spec.py:COMPONENT_SPEC_SCHEMA` (runtime source of truth). Change both, add a schema test.
 - **Local-first parsing.** No network in the ingest or analysis layers. Only the optional regeneration step touches an LLM, and it gates on `ComponentSpec` rather than raw source.

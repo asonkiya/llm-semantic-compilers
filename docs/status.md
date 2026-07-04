@@ -46,11 +46,12 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Shared tree-sitter helper (first opportunistic step on grammar-agnostic refactor) | done | `src/cgir/analyses/_python_ast.py` |
 | Extended effects taxonomy (`net`, `fs`, `nondeterm`, lexical matching) | done | `src/cgir/analyses/effects.py` (`_classify_dotted_call`) |
 | LLM-driven regeneration | stub | `src/cgir/regenerate/regenerator.py` (`P1-regenerate`) |
-| HTTP API (FastAPI) | stub | `src/cgir/api/server.py` (`P1-api`, 501s) |
 | GraphML export (`cgir export --format graphml`) | done | `src/cgir/export/graphml.py` |
 | Interactive HTML viz (`cgir viz`) — self-contained, no network | done | `src/cgir/export/html_viz.py` |
 | Mermaid call-graph (`cgir viz --format mermaid`) | done | `src/cgir/export/mermaid.py` |
 | Structure report (`cgir stats`, `--json`) — kinds, purity, effects, hotspots | done | `src/cgir/report/stats.py` |
+| Shared pipeline driver (CLI + API call the same function) | done | `src/cgir/pipeline.py:scan_repo` |
+| HTTP API (`/scan`, `/components`, `/trace`, `/regenerate`, `/stats`) | done | `src/cgir/api/server.py` |
 | `RepoGraph.from_jsonable` (viz/export run off an existing index) | done | `src/cgir/ir/graph.py` |
 | Joern adapter | stub | `src/cgir/sources/joern_source.py` (`P2-joern-bridge`) |
 | CodeQL adapter | stub | `src/cgir/sources/codeql_source.py` (`P2-codeql-bridge`) |
@@ -59,7 +60,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 161 tests, all green:
+`pytest -q` runs 169 tests, all green:
 
 | File | Covers |
 |---|---|
@@ -80,6 +81,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | `tests/unit/test_html_viz.py` | `viz.html` written, data embedded, **no external resources**, JSON island parseable |
 | `tests/unit/test_stats.py` | Totals/files, kind counts, purity buckets + mean, effect counts, most-called ranking, fan-out ranking, external-call counting, empty-input shape |
 | `tests/integration/test_cli_scan.py` | Full CLI pipeline writes correct outputs; `cgir viz` (html + mermaid), `cgir export --format graphml`, and `cgir stats` (text + `--json`) run off an existing index |
+| `tests/integration/test_api.py` | `POST /scan` → list/get components, trace hit + 404 miss, regenerate prompt-pack, stats; 409 on unscanned index; 404 on unknown component |
 
 The `test_symbols.py` row is intentional debt — symbol resolution is exercised transitively by the call-graph tests but doesn't have a direct red-green pair yet. Pick it up before any change to `analyses/symbols.py`.
 
@@ -97,6 +99,7 @@ The `test_symbols.py` row is intentional debt — symbol resolution is exercised
 | Sprint 3 | P1-pdg | Red-green TDD — extended CFG with `reads`/`mutates`/`controlled_by` attrs (16 new test_cfg.py tests); added `test_pdg.py` (10 tests) for `FLOWS_TO` (data dep) and `DEPENDS_ON` (control dep). Second pure-graph analysis. Wired reaching-defs + PDG into the CLI scan pipeline. |
 | Sprint 3 | `state_transformer` classification | Slicer reads `Assignment.attrs["mutates"]` to detect functions that mutate via attribute or subscript LHS. `tests/unit/test_slicer.py` pins a method `set_x(self, v): self.x = v` as `state_transformer`. |
 | Sprint 4 | Real-world usability fixes | Ingester now skips `DEFAULT_IGNORE_DIRS` ({venv, node_modules, build, dist, __pycache__, site-packages, .tox, .pytest_cache, .mypy_cache, .ruff_cache, target, out, env}) and accepts a `--exclude` flag for custom names. Decorated functions and classes (`@property`/`@staticmethod`/`@classmethod`/multi-decorator stacks) are now surfaced. Relative imports (`from .x import y`, `from ..a.b import c`) resolve to absolute targets and feed the `CALLS` resolver. CLI scan prints a per-kind histogram after writing the index. Smoke-tested on the CGIR codebase itself: `cgir scan .` produces 219 components with sane distribution and runs in ~1s. |
+| Sprint 8 | `P1-api` | Red-green TDD — 8 new tests. Extracted the scan pipeline into `cgir/pipeline.py:scan_repo` (per roadmap: one driver, CLI and API as thin surfaces). FastAPI routes: `POST /scan`, `GET /components`, `GET /components/{id}`, `GET /trace`, `POST /regenerate`, `GET /stats`. Missing-index reads answer 409 (vs 404 for unknown components). `CLAUDE.md` pipeline pointer updated to `pipeline.py`. |
 | Sprint 7 | `cgir stats` structure report | Red-green TDD — 10 new tests. `report/stats.py:compute_stats` is a pure function over specs (JSON-able result); `render_text` for the terminal. Reports totals, per-kind counts, purity buckets (pure/tainted/impure + mean), effect tag counts, most-called components, top fan-out, and external-call hotspots. `cgir stats --index <dir> [--json]`. |
 | Sprint 6 | Visualization (`P2-graphml` + `cgir viz`) | Red-green TDD — 18 new tests. `RepoGraph.from_jsonable` lets `viz`/`export` run off an existing `.cgir` index without rescanning. GraphML export flattens attrs to scalars for Gephi/yEd. `cgir viz` writes a fully self-contained `viz.html` (embedded JSON + vanilla-JS canvas force layout: drag, zoom, pan, tooltip, detail panel, search, kind legend — zero network requests). `cgir viz --format mermaid` prints a Markdown-embeddable flowchart, subgraph per file, styled by component kind. |
 | Sprint 5 | Precision fixes (closes all four Sprint-4 gaps) | Red-green TDD — 43 new tests. `with`/`try`/`match` bodies now traversed: `with` headers define their `as` aliases and keep the outer controller; `except` clauses become `Branch` nodes (handler bodies control-dependent, `as exc` alias is a def); `match` cases mirror if/elif Branch chains. Augmented assignments feed writes/mutates/reads. Bare mutator calls (`xs.append(x)`, `self.config.update(d)`) record `mutates` via a known-mutator-method table. `for` targets are defs. `reaching_defs`/`pdg` generalized: any CFG node with non-empty `writes` is a definition. Effects taxonomy extended with lexical `net`/`fs`/`nondeterm` matching (`_classify_dotted_call`). Slicer now gates mutation on caller observability: mutating a locally-created object stays pure — self-scan `state_transformer` count dropped from 32 (mostly false) to 5 (all true). |
@@ -115,7 +118,7 @@ Real codebases will hit these — flag rather than guess:
 
 `grep -rn "milestone:\|STUB:" src/` is the canonical backlog. As of this commit it lists:
 
-- `P1-api`, `P1-regenerate`
-- `P2-graphml`, `P2-neo4j`, `P2-joern-bridge`, `P2-codeql-bridge`
+- `P1-regenerate`
+- `P2-neo4j`, `P2-joern-bridge`, `P2-codeql-bridge`
 
 See [`roadmap.md`](./roadmap.md) for sequencing.
