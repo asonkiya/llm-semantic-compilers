@@ -66,15 +66,29 @@ def _callee_label(graph: RepoGraph, node_id: str) -> str:
 
 
 def _has_mutations(graph: RepoGraph, func_id: str) -> bool:
-    """True if any Assignment child mutates an existing object (attr/subscript LHS).
+    """True if any CFG child mutates state *observable by the caller*.
 
-    Populated by :mod:`cgir.analyses.cfg` via ``Assignment.attrs["mutates"]``.
+    Covers attribute/subscript assignment LHS (``self.x = v``, ``xs[0] = v``,
+    ``self.total += n``) on ``Assignment`` nodes and bare mutator method
+    calls (``xs.append(x)``) on ``Statement`` nodes — both populated by
+    :mod:`cgir.analyses.cfg` via ``attrs["mutates"]``.
+
+    Mutating an object the function *itself created* (a local) is invisible
+    to callers and stays pure: a mutated base name only counts if it is a
+    parameter, ``self``, or a name never written locally (a global).
     """
-    for child in graph.children(func_id, NodeKind.Assignment):
-        mutates = child.attrs.get("mutates") if child.attrs else None
-        if isinstance(mutates, list) and mutates:
-            return True
-    return False
+    params = {p.name for p in graph.children(func_id, NodeKind.Parameter)}
+    local_writes: set[str] = set()
+    mutated: list[str] = []
+    for child in graph.children(func_id):
+        attrs = child.attrs or {}
+        writes = attrs.get("writes")
+        if isinstance(writes, list):
+            local_writes.update(writes)
+        mutates = attrs.get("mutates")
+        if isinstance(mutates, list):
+            mutated.extend(mutates)
+    return any(base in params or base not in local_writes for base in mutated)
 
 
 def _classify(effects: list[str], purity_score: float, mutates_state: bool) -> ComponentKind:

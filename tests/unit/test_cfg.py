@@ -498,3 +498,348 @@ def test_nested_branch_uses_inner_branch_as_controller(repo: Path) -> None:
     [assign] = (c for c in g.children(func_id) if c.kind == NodeKind.Assignment)
     assert assign.attrs.get("controlled_by") == inner.id
     assert inner.attrs.get("controlled_by") == outer.id
+
+
+# --- with-statement bodies (Sprint 5) ----------------------------------------
+
+
+def test_with_body_statements_enter_cfg(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(p):
+            with open(p) as fh:
+                data = fh.read()
+            return data
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    assigns = _assignments(g, "func:m.f")
+    assert len(assigns) == 1
+    assert assigns[0].attrs.get("writes") == ["data"]
+
+
+def test_with_header_records_alias_write_and_context_reads(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(p):
+            with open(p) as fh:
+                pass
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    entry = next(iter(g.out_edges(func_id, EdgeKind.CONTROLS)))
+    header = g.get_node(entry.dst)
+    assert header.attrs.get("writes") == ["fh"]
+    assert header.attrs.get("reads") == ["p"]
+
+
+def test_with_body_keeps_outer_controller(repo: Path) -> None:
+    """A `with` body always executes — it introduces no control dependence."""
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(p):
+            with open(p) as fh:
+                data = fh.read()
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert assign.attrs.get("controlled_by") is None
+
+
+def test_with_without_alias_records_no_writes(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(lock):
+            with lock:
+                x = 1
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    entry = next(iter(g.out_edges(func_id, EdgeKind.CONTROLS)))
+    header = g.get_node(entry.dst)
+    assert header.attrs.get("writes") == []
+    assert header.attrs.get("reads") == ["lock"]
+
+
+# --- try-statement bodies (Sprint 5) ------------------------------------------
+
+
+def test_try_body_statements_enter_cfg(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(y):
+            try:
+                x = 1 / y
+            except ZeroDivisionError:
+                x = 0
+            return x
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    assigns = _assignments(g, "func:m.f")
+    assert len(assigns) == 2
+
+
+def test_except_body_controlled_by_handler_branch(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(y):
+            try:
+                x = 1 / y
+            except ZeroDivisionError:
+                x = 0
+            return x
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    branches = [c for c in g.children(func_id) if c.kind == NodeKind.Branch]
+    assert len(branches) == 1, "the except clause must appear as a Branch node"
+    handler_assign = _assignments(g, func_id)[1]
+    assert handler_assign.attrs.get("controlled_by") == branches[0].id
+
+
+def test_try_body_keeps_outer_controller(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(y):
+            try:
+                x = 1 / y
+            except ZeroDivisionError:
+                x = 0
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    try_assign = _assignments(g, "func:m.f")[0]
+    assert try_assign.attrs.get("controlled_by") is None
+
+
+def test_except_alias_records_write(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(y):
+            try:
+                x = 1 / y
+            except ZeroDivisionError as exc:
+                x = 0
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    [branch] = (c for c in g.children(func_id) if c.kind == NodeKind.Branch)
+    assert branch.attrs.get("writes") == ["exc"]
+
+
+def test_finally_body_enters_cfg_with_outer_controller(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(y):
+            try:
+                x = 1 / y
+            finally:
+                done = True
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    assigns = _assignments(g, "func:m.f")
+    assert len(assigns) == 2
+    finally_assign = assigns[1]
+    assert finally_assign.attrs.get("writes") == ["done"]
+    assert finally_assign.attrs.get("controlled_by") is None
+
+
+def test_try_else_body_enters_cfg(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(y):
+            try:
+                x = 1 / y
+            except ZeroDivisionError:
+                x = 0
+            else:
+                ok = True
+            return x
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    writes = {w for a in _assignments(g, "func:m.f") for w in (a.attrs.get("writes") or [])}
+    assert "ok" in writes
+
+
+# --- match-statement bodies (Sprint 5) ----------------------------------------
+
+
+def test_match_cases_become_branch_chain(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(cmd):
+            match cmd:
+                case "start":
+                    x = 1
+                case "stop":
+                    x = 2
+            return x
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    branches = [c for c in g.children(func_id) if c.kind == NodeKind.Branch]
+    assert len(branches) == 2, "one Branch per case clause"
+    assigns = _assignments(g, func_id)
+    assert len(assigns) == 2
+
+
+def test_match_case_body_controlled_by_its_branch(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(cmd):
+            match cmd:
+                case "start":
+                    x = 1
+                case "stop":
+                    x = 2
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    branches = sorted(
+        (c for c in g.children(func_id) if c.kind == NodeKind.Branch),
+        key=lambda n: (n.start_line or 0, n.id),
+    )
+    assigns = _assignments(g, func_id)
+    assert assigns[0].attrs.get("controlled_by") == branches[0].id
+    assert assigns[1].attrs.get("controlled_by") == branches[1].id
+
+
+def test_match_case_branch_reads_subject(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(cmd):
+            match cmd:
+                case "start":
+                    x = 1
+        """,
+    )
+    g = _ingest_with_cfg(repo)
+    func_id = "func:m.f"
+    [branch] = (c for c in g.children(func_id) if c.kind == NodeKind.Branch)
+    assert branch.attrs.get("reads") == ["cmd"]
+
+
+# --- augmented assignment (Sprint 5) ------------------------------------------
+
+
+def test_augmented_assignment_records_write_and_self_read(repo: Path) -> None:
+    _write(repo, "m.py", "def f(x):\n    x += 1\n    return x\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert assign.attrs.get("writes") == ["x"]
+    assert "x" in (assign.attrs.get("reads") or [])
+
+
+def test_augmented_assignment_reads_rhs(repo: Path) -> None:
+    _write(repo, "m.py", "def f(x, y):\n    x += y\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert set(assign.attrs.get("reads") or []) == {"x", "y"}
+
+
+def test_augmented_attribute_assignment_records_mutates(repo: Path) -> None:
+    _write(repo, "m.py", "class C:\n    def bump(self, n):\n        self.total += n\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "method:m.C.bump")
+    assert assign.attrs.get("writes") == []
+    assert assign.attrs.get("mutates") == ["self"]
+    assert set(assign.attrs.get("reads") or []) == {"self", "n"}
+
+
+def test_augmented_subscript_assignment_records_mutates(repo: Path) -> None:
+    _write(repo, "m.py", "def f(xs, i):\n    xs[i] += 1\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert assign.attrs.get("writes") == []
+    assert assign.attrs.get("mutates") == ["xs"]
+
+
+# --- method-call mutations (Sprint 5) -----------------------------------------
+
+
+def test_mutator_method_call_records_mutates(repo: Path) -> None:
+    _write(repo, "m.py", "def push(xs, x):\n    xs.append(x)\n")
+    g = _ingest_with_cfg(repo)
+    stmts = [c for c in g.children("func:m.push") if c.kind == NodeKind.Statement]
+    assert stmts[0].attrs.get("mutates") == ["xs"]
+
+
+def test_non_mutator_method_call_records_no_mutates(repo: Path) -> None:
+    _write(repo, "m.py", "def find(xs, x):\n    xs.index(x)\n")
+    g = _ingest_with_cfg(repo)
+    stmts = [c for c in g.children("func:m.find") if c.kind == NodeKind.Statement]
+    assert stmts[0].attrs.get("mutates") == []
+
+
+def test_chained_attribute_mutator_uses_base_name(repo: Path) -> None:
+    _write(repo, "m.py", "class C:\n    def merge(self, d):\n        self.config.update(d)\n")
+    g = _ingest_with_cfg(repo)
+    stmts = [c for c in g.children("method:m.C.merge") if c.kind == NodeKind.Statement]
+    assert stmts[0].attrs.get("mutates") == ["self"]
+
+
+def test_bare_function_call_records_no_mutates(repo: Path) -> None:
+    _write(repo, "m.py", "def f(x):\n    use(x)\n")
+    g = _ingest_with_cfg(repo)
+    stmts = [c for c in g.children("func:m.f") if c.kind == NodeKind.Statement]
+    assert stmts[0].attrs.get("mutates") == []
+
+
+# --- for-loop target writes (Sprint 5) ----------------------------------------
+
+
+def test_for_loop_header_records_target_write(repo: Path) -> None:
+    _write(repo, "m.py", "def f(items):\n    for i in items:\n        use(i)\n")
+    g = _ingest_with_cfg(repo)
+    loops = [c for c in g.children("func:m.f") if c.kind == NodeKind.Loop]
+    assert loops[0].attrs.get("writes") == ["i"]
+
+
+def test_for_loop_tuple_target_records_all_writes(repo: Path) -> None:
+    _write(repo, "m.py", "def f(pairs):\n    for k, v in pairs:\n        use(k, v)\n")
+    g = _ingest_with_cfg(repo)
+    loops = [c for c in g.children("func:m.f") if c.kind == NodeKind.Loop]
+    assert set(loops[0].attrs.get("writes") or []) == {"k", "v"}
+
+
+def test_while_loop_header_records_no_writes(repo: Path) -> None:
+    _write(repo, "m.py", "def f(x):\n    while x > 0:\n        x = x - 1\n")
+    g = _ingest_with_cfg(repo)
+    loops = [c for c in g.children("func:m.f") if c.kind == NodeKind.Loop]
+    assert loops[0].attrs.get("writes") == []

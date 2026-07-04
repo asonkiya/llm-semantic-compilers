@@ -2,10 +2,11 @@
 
 Adds two edge kinds onto the existing CFG-enriched graph:
 
-* ``FLOWS_TO`` — data dependence. For each ``Assignment`` or ``Parameter``
-  D that writes variable v, and each CFG node N that *reads* v, emit
-  ``D -[FLOWS_TO]-> N`` iff D reaches N (per
-  :mod:`cgir.analyses.reaching_defs`).
+* ``FLOWS_TO`` — data dependence. For each definition D (a ``Parameter``
+  or any CFG node with a non-empty ``writes`` attr — ``Assignment``,
+  ``for`` header, ``with`` header, ``except`` clause) writing variable v,
+  and each CFG node N that *reads* v, emit ``D -[FLOWS_TO]-> N`` iff D
+  reaches N (per :mod:`cgir.analyses.reaching_defs`).
 * ``DEPENDS_ON`` — control dependence. For each CFG node N with
   ``attrs["controlled_by"]`` set, emit ``N -[DEPENDS_ON]-> controller``.
   The controller is the immediately enclosing ``Branch`` or ``Loop``, as
@@ -52,8 +53,6 @@ def _build_for_function(graph: RepoGraph, func: Node, rd: dict[str, set[str]]) -
     for p in params:
         var_to_defs.setdefault(p.name, set()).add(p.id)
     for n in cfg_nodes:
-        if n.kind != NodeKind.Assignment:
-            continue
         writes = n.attrs.get("writes") if n.attrs else None
         if isinstance(writes, list):
             for v in writes:

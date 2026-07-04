@@ -228,3 +228,50 @@ def test_returns_entry_for_every_cfg_node(repo: Path) -> None:
     }
     expected = {c.id for c in g.children(func_id) if c.kind in cfg_kinds}
     assert expected <= set(rd)
+
+
+# --- generalized defs: any CFG node with a "writes" attr (Sprint 5) ----------
+
+
+def test_with_alias_is_a_def(repo: Path) -> None:
+    """`with open(p) as fh:` defines fh; the header node reaches the body use."""
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(p):
+            with open(p) as fh:
+                data = fh.read()
+        """,
+    )
+    g = _ingest(repo)
+    rd = compute(g)
+    func_id = "func:m.f"
+
+    header = next(
+        c
+        for c in g.children(func_id)
+        if c.kind == NodeKind.Statement and "fh" in (c.attrs.get("writes") or [])
+    )
+    [assign] = _children_of_kind(g, func_id, NodeKind.Assignment)
+    assert header.id in rd[assign.id]
+
+
+def test_for_target_is_a_def(repo: Path) -> None:
+    """`for i in items:` defines i; the loop header reaches the body use."""
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(items):
+            for i in items:
+                y = i
+        """,
+    )
+    g = _ingest(repo)
+    rd = compute(g)
+    func_id = "func:m.f"
+
+    [loop] = _children_of_kind(g, func_id, NodeKind.Loop)
+    [assign] = _children_of_kind(g, func_id, NodeKind.Assignment)
+    assert loop.id in rd[assign.id]

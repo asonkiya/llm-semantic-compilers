@@ -95,3 +95,139 @@ def test_classify_returns_entry_for_every_function(repo: Path) -> None:
     graph = _ingest(repo)
     effects = classify(graph, repo)
     assert set(effects) == {"func:m.a", "func:m.b"}
+
+
+# --- extended taxonomy: net / fs / nondeterm (Sprint 5) -----------------------
+
+
+def test_requests_call_is_net_effect(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        import requests
+
+        def fetch(url):
+            return requests.get(url)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "net" in effects["func:m.fetch"]
+
+
+def test_urllib_call_is_net_effect(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        import urllib.request
+
+        def fetch(url):
+            return urllib.request.urlopen(url)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "net" in effects["func:m.fetch"]
+
+
+def test_os_remove_is_fs_effect(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        import os
+
+        def rm(p):
+            os.remove(p)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "fs" in effects["func:m.rm"]
+
+
+def test_shutil_rmtree_is_fs_effect(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        import shutil
+
+        def wipe(d):
+            shutil.rmtree(d)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "fs" in effects["func:m.wipe"]
+
+
+def test_path_write_text_is_fs_effect(repo: Path) -> None:
+    _write(repo, "m.py", "def save(p, s):\n    p.write_text(s)\n")
+    effects = classify(_ingest(repo), repo)
+    assert "fs" in effects["func:m.save"]
+
+
+def test_random_call_is_nondeterm_effect(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        import random
+
+        def roll():
+            return random.randint(1, 6)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "nondeterm" in effects["func:m.roll"]
+
+
+def test_time_time_is_nondeterm_effect(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        import time
+
+        def stamp():
+            return time.time()
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "nondeterm" in effects["func:m.stamp"]
+
+
+def test_datetime_now_is_nondeterm_effect(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        from datetime import datetime
+
+        def stamp():
+            return datetime.now()
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "nondeterm" in effects["func:m.stamp"]
+
+
+def test_uuid4_is_nondeterm_effect(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        import uuid
+
+        def fresh_id():
+            return uuid.uuid4()
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "nondeterm" in effects["func:m.fresh_id"]
+
+
+def test_pure_attribute_call_is_not_tagged(repo: Path) -> None:
+    """An arbitrary method call must not trip the net/fs/nondeterm heuristics."""
+    _write(repo, "m.py", "def up(s):\n    return s.upper()\n")
+    effects = classify(_ingest(repo), repo)
+    assert effects["func:m.up"] == []

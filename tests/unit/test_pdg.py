@@ -229,3 +229,45 @@ def test_top_level_stmt_has_no_control_dep(repo: Path) -> None:
     for child in g.children(func_id):
         if child.kind in {NodeKind.Assignment, NodeKind.Return}:
             assert _depends_on(g, child.id) == set()
+
+
+# --- generalized defs (Sprint 5) ---------------------------------------------
+
+
+def test_for_target_flows_to_body_use(repo: Path) -> None:
+    """The loop header defines `i`, so it FLOWS_TO the body statement reading it."""
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(items):
+            for i in items:
+                use(i)
+        """,
+    )
+    g = _ingest(repo)
+    func_id = "func:m.f"
+    [loop] = _kind(g, func_id, NodeKind.Loop)
+    stmts = _kind(g, func_id, NodeKind.Statement)
+    assert stmts[0].id in _flows_to(g, loop.id)
+
+
+def test_with_alias_flows_to_body_use(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        def f(p):
+            with open(p) as fh:
+                data = fh.read()
+        """,
+    )
+    g = _ingest(repo)
+    func_id = "func:m.f"
+    header = next(
+        c
+        for c in g.children(func_id)
+        if c.kind == NodeKind.Statement and "fh" in (c.attrs.get("writes") or [])
+    )
+    [assign] = _kind(g, func_id, NodeKind.Assignment)
+    assert assign.id in _flows_to(g, header.id)

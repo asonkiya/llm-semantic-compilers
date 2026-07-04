@@ -2,19 +2,20 @@
 
 Classical forward may-analysis over each function's CFG:
 
-* For each ``Assignment`` node A defining variables V,
-  ``gen[A] = {A.id}`` and ``kill[A]`` contains every other def of any
-  variable in V.
+* Any CFG node A with a non-empty ``writes`` attr is a definition of those
+  variables: ``gen[A] = {A.id}`` and ``kill[A]`` contains every other def
+  of any variable A writes. This covers ``Assignment`` nodes, ``for``-loop
+  headers (loop targets), ``with`` headers (``as`` aliases), and ``except``
+  clauses (``as`` aliases).
 * ``Parameter`` nodes count as initial defs at function entry.
 * ``in[n] = union of out[pred]`` over ``CONTROLS`` predecessors within
   the same function; for the entry node(s), ``in`` also contains the
   parameter defs.
 * ``out[n] = gen[n] | (in[n] - kill[n])``.
 
-This is the first pure-graph analysis: it reads
-``Assignment.attrs["writes"]`` populated by :mod:`cgir.analyses.cfg` and
-walks the graph. It does not re-parse source. See
-``docs/roadmap.md`` "Grammar-agnostic core refactor".
+This is the first pure-graph analysis: it reads the ``writes`` attrs
+populated by :mod:`cgir.analyses.cfg` and walks the graph. It does not
+re-parse source. See ``docs/roadmap.md`` "Grammar-agnostic core refactor".
 """
 
 from __future__ import annotations
@@ -39,7 +40,8 @@ _CFG_KINDS: frozenset[NodeKind] = frozenset(
 def compute(graph: RepoGraph) -> dict[str, set[str]]:
     """Return ``{cfg_node_id: {def_id, ...}}`` across every function/method.
 
-    ``def_id`` is the id of an ``Assignment`` or ``Parameter`` node.
+    ``def_id`` is the id of a ``Parameter`` node or any CFG node with a
+    non-empty ``writes`` attr.
     """
     result: dict[str, set[str]] = {}
     for func in list(graph.nodes()):
@@ -62,21 +64,20 @@ def _compute_for_function(graph: RepoGraph, func: Node) -> dict[str, set[str]]:
         defs_by_var.setdefault(p.name, set()).add(p.id)
     writes_per_node: dict[str, list[str]] = {}
     for n in cfg_nodes:
-        if n.kind != NodeKind.Assignment:
-            continue
         writes_raw = n.attrs.get("writes") if n.attrs else None
         writes = list(writes_raw) if isinstance(writes_raw, list) else []
-        writes_per_node[n.id] = writes
+        if writes:
+            writes_per_node[n.id] = writes
         for var in writes:
             defs_by_var.setdefault(var, set()).add(n.id)
 
     gen: dict[str, set[str]] = {}
     kill: dict[str, set[str]] = {}
     for n in cfg_nodes:
-        if n.kind == NodeKind.Assignment:
+        if n.id in writes_per_node:
             gen[n.id] = {n.id}
             kill_set: set[str] = set()
-            for var in writes_per_node.get(n.id, []):
+            for var in writes_per_node[n.id]:
                 kill_set |= defs_by_var.get(var, set()) - {n.id}
             kill[n.id] = kill_set
         else:

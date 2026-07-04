@@ -35,12 +35,16 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | CLI (`scan`, `export`, `component`, `trace`, `regenerate`) | done | `src/cgir/cli.py` |
 | Intra-procedural CFG (`Statement`/`Assignment`/`Branch`/`Loop`/`Return` + `CONTROLS` edges) | done | `src/cgir/analyses/cfg.py` |
 | Assignment `writes` / `mutates` attrs; per-node `reads` / `controlled_by` attrs | done | `src/cgir/analyses/cfg.py` (`_extract_lhs_targets`, `_extract_reads`) |
+| `with` / `try` / `match` body traversal (headers as defs, except/case as Branch) | done | `src/cgir/analyses/cfg.py` (`_build_with`, `_build_try`, `_build_match`) |
+| Augmented assignment (`x += 1`, `self.total += n`) in writes/mutates/reads | done | `src/cgir/analyses/cfg.py` (`_ASSIGNMENT_TYPES`) |
+| Bare mutator method calls (`xs.append(x)`) recorded as `mutates` | done | `src/cgir/analyses/cfg.py` (`_extract_call_mutations`, `_MUTATOR_METHODS`) |
+| `for`-target / `with`-alias / `except`-alias as reaching definitions | done | `cfg.py` + generalized defs in `reaching_defs.py` / `pdg.py` |
+| Caller-observable mutation gate (local-object mutation stays pure) | done | `src/cgir/slicing/slicer.py:_has_mutations` |
 | Reaching definitions (worklist over `CONTROLS`) | done | `src/cgir/analyses/reaching_defs.py` |
 | PDG: `FLOWS_TO` (data dep) + `DEPENDS_ON` (control dep) | done | `src/cgir/analyses/pdg.py` |
 | `state_transformer` classification (attribute/subscript assignment) | done | `src/cgir/slicing/slicer.py:_has_mutations` |
 | Shared tree-sitter helper (first opportunistic step on grammar-agnostic refactor) | done | `src/cgir/analyses/_python_ast.py` |
-| Extended effects taxonomy (`net`, `fs`, `nondeterm`) | planned | extends `effects.DIRECT_EFFECT_TAGS` |
-| PDG overlay | stub | `src/cgir/analyses/pdg.py` (`P1-pdg`) |
+| Extended effects taxonomy (`net`, `fs`, `nondeterm`, lexical matching) | done | `src/cgir/analyses/effects.py` (`_classify_dotted_call`) |
 | LLM-driven regeneration | stub | `src/cgir/regenerate/regenerator.py` (`P1-regenerate`) |
 | HTTP API (FastAPI) | stub | `src/cgir/api/server.py` (`P1-api`, 501s) |
 | Joern adapter | stub | `src/cgir/sources/joern_source.py` (`P2-joern-bridge`) |
@@ -51,7 +55,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 90 tests, all green:
+`pytest -q` runs 133 tests, all green:
 
 | File | Covers |
 |---|---|
@@ -60,13 +64,12 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | `tests/unit/test_tree_sitter_source.py` | File / function / parameter ingest counts; default ignore-dirs (venv, node_modules, build, dist, __pycache__, site-packages); custom ignore extends default; dot-prefix dirs; decorated functions (@property, @staticmethod, @classmethod, multi-decorator stack, decorated class) |
 | `tests/unit/test_symbols.py` | Local function/class bindings; absolute `from a.b import c`; relative imports (`.x`, `..x`); relative imports drive `CALLS`; unresolved external imports stay opaque; `IMPORTS` edge target attribute |
 | `tests/unit/test_call_graph.py` | Cross-file `CALLS` resolution |
-| `tests/unit/test_effects.py` | Pure / io / raise / transitive / per-function coverage |
+| `tests/unit/test_effects.py` | Pure / io / raise / transitive / per-function coverage; net (requests, urllib), fs (os.remove, shutil, .write_text), nondeterm (random, time.time, datetime.now, uuid4); arbitrary method calls stay untagged |
 | `tests/unit/test_purity.py` | 1.0 / 0.7 / 0.0 tiers, pure caller stays pure |
-| `tests/unit/test_cfg.py` | CFG topology (chain, if/else, if/elif/else, for, while, return-as-sink, nested); Assignment `writes`/`mutates` for simple/tuple/subscript/attribute LHS; per-node `reads` (RHS, condition, iterable, returned value; excludes attribute names and callee names); `controlled_by` threading through nested branches and loops |
-| `tests/unit/test_reaching_defs.py` | Pure-graph signature, linear def→use, kill on reassignment, branch-merge union, parameter as initial def, loop back-edge propagation, var-isolation, empty-function shape, full-coverage shape |
-| `tests/unit/test_pdg.py` | Pure-graph signature; `FLOWS_TO` for linear/reassignment/parameter/branch-merge; no flow for unread defs; var-filtered flow; `DEPENDS_ON` for if-body and loop-body; no control-dep for top-level stmts |
-| `tests/unit/test_slicer.py` | `pure_function` regression; method mutating `self.x` classifies as `state_transformer` |
-| `tests/unit/test_slicer.py` | `pure_function` classification + `purity == 1.0` |
+| `tests/unit/test_cfg.py` | CFG topology (chain, if/else, if/elif/else, for, while, return-as-sink, nested); Assignment `writes`/`mutates` for simple/tuple/subscript/attribute LHS; per-node `reads` (RHS, condition, iterable, returned value; excludes attribute names and callee names); `controlled_by` threading through nested branches and loops; `with` bodies + header alias writes/context reads; `try`/`except`/`else`/`finally` bodies, except-as-Branch, except alias writes; `match` case Branch chains, case-body control deps, subject reads; augmented assignment writes/mutates/reads; mutator-call `mutates` (`xs.append`, chained `self.config.update`, non-mutator negative); for-target writes (simple + tuple) |
+| `tests/unit/test_reaching_defs.py` | Pure-graph signature, linear def→use, kill on reassignment, branch-merge union, parameter as initial def, loop back-edge propagation, var-isolation, empty-function shape, full-coverage shape; with-alias and for-target as defs |
+| `tests/unit/test_pdg.py` | Pure-graph signature; `FLOWS_TO` for linear/reassignment/parameter/branch-merge; no flow for unread defs; var-filtered flow; `DEPENDS_ON` for if-body and loop-body; no control-dep for top-level stmts; for-target and with-alias `FLOWS_TO` body uses |
+| `tests/unit/test_slicer.py` | `pure_function` regression + `purity == 1.0`; `self.x` mutation, `xs.append(x)`, and `self.total += n` classify as `state_transformer`; mutating a *local* list/dict stays `pure_function`; mutating a module-level global counts |
 | `tests/unit/test_trace_map.py` | path:line lookup |
 | `tests/integration/test_cli_scan.py` | Full CLI pipeline writes correct outputs |
 
@@ -86,15 +89,17 @@ The `test_symbols.py` row is intentional debt — symbol resolution is exercised
 | Sprint 3 | P1-pdg | Red-green TDD — extended CFG with `reads`/`mutates`/`controlled_by` attrs (16 new test_cfg.py tests); added `test_pdg.py` (10 tests) for `FLOWS_TO` (data dep) and `DEPENDS_ON` (control dep). Second pure-graph analysis. Wired reaching-defs + PDG into the CLI scan pipeline. |
 | Sprint 3 | `state_transformer` classification | Slicer reads `Assignment.attrs["mutates"]` to detect functions that mutate via attribute or subscript LHS. `tests/unit/test_slicer.py` pins a method `set_x(self, v): self.x = v` as `state_transformer`. |
 | Sprint 4 | Real-world usability fixes | Ingester now skips `DEFAULT_IGNORE_DIRS` ({venv, node_modules, build, dist, __pycache__, site-packages, .tox, .pytest_cache, .mypy_cache, .ruff_cache, target, out, env}) and accepts a `--exclude` flag for custom names. Decorated functions and classes (`@property`/`@staticmethod`/`@classmethod`/multi-decorator stacks) are now surfaced. Relative imports (`from .x import y`, `from ..a.b import c`) resolve to absolute targets and feed the `CALLS` resolver. CLI scan prints a per-kind histogram after writing the index. Smoke-tested on the CGIR codebase itself: `cgir scan .` produces 219 components with sane distribution and runs in ~1s. |
+| Sprint 5 | Precision fixes (closes all four Sprint-4 gaps) | Red-green TDD — 43 new tests. `with`/`try`/`match` bodies now traversed: `with` headers define their `as` aliases and keep the outer controller; `except` clauses become `Branch` nodes (handler bodies control-dependent, `as exc` alias is a def); `match` cases mirror if/elif Branch chains. Augmented assignments feed writes/mutates/reads. Bare mutator calls (`xs.append(x)`, `self.config.update(d)`) record `mutates` via a known-mutator-method table. `for` targets are defs. `reaching_defs`/`pdg` generalized: any CFG node with non-empty `writes` is a definition. Effects taxonomy extended with lexical `net`/`fs`/`nondeterm` matching (`_classify_dotted_call`). Slicer now gates mutation on caller observability: mutating a locally-created object stays pure — self-scan `state_transformer` count dropped from 32 (mostly false) to 5 (all true). |
 
 ## Known precision gaps
 
 Real codebases will hit these — flag rather than guess:
 
-- **Method-call mutations not detected.** `xs.append(x)`, `self.config.update(...)`, etc. are calls (no LHS), so they don't trigger `mutates`. Functions that mutate via method calls stay classified as `pure_function`.
-- **Augmented assignments aren't extracted.** `x += 1` and `self.counter += 1` are tree-sitter `augmented_assignment` nodes; the CFG only handles plain `assignment`. So they're not in `writes`/`mutates`/`reads`. Affects reaching-defs and PDG precision inside any function using `+=` / `-=` / `*=` / etc.
-- **Body of `with` / `try` / `match` is opaque.** Statements inside these constructs become a single CFG `Statement` node and their inner statements never enter the graph. Lifted in Sprint 5.
-- **Effects taxonomy is minimal.** Only `io` (print/input/open) and `raise` are detected directly; `net`, `fs`, `nondeterm` are documented but not yet wired into `_walk_body_for_effects`.
+- **Effect matching is lexical.** `net`/`fs`/`nondeterm` match the dotted callee text against prefix/suffix tables. `import requests as r; r.get(url)` escapes; `self.now()` false-positives on the `.now` suffix. Symbol-resolved effect matching is future work.
+- **Mutator-method detection is a fixed name table.** `_MUTATOR_METHODS` covers the common list/dict/set/deque/queue/file mutators. Unknown mutator names and calls whose result is consumed (`x = xs.pop()`) are missed.
+- **`case` patterns don't bind.** `case Point(x=a):` binds `a`, but pattern captures aren't extracted as writes — only the subject read and guard reads are recorded.
+- **`break` / `continue` jump targets** aren't modelled; loop `else` clauses and exception flow *within* a try body (a raise mid-block skipping the rest) are approximated.
+- **Local-mutation gate is name-based.** A local name rebound to a parameter (`alias = xs; alias.append(x)`) is treated as local and stays pure — no alias analysis.
 
 ## Outstanding tags
 
