@@ -121,6 +121,59 @@ def test_unresolved_external_import_stays_opaque(repo: Path) -> None:
     assert table.bindings["List"] is None
 
 
+# --- aliased imports (Sprint 11) ---------------------------------------------
+
+
+def test_aliased_from_import_binds_alias_not_original(repo: Path) -> None:
+    """`from pricing import add_tax as tax` binds `tax`, not `add_tax`."""
+    _write(repo, "pricing.py", "def add_tax(price, rate):\n    return price\n")
+    _write(repo, "orchestrator.py", "from pricing import add_tax as tax\n")
+    graph = _ingest(repo)
+    tables = build_symbol_tables(graph)
+    assert resolve(tables, "module:orchestrator", "tax") == "func:pricing.add_tax"
+    assert resolve(tables, "module:orchestrator", "add_tax") is None
+
+
+def test_aliased_from_import_drives_call_graph(repo: Path) -> None:
+    _write(repo, "pricing.py", "def add_tax(price, rate):\n    return price\n")
+    _write(
+        repo,
+        "orchestrator.py",
+        """
+        from pricing import add_tax as tax
+
+        def quote(price):
+            return tax(price, 0.08)
+        """,
+    )
+    graph = _ingest(repo)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, repo)
+    callees = {e.dst for e in graph.out_edges("func:orchestrator.quote", EdgeKind.CALLS)}
+    assert "func:pricing.add_tax" in callees
+
+
+def test_import_node_records_alias_attr(repo: Path) -> None:
+    """`import numpy as np` records target=numpy, alias=np on the Import node."""
+    _write(repo, "m.py", "import numpy as np\n")
+    graph = _ingest(repo)
+    from cgir.ir.nodes import NodeKind
+
+    [imp] = (c for c in graph.children("module:m", NodeKind.Import))
+    assert imp.attrs.get("target") == "numpy"
+    assert imp.attrs.get("alias") == "np"
+
+
+def test_unaliased_import_has_no_alias_attr(repo: Path) -> None:
+    _write(repo, "m.py", "import json\n")
+    graph = _ingest(repo)
+    from cgir.ir.nodes import NodeKind
+
+    [imp] = (c for c in graph.children("module:m", NodeKind.Import))
+    assert imp.attrs.get("target") == "json"
+    assert imp.attrs.get("alias") is None
+
+
 # --- IMPORTS edges (sanity) ------------------------------------------------
 
 

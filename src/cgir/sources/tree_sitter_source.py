@@ -271,7 +271,7 @@ class TreeSitterSource(GraphSource):
         source: bytes,
         ts_node: TSNode,
     ) -> None:
-        for target in _import_targets(ts_node, source, current_module):
+        for target, alias in _import_targets(ts_node, source, current_module):
             import_id = f"import:{module_id}::{target}"
             graph.add_node(
                 Node(
@@ -281,7 +281,7 @@ class TreeSitterSource(GraphSource):
                     path=rel_path,
                     start_line=ts_node.start_point[0] + 1,
                     end_line=ts_node.end_point[0] + 1,
-                    attrs={"target": target},
+                    attrs={"target": target, "alias": alias},
                 )
             )
             graph.add_edge(Edge(src=module_id, dst=import_id, kind=EdgeKind.CONTAINS))
@@ -333,22 +333,33 @@ def _param_name(node: TSNode, source: bytes) -> str | None:
     return None
 
 
-def _import_targets(node: TSNode, source: bytes, current_module: str) -> list[str]:
-    targets: list[str] = []
+def _import_targets(
+    node: TSNode, source: bytes, current_module: str
+) -> list[tuple[str, str | None]]:
+    """Yield ``(absolute_target, local_alias_or_None)`` per imported name."""
+    targets: list[tuple[str, str | None]] = []
     if node.type == "import_statement":
         for child in node.children:
             if child.type in {"dotted_name", "aliased_import"}:
                 name = _identifier_text(_name_child(child), source)
                 if name:
-                    targets.append(name)
+                    targets.append((name, _alias_text(child, source)))
     elif node.type == "import_from_statement":
         module_node = node.child_by_field_name("module_name")
         module = _resolve_from_module(module_node, source, current_module) if module_node else ""
         for child in node.children_by_field_name("name"):
             name = _identifier_text(_name_child(child), source)
             if name:
-                targets.append(f"{module}.{name}" if module else name)
+                target = f"{module}.{name}" if module else name
+                targets.append((target, _alias_text(child, source)))
     return targets
+
+
+def _alias_text(ts_node: TSNode, source: bytes) -> str | None:
+    """The ``as`` alias of an ``aliased_import``, if any."""
+    if ts_node.type != "aliased_import":
+        return None
+    return _identifier_text(ts_node.child_by_field_name("alias"), source)
 
 
 def _resolve_from_module(module_node: TSNode, source: bytes, current_module: str) -> str:

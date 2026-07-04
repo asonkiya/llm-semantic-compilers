@@ -7,6 +7,8 @@ Resolution rules:
 * ``from a.b import c`` binds the local name ``c`` to the qualified symbol
   ``a.b.c``. If that resolves to a known ``Function``/``Class`` node, we
   record it; otherwise the binding stays opaque (third-party).
+* ``import x as y`` / ``from a import b as c`` bind the *alias* (recorded
+  by the ingester on the Import node); the original name is not bound.
 * Top-level ``def``/``class`` in a module bind their names in that module's
   table.
 """
@@ -43,7 +45,8 @@ def build_symbol_tables(graph: RepoGraph) -> dict[str, SymbolTable]:
         table = tables[module.id]
         for child in graph.children(module.id, NodeKind.Import):
             target = str(child.attrs.get("target") or child.name)
-            local = target.rsplit(".", 1)[-1]
+            alias = child.attrs.get("alias")
+            local = alias if isinstance(alias, str) else target.rsplit(".", 1)[-1]
             table.bindings[local] = qualname_index.get(target)
 
     return tables

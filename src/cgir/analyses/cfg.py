@@ -139,6 +139,9 @@ class _CFGBuilder:
     ) -> list[str]:
         node_id = self._new_id("assign")
         writes, mutates = _extract_lhs_targets(ts_node, self.source)
+        for base in _extract_call_mutations(ts_node, self.source):
+            if base not in mutates:
+                mutates.append(base)
         attrs: dict[str, object] = {
             "writes": writes,
             "mutates": mutates,
@@ -153,6 +156,7 @@ class _CFGBuilder:
         node_id = self._new_id("return")
         attrs: dict[str, object] = {
             "reads": _extract_reads(ts_node, self.source),
+            "mutates": _extract_call_mutations(ts_node, self.source),
             "controlled_by": controller,
         }
         self._add_node(node_id, NodeKind.Return, ts_node, attrs=attrs)
@@ -539,28 +543,29 @@ def _with_targets(with_ts: TSNode, source: bytes) -> tuple[list[str], list[str]]
 
 
 def _extract_call_mutations(stmt_ts: TSNode, source: bytes) -> list[str]:
-    """Receiver base names mutated by a bare mutator method call.
+    """Receiver base names mutated by mutator method calls in this statement.
 
-    ``xs.append(x)`` returns ``["xs"]``; ``self.config.update(d)`` returns
-    ``["self"]``. Only statement-level calls whose method name is in
-    :data:`_MUTATOR_METHODS` count — a heuristic: it misses unknown mutator
-    names and ``x = xs.pop()`` (call in an assignment RHS).
+    Walks the whole statement subtree, so ``xs.append(x)``, assignment RHS
+    (``x = xs.pop()``), and return expressions (``return xs.pop()``) all
+    count. ``self.config.update(d)`` returns ``["self"]``. Only method
+    names in :data:`_MUTATOR_METHODS` count — unknown mutator names are
+    missed (heuristic).
     """
-    if stmt_ts.type != "expression_statement":
-        return []
-    for child in stmt_ts.named_children:
-        if child.type != "call":
-            continue
-        fn = child.child_by_field_name("function")
-        if fn is None or fn.type != "attribute":
-            continue
-        attr = fn.child_by_field_name("attribute")
-        obj = fn.child_by_field_name("object")
-        if attr is None or obj is None:
-            continue
-        if _text(attr, source) in _MUTATOR_METHODS:
-            return _base_names(obj, source)
-    return []
+    names: list[str] = []
+    stack: list[TSNode] = [stmt_ts]
+    while stack:
+        node = stack.pop()
+        if node.type == "call":
+            fn = node.child_by_field_name("function")
+            if fn is not None and fn.type == "attribute":
+                attr = fn.child_by_field_name("attribute")
+                obj = fn.child_by_field_name("object")
+                if attr is not None and obj is not None and _text(attr, source) in _MUTATOR_METHODS:
+                    for base in _base_names(obj, source):
+                        if base not in names:
+                            names.append(base)
+        stack.extend(node.children)
+    return names
 
 
 def _read_target(ts_node: TSNode) -> TSNode | None:

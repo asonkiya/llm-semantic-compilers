@@ -126,6 +126,12 @@ def test_mutating_a_global_is_state_transformation(tmp_path: Path) -> None:
     assert specs["m.remember"].kind == ComponentKind.state_transformer
 
 
+def test_rhs_pop_is_state_transformer(tmp_path: Path) -> None:
+    """`return xs.pop()` mutates the argument — not a pure_function (Sprint 11)."""
+    specs = _specs_for(tmp_path, "def take(xs):\n    return xs.pop()\n")
+    assert specs["m.take"].kind == ComponentKind.state_transformer
+
+
 def test_subscript_write_to_local_is_not_state_transformation(tmp_path: Path) -> None:
     specs = _specs_for(
         tmp_path,

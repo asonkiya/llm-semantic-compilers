@@ -821,6 +821,30 @@ def test_bare_function_call_records_no_mutates(repo: Path) -> None:
     assert stmts[0].attrs.get("mutates") == []
 
 
+def test_rhs_mutator_call_records_mutates(repo: Path) -> None:
+    """`x = xs.pop()` mutates xs even though the call sits in an assignment RHS."""
+    _write(repo, "m.py", "def f(xs):\n    x = xs.pop()\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert assign.attrs.get("mutates") == ["xs"]
+    assert assign.attrs.get("writes") == ["x"]
+
+
+def test_rhs_pure_call_records_no_mutates(repo: Path) -> None:
+    _write(repo, "m.py", "def f(xs):\n    y = sorted(xs)\n")
+    g = _ingest_with_cfg(repo)
+    [assign] = _assignments(g, "func:m.f")
+    assert assign.attrs.get("mutates") == []
+
+
+def test_return_mutator_call_records_mutates(repo: Path) -> None:
+    """`return xs.pop()` mutates xs on the way out."""
+    _write(repo, "m.py", "def f(xs):\n    return xs.pop()\n")
+    g = _ingest_with_cfg(repo)
+    [ret] = (c for c in g.children("func:m.f") if c.kind == NodeKind.Return)
+    assert ret.attrs.get("mutates") == ["xs"]
+
+
 # --- for-loop target writes (Sprint 5) ----------------------------------------
 
 

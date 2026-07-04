@@ -231,3 +231,83 @@ def test_pure_attribute_call_is_not_tagged(repo: Path) -> None:
     _write(repo, "m.py", "def up(s):\n    return s.upper()\n")
     effects = classify(_ingest(repo), repo)
     assert effects["func:m.up"] == []
+
+
+# --- alias-aware matching (Sprint 11) -----------------------------------------
+
+
+def test_aliased_module_import_is_net(repo: Path) -> None:
+    """`import requests as r; r.get(url)` resolves through the import alias."""
+    _write(
+        repo,
+        "m.py",
+        """
+        import requests as r
+
+        def fetch(url):
+            return r.get(url)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "net" in effects["func:m.fetch"]
+
+
+def test_from_import_bare_call_is_fs(repo: Path) -> None:
+    """`from os import remove; remove(p)` — a bare callee resolved via binding."""
+    _write(
+        repo,
+        "m.py",
+        """
+        from os import remove
+
+        def rm(p):
+            remove(p)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "fs" in effects["func:m.rm"]
+
+
+def test_from_import_bare_call_is_net(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        from urllib.request import urlopen
+
+        def fetch(u):
+            return urlopen(u)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "net" in effects["func:m.fetch"]
+
+
+def test_aliased_bare_call_is_nondeterm(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        from uuid import uuid4 as fresh
+
+        def make_id():
+            return fresh()
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "nondeterm" in effects["func:m.make_id"]
+
+
+def test_unrelated_bare_call_stays_untagged(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        from mylib import helper
+
+        def go(x):
+            return helper(x)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert effects["func:m.go"] == []

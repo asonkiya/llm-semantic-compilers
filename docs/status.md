@@ -61,7 +61,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 176 tests, all green:
+`pytest -q` runs 189 tests, all green:
 
 | File | Covers |
 |---|---|
@@ -101,6 +101,7 @@ The `test_symbols.py` row is intentional debt — symbol resolution is exercised
 | Sprint 3 | P1-pdg | Red-green TDD — extended CFG with `reads`/`mutates`/`controlled_by` attrs (16 new test_cfg.py tests); added `test_pdg.py` (10 tests) for `FLOWS_TO` (data dep) and `DEPENDS_ON` (control dep). Second pure-graph analysis. Wired reaching-defs + PDG into the CLI scan pipeline. |
 | Sprint 3 | `state_transformer` classification | Slicer reads `Assignment.attrs["mutates"]` to detect functions that mutate via attribute or subscript LHS. `tests/unit/test_slicer.py` pins a method `set_x(self, v): self.x = v` as `state_transformer`. |
 | Sprint 4 | Real-world usability fixes | Ingester now skips `DEFAULT_IGNORE_DIRS` ({venv, node_modules, build, dist, __pycache__, site-packages, .tox, .pytest_cache, .mypy_cache, .ruff_cache, target, out, env}) and accepts a `--exclude` flag for custom names. Decorated functions and classes (`@property`/`@staticmethod`/`@classmethod`/multi-decorator stacks) are now surfaced. Relative imports (`from .x import y`, `from ..a.b import c`) resolve to absolute targets and feed the `CALLS` resolver. CLI scan prints a per-kind histogram after writing the index. Smoke-tested on the CGIR codebase itself: `cgir scan .` produces 219 components with sane distribution and runs in ~1s. |
+| Sprint 11 | Aliased imports + RHS mutator calls | Red-green TDD — 13 new tests. Ingester records `alias` on Import nodes; symbol tables bind the alias (fixes `from a import b as c` never resolving in the call graph). Effects matching is now import-alias aware: `import requests as r; r.get(...)` → `net`, and bare callees bound by `from os import remove` resolve through per-module alias maps. Mutator-call detection walks the whole statement subtree, so `x = xs.pop()` and `return xs.pop()` count as mutations. |
 | Sprint 10 | Real-codebase validation + parse cache | Scanned networkx (~6.7k components) from site-packages: no crashes, sane distribution. Found the per-function re-parse hot spot (each pass parsed a file once *per function* in it); added `SourceCache` (parse-once per file per pass) to call_graph/cfg/effects — 58s → 14.7s on networkx with byte-identical output. HTML viz physics now samples repulsion pairs above 1,200 nodes so large graphs stay interactive. |
 | Sprint 9 | `P1-regenerate` | Red-green TDD — 4 new tests. `regenerate(spec, lang, generator=None)`: the LLM call is an injectable `Callable[[str], str]`, so everything is testable offline. `anthropic_generator()` (lazy import, `cgir[llm]` extra, `CGIR_MODEL` override, prompt caching on the system prompt from day one per roadmap) backs `cgir regenerate --live`; without `--live` it's an explicit dry run that prints the prompt-pack. API `/regenerate` stays dry-run. |
 | Sprint 8 | `P1-api` | Red-green TDD — 8 new tests. Extracted the scan pipeline into `cgir/pipeline.py:scan_repo` (per roadmap: one driver, CLI and API as thin surfaces). FastAPI routes: `POST /scan`, `GET /components`, `GET /components/{id}`, `GET /trace`, `POST /regenerate`, `GET /stats`. Missing-index reads answer 409 (vs 404 for unknown components). `CLAUDE.md` pipeline pointer updated to `pipeline.py`. |
@@ -112,8 +113,8 @@ The `test_symbols.py` row is intentional debt — symbol resolution is exercised
 
 Real codebases will hit these — flag rather than guess:
 
-- **Effect matching is lexical.** `net`/`fs`/`nondeterm` match the dotted callee text against prefix/suffix tables. `import requests as r; r.get(url)` escapes; `self.now()` false-positives on the `.now` suffix. Symbol-resolved effect matching is future work.
-- **Mutator-method detection is a fixed name table.** `_MUTATOR_METHODS` covers the common list/dict/set/deque/queue/file mutators. Unknown mutator names and calls whose result is consumed (`x = xs.pop()`) are missed.
+- **Effect matching is lexical (alias-aware).** `net`/`fs`/`nondeterm` match dotted callee text against prefix/suffix tables after normalizing through per-module import aliases. Re-exported names and attribute chains on objects (`self.session.get(...)`) still escape; `self.now()` false-positives on the `.now` suffix.
+- **Mutator-method detection is a fixed name table.** `_MUTATOR_METHODS` covers the common list/dict/set/deque/queue/file mutators; RHS and return-expression calls now count. Unknown mutator names are still missed.
 - **`case` patterns don't bind.** `case Point(x=a):` binds `a`, but pattern captures aren't extracted as writes — only the subject read and guard reads are recorded.
 - **`break` / `continue` jump targets** aren't modelled; loop `else` clauses and exception flow *within* a try body (a raise mid-block skipping the rest) are approximated.
 - **Local-mutation gate is name-based.** A local name rebound to a parameter (`alias = xs; alias.append(x)`) is treated as local and stays pure — no alias analysis.
