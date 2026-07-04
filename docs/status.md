@@ -51,6 +51,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Interactive HTML viz (`cgir viz`) — self-contained, no network | done | `src/cgir/export/html_viz.py` |
 | Mermaid call-graph (`cgir viz --format mermaid`) | done | `src/cgir/export/mermaid.py` |
 | Structure report (`cgir stats`, `--json`) — kinds, purity, effects, hotspots | done | `src/cgir/report/stats.py` |
+| Flow tracing (`cgir flow <id>`) — annotated caller/callee trees | done | `src/cgir/report/flow.py` |
 | Shared pipeline driver (CLI + API call the same function) | done | `src/cgir/pipeline.py:scan_repo` |
 | HTTP API (`/scan`, `/components`, `/trace`, `/regenerate`, `/stats`) | done | `src/cgir/api/server.py` |
 | `RepoGraph.from_jsonable` (viz/export run off an existing index) | done | `src/cgir/ir/graph.py` |
@@ -61,7 +62,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 211 tests, all green:
+`pytest -q` runs 216 tests, all green:
 
 | File | Covers |
 |---|---|
@@ -101,6 +102,7 @@ The `test_symbols.py` row is intentional debt — symbol resolution is exercised
 | Sprint 3 | P1-pdg | Red-green TDD — extended CFG with `reads`/`mutates`/`controlled_by` attrs (16 new test_cfg.py tests); added `test_pdg.py` (10 tests) for `FLOWS_TO` (data dep) and `DEPENDS_ON` (control dep). Second pure-graph analysis. Wired reaching-defs + PDG into the CLI scan pipeline. |
 | Sprint 3 | `state_transformer` classification | Slicer reads `Assignment.attrs["mutates"]` to detect functions that mutate via attribute or subscript LHS. `tests/unit/test_slicer.py` pins a method `set_x(self, v): self.x = v` as `state_transformer`. |
 | Sprint 4 | Real-world usability fixes | Ingester now skips `DEFAULT_IGNORE_DIRS` ({venv, node_modules, build, dist, __pycache__, site-packages, .tox, .pytest_cache, .mypy_cache, .ruff_cache, target, out, env}) and accepts a `--exclude` flag for custom names. Decorated functions and classes (`@property`/`@staticmethod`/`@classmethod`/multi-decorator stacks) are now surfaced. Relative imports (`from .x import y`, `from ..a.b import c`) resolve to absolute targets and feed the `CALLS` resolver. CLI scan prints a per-kind histogram after writing the index. Smoke-tested on the CGIR codebase itself: `cgir scan .` produces 219 components with sane distribution and runs in ~1s. |
+| Sprint 14 | Tracing | New `cgir flow <id> [--depth]`: upstream callers + downstream callees as depth-limited trees, each node annotated `[kind · effects] -> ReturnType`, cycles marked. Viz: edges are typed — solid call arrows labeled with the callee's declared return type, dashed construct arrows to violet square *type nodes* (the data model becomes visible in the graph); clicking a node now highlights its full transitive upstream+downstream trace instead of 1-hop (hover stays 1-hop). |
 | Sprint 13 | Settled taxonomy (user decisions) | (1) `raise` is recorded but **not impure**: `IMPURE_EFFECT_TAGS = DIRECT_EFFECT_TAGS - {raise}` gates purity, classification, and the transitive closure — raise-only validators score 1.0 and don't taint callers. (2) New `db` effect tag: receiver-gated lexical match (db/session/conn/cursor/engine × query/execute/commit/add/...). (3) New `constructs` ComponentSpec field (schema updated in both places): constructor calls resolve to `__init__` when defined, else the class qualname lands in `constructs`; stats shows Constructed types. (4) `outputs` filled from the declared return annotation. On the test backend: db 45 (the dominant effect, previously invisible), raise-only routes became orchestrator, external-calls noise vanished. |
 | Sprint 12 | Source-root resolution + viz file grouping | User feedback on a real scan: everything rendered as isolated nodes. Root cause was resolution, not viz — a package rooted in `backend/` gives modules qualnames like `backend.app.repos.chapter` while the code imports `app.repos.chapter`. Fixes: unique-suffix fallback in symbol resolution (ambiguous suffixes stay unresolved), and module-attribute calls (`chapter.get_chapter(...)`) resolve through the module binding into the target function. On the test repo CALLS went from near-zero cross-module edges to 71. Viz now draws per-file hull outlines + labels and stronger same-file cohesion. |
 | Sprint 11 | Aliased imports + RHS mutator calls | Red-green TDD — 13 new tests. Ingester records `alias` on Import nodes; symbol tables bind the alias (fixes `from a import b as c` never resolving in the call graph). Effects matching is now import-alias aware: `import requests as r; r.get(...)` → `net`, and bare callees bound by `from os import remove` resolve through per-module alias maps. Mutator-call detection walks the whole statement subtree, so `x = xs.pop()` and `return xs.pop()` count as mutations. |

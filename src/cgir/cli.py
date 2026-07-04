@@ -21,6 +21,7 @@ from cgir.ir.component_spec import ComponentSpec
 from cgir.ir.graph import RepoGraph
 from cgir.pipeline import scan_repo
 from cgir.regenerate import regenerate as run_regenerate
+from cgir.report.flow import render_flow
 from cgir.report.stats import compute_stats, render_text
 from cgir.trace import TraceMap
 
@@ -109,6 +110,20 @@ def stats(
         typer.echo(json.dumps(result, indent=2, sort_keys=True))
     else:
         typer.echo(render_text(result), nl=False)
+
+
+@app.command()
+def flow(
+    component_id: Annotated[str, typer.Argument(metavar="ID")],
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+    depth: Annotated[int, typer.Option("--depth", help="Max hops in each direction.")] = 3,
+) -> None:
+    """Trace a component: upstream callers, downstream callees, constructed types."""
+    specs = _load_specs(index_dir)
+    try:
+        typer.echo(render_flow(specs, component_id, depth), nl=False)
+    except KeyError as exc:
+        raise typer.BadParameter(f"Unknown component: {component_id}") from exc
 
 
 def _load_graph(index_dir: Path) -> RepoGraph:

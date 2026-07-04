@@ -40,9 +40,30 @@ def _build_data(specs: list[ComponentSpec]) -> dict[str, object]:
                 "effects": spec.effects,
                 "inputs": spec.inputs,
                 "calls": spec.calls,
+                "constructs": spec.constructs,
+                "outputs": spec.outputs,
                 "file": file,
                 "trace": spec.trace,
                 "signature": spec.signature,
+            }
+        )
+    # Synthetic nodes for constructed types — the data model becomes visible.
+    type_names = sorted({t for spec in specs for t in spec.constructs})
+    for type_name in type_names:
+        index_of[type_name] = len(nodes)
+        nodes.append(
+            {
+                "id": type_name,
+                "kind": "type",
+                "purity": None,
+                "effects": [],
+                "inputs": [],
+                "calls": [],
+                "constructs": [],
+                "outputs": [],
+                "file": "(types)",
+                "trace": [],
+                "signature": None,
             }
         )
     edges = []
@@ -50,7 +71,24 @@ def _build_data(specs: list[ComponentSpec]) -> dict[str, object]:
         for callee in spec.calls:
             target = index_of.get(callee)
             if target is not None:
-                edges.append({"s": index_of[spec.id], "t": target})
+                callee_outputs = specs[target].outputs if target < len(specs) else []
+                edges.append(
+                    {
+                        "s": index_of[spec.id],
+                        "t": target,
+                        "kind": "call",
+                        "type": callee_outputs[0] if callee_outputs else None,
+                    }
+                )
+        for type_name in spec.constructs:
+            edges.append(
+                {
+                    "s": index_of[spec.id],
+                    "t": index_of[type_name],
+                    "kind": "construct",
+                    "type": type_name.rsplit(".", 1)[-1],
+                }
+            )
     return {"nodes": nodes, "edges": edges}
 
 
@@ -111,6 +149,7 @@ const KIND_COLORS = {
   state_transformer: "#f6ad55",
   effect_adapter: "#fc8181",
   unknown: "#a0aec0",
+  type: "#b794f4",
 };
 
 const canvas = document.getElementById("canvas");
@@ -132,9 +171,28 @@ const nodes = DATA.nodes.map((n, i) => {
   return { ...n, x: W / 2 + Math.cos(angle) * r, y: H / 2 + Math.sin(angle) * r,
            vx: 0, vy: 0, deg: 0, fixed: false };
 });
-const edges = DATA.edges.map(e => ({ s: e.s, t: e.t }));
+const edges = DATA.edges.map(e => ({ s: e.s, t: e.t, kind: e.kind || "call", type: e.type }));
 edges.forEach(e => { nodes[e.s].deg++; nodes[e.t].deg++; });
 nodes.forEach(n => { n.r = 5 + Math.min(11, Math.sqrt(n.deg) * 2.4); });
+
+// adjacency for transitive tracing
+const outAdj = nodes.map(() => []), inAdj = nodes.map(() => []);
+edges.forEach((e, ei) => { outAdj[e.s].push({ n: e.t, ei }); inAdj[e.t].push({ n: e.s, ei }); });
+function traceFrom(start) {
+  const tracedNodes = new Set([start]), tracedEdges = new Set();
+  [outAdj, inAdj].forEach(adj => {
+    const frontier = [start], visited = new Set([start]);
+    while (frontier.length) {
+      const cur = frontier.pop();
+      adj[cur].forEach(({ n, ei }) => {
+        tracedEdges.add(ei); tracedNodes.add(n);
+        if (!visited.has(n)) { visited.add(n); frontier.push(n); }
+      });
+    }
+  });
+  return { nodes: tracedNodes, edges: tracedEdges };
+}
+let traced = null;
 
 // group pull: components in the same file drift together
 const fileCenters = {};
@@ -262,22 +320,32 @@ function draw() {
     }
   });
 
+  // Selected node: highlight the full transitive trace (upstream + downstream).
+  // Hover only: highlight 1-hop neighbors.
+  const focus = selected !== null ? selected : hovered;
   const neighbor = new Set();
-  const focus = selected || hovered;
-  if (focus !== null) {
+  if (focus !== null && traced === null) {
     edges.forEach(e => {
       if (e.s === focus) neighbor.add(e.t);
       if (e.t === focus) neighbor.add(e.s);
     });
   }
+  const nodeHot = i => traced ? traced.nodes.has(i)
+    : (focus === null || i === focus || neighbor.has(i));
+  const edgeHot = (e, ei) => traced ? traced.edges.has(ei)
+    : (focus !== null && (e.s === focus || e.t === focus));
 
-  edges.forEach(e => {
+  edges.forEach((e, ei) => {
     const a = nodes[e.s], b = nodes[e.t];
     if (!kindVisible[a.kind] || !kindVisible[b.kind]) return;
-    const hot = focus !== null && (e.s === focus || e.t === focus);
-    ctx.strokeStyle = hot ? "#e9c46a" : "rgba(120,140,190,0.28)";
-    ctx.lineWidth = (hot ? 1.8 : 0.8) / view.scale;
+    const hot = edgeHot(e, ei);
+    const dimmed = focus !== null && !hot;
+    ctx.strokeStyle = hot && focus !== null ? "#e9c46a"
+      : dimmed ? "rgba(120,140,190,0.08)" : "rgba(120,140,190,0.28)";
+    ctx.lineWidth = ((hot && focus !== null) ? 1.8 : 0.8) / view.scale;
+    if (e.kind === "construct") ctx.setLineDash([5 / view.scale, 4 / view.scale]);
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.setLineDash([]);
     // arrowhead
     const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
     const tx = b.x - (dx / d) * (b.r + 4), ty = b.y - (dy / d) * (b.r + 4);
@@ -288,15 +356,27 @@ function draw() {
     ctx.lineTo(tx - s * Math.cos(ang - 0.4), ty - s * Math.sin(ang - 0.4));
     ctx.lineTo(tx - s * Math.cos(ang + 0.4), ty - s * Math.sin(ang + 0.4));
     ctx.fill();
+    // data-type label: what flows back along this edge
+    if (e.type && !dimmed && (view.scale > 1.3 || hot)) {
+      ctx.fillStyle = e.kind === "construct" ? "#b794f4" : "#8ea6d8";
+      ctx.font = `${10 / view.scale}px sans-serif`;
+      ctx.fillText(e.type, (a.x + b.x) / 2 + 4 / view.scale, (a.y + b.y) / 2 - 4 / view.scale);
+    }
   });
 
   nodes.forEach((n, i) => {
     if (!kindVisible[n.kind]) return;
-    const dim = (query && !matches(n)) ||
-      (focus !== null && i !== focus && !neighbor.has(i));
+    const dim = (query && !matches(n)) || (focus !== null && !nodeHot(i));
     ctx.globalAlpha = dim ? 0.16 : 1;
     ctx.fillStyle = KIND_COLORS[n.kind] || KIND_COLORS.unknown;
-    ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    if (n.kind === "type") {
+      const r = n.r;
+      ctx.rect(n.x - r, n.y - r, r * 2, r * 2);
+    } else {
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+    }
+    ctx.fill();
     if (i === selected) {
       ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 / view.scale; ctx.stroke();
     }
@@ -382,10 +462,11 @@ canvas.addEventListener("wheel", ev => {
 // --- detail panel -------------------------------------------------------------
 function select(i) {
   selected = i;
+  traced = i === null ? null : traceFrom(i);
   const panel = document.getElementById("detail");
   if (i === null) { panel.style.display = "none"; return; }
   const n = nodes[i];
-  const callers = edges.filter(e => e.t === i).map(e => nodes[e.s].id);
+  const callers = edges.filter(e => e.t === i && e.kind === "call").map(e => nodes[e.s].id);
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
   const list = xs => xs.length
     ? "<dd>" + xs.map(esc).join("</dd><dd>") + "</dd>" : "<dd>—</dd>";
@@ -393,11 +474,13 @@ function select(i) {
     <h2>${esc(n.id)}</h2>
     <dl>
       <dt>kind</dt><dd>${esc(n.kind)}</dd>
-      <dt>purity</dt><dd>${n.purity}</dd>
+      <dt>purity</dt><dd>${n.purity == null ? "—" : n.purity}</dd>
       <dt>signature</dt><dd>${esc(n.signature || "—")}</dd>
+      <dt>returns</dt>${list(n.outputs || [])}
       <dt>effects</dt>${list(n.effects)}
       <dt>inputs</dt>${list(n.inputs)}
       <dt>calls</dt>${list(n.calls)}
+      <dt>constructs</dt>${list(n.constructs || [])}
       <dt>called by</dt>${list(callers)}
       <dt>trace</dt>${list(n.trace)}
     </dl>`;

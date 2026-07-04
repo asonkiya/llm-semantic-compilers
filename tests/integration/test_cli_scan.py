@@ -117,3 +117,28 @@ def test_stats_json_output(tmp_path: Path, python_sample_repo: Path) -> None:
     payload = json.loads(result.output)
     assert payload["total"] == 2
     assert payload["kinds"]["pure_function"] == 2
+
+
+# --- flow tracing (Sprint 14) ---------------------------------------------------
+
+
+def test_flow_shows_downstream_callees(tmp_path: Path, python_sample_repo: Path) -> None:
+    out_dir = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(app, ["flow", "orchestrator.quote", "--index", str(out_dir)])
+    assert result.exit_code == 0, result.output
+    assert "pricing.add_tax" in result.output
+    assert "calls" in result.output.lower()
+
+
+def test_flow_shows_upstream_callers(tmp_path: Path, python_sample_repo: Path) -> None:
+    out_dir = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(app, ["flow", "pricing.add_tax", "--index", str(out_dir)])
+    assert result.exit_code == 0, result.output
+    assert "orchestrator.quote" in result.output
+    assert "called by" in result.output.lower()
+
+
+def test_flow_unknown_component_fails(tmp_path: Path, python_sample_repo: Path) -> None:
+    out_dir = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(app, ["flow", "nope.nothing", "--index", str(out_dir)])
+    assert result.exit_code != 0

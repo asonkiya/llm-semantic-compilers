@@ -72,3 +72,32 @@ def test_embedded_json_is_parseable(tmp_path: Path) -> None:
     data = json.loads(match.group(1))
     assert data["nodes"][0]["id"] == "m.f"
     assert data["nodes"][0]["effects"] == ["io"]
+
+
+def _data_island(tmp_path: Path, specs: list[ComponentSpec]) -> dict:
+    html = write(tmp_path, specs).read_text()
+    match = re.search(r"/\*CGIR_DATA\*/(.*?)/\*END_CGIR_DATA\*/", html, re.DOTALL)
+    assert match
+    return json.loads(match.group(1))
+
+
+def test_call_edges_carry_kind_and_return_type(tmp_path: Path) -> None:
+    """Sprint 14: edges are typed — kind 'call' + the callee's return type."""
+    callee = _spec("m.leaf")
+    callee.outputs = ["float"]
+    caller = _spec("m.top", calls=["m.leaf"])
+    data = _data_island(tmp_path, [callee, caller])
+    [edge] = data["edges"]
+    assert edge["kind"] == "call"
+    assert edge["type"] == "float"
+
+
+def test_construct_edges_target_type_nodes(tmp_path: Path) -> None:
+    """Constructs become dashed edges to synthetic type nodes."""
+    spec = _spec("m.make")
+    spec.constructs = ["models.Chapter"]
+    data = _data_island(tmp_path, [spec])
+    type_nodes = [n for n in data["nodes"] if n.get("kind") == "type"]
+    assert [n["id"] for n in type_nodes] == ["models.Chapter"]
+    [edge] = data["edges"]
+    assert edge["kind"] == "construct"
