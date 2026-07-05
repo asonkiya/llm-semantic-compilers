@@ -56,6 +56,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Index diff + drift rules (`cgir diff --fail-on`) | done | `src/cgir/report/diff.py` |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware) | done | `src/cgir/report/pack.py` |
+| MCP server (`cgir mcp`, stdio; `cgir[mcp]` extra) | done | `src/cgir/api/mcp_server.py` |
 | Shared pipeline driver (CLI + API call the same function) | done | `src/cgir/pipeline.py:scan_repo` |
 | HTTP API (`/scan`, `/components`, `/trace`, `/regenerate`, `/stats`) | done | `src/cgir/api/server.py` |
 | `RepoGraph.from_jsonable` (viz/export run off an existing index) | done | `src/cgir/ir/graph.py` |
@@ -66,7 +67,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 264 tests, all green:
+`pytest -q` runs 273 tests, all green:
 
 | File | Covers |
 |---|---|
@@ -106,6 +107,7 @@ The `test_symbols.py` row is intentional debt — symbol resolution is exercised
 | Sprint 3 | P1-pdg | Red-green TDD — extended CFG with `reads`/`mutates`/`controlled_by` attrs (16 new test_cfg.py tests); added `test_pdg.py` (10 tests) for `FLOWS_TO` (data dep) and `DEPENDS_ON` (control dep). Second pure-graph analysis. Wired reaching-defs + PDG into the CLI scan pipeline. |
 | Sprint 3 | `state_transformer` classification | Slicer reads `Assignment.attrs["mutates"]` to detect functions that mutate via attribute or subscript LHS. `tests/unit/test_slicer.py` pins a method `set_x(self, v): self.x = v` as `state_transformer`. |
 | Sprint 4 | Real-world usability fixes | Ingester now skips `DEFAULT_IGNORE_DIRS` ({venv, node_modules, build, dist, __pycache__, site-packages, .tox, .pytest_cache, .mypy_cache, .ruff_cache, target, out, env}) and accepts a `--exclude` flag for custom names. Decorated functions and classes (`@property`/`@staticmethod`/`@classmethod`/multi-decorator stacks) are now surfaced. Relative imports (`from .x import y`, `from ..a.b import c`) resolve to absolute targets and feed the `CALLS` resolver. CLI scan prints a per-kind histogram after writing the index. Smoke-tested on the CGIR codebase itself: `cgir scan .` produces 219 components with sane distribution and runs in ~1s. |
+| Sprint 19 | `cgir mcp` — agents as first-class users | `api/mcp_server.py`: plain `tool_*` functions over an index dir (stats, component, flow, pack, search, entrypoints) — fully testable offline; FastMCP wiring behind a lazy import (new `cgir[mcp]` extra, anthropic pattern). `cgir mcp --index .cgir` serves stdio — register it in an agent's MCP config and the agent navigates the repo semantically (search by effect, pull a pack, trace flows) instead of grepping. |
 | Sprint 18 | `cgir pack` — the context packer | The product's core loop: `report/pack.py:build_pack` assembles the minimal bundle for working on one component — target spec + source (span read via the graph), callee *interfaces only* ("do not modify these"), callers with entrypoints, constructed types. Approximate token budget (chars/4) drops whole sections in reverse priority and records every omission — the bundle never silently lies about completeness. `cgir pack ID [--repo] [--budget]` emits prompt-ready markdown. |
 | Sprint 17 | Entrypoint recognition | Ingester records decorator texts on function/method nodes. New `analyses/entrypoints.py` (pure, lexical): `router.get("/x")` → `HTTP GET /x`, `app.route` → `HTTP /x`, typer/click `command` → `CLI <fn>`, celery `task`/`shared_task` → `task <fn>`. New optional `entrypoint` ComponentSpec field (schema updated in both places). Stats opens with the full API surface (`Entrypoints:` section); `cgir flow` annotates entrypoints; viz draws a gold ring on externally-reachable nodes with the label in tooltip/detail. Router prefixes (`include_router(prefix=...)`) aren't visible from the decorator — paths are handler-local. |
 | Sprint 16 | `cgir diff` — effect-drift CI | `report/diff.py`: pure diff over two spec lists on the contract fields (kind, purity, effects, signature, outputs) + `violations` rule evaluation. `cgir diff OLD NEW [--json] [--fail-on effect-gain[:tag] | purity-drop | kind-change]...` exits 1 on drift — "this PR made a pure function effectful" is now a CI failure. Rules only fire for components present in both scans: new effectful code is a choice, drift is a regression. |

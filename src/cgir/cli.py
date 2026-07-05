@@ -171,6 +171,20 @@ def _component_source(index_dir: Path, component_id: str, repo: Path | None) -> 
 
 
 @app.command()
+def mcp(
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+) -> None:
+    """Serve the index to agents over MCP (stdio; requires cgir[mcp])."""
+    from cgir.api.mcp_server import create_server
+
+    try:
+        server = create_server(index_dir)
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    server.run()
+
+
+@app.command()
 def diff(
     old_index: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
     new_index: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
