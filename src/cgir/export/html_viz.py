@@ -4,9 +4,18 @@ Writes a single ``viz.html`` with the component data embedded as JSON and
 a hand-rolled canvas force layout — no CDN, no network requests, matching
 the local-first rule for the analysis layers. Open it with any browser.
 
+Three views over the same data:
+
+* **Components** — force layout, one node per component, file hulls.
+* **Files** — one node per file, edges aggregated with call counts:
+  the architecture overview.
+* **Layers** — columns by call depth (routes → services → repos → types),
+  left to right.
+
 Interactions: drag nodes, wheel-zoom, drag-background to pan, hover for a
-tooltip, click for a detail panel, search box to highlight, legend to
-toggle component kinds.
+tooltip, click for a transitive trace + detail panel, search box to
+highlight, legend to toggle component kinds, sliders for spacing / link
+length / node size.
 """
 
 from __future__ import annotations
@@ -103,20 +112,33 @@ _TEMPLATE = """<!DOCTYPE html>
     background: #0f1420; color: #dbe2ef; }
   #canvas { display: block; cursor: grab; }
   #topbar { position: fixed; top: 0; left: 0; right: 0; display: flex;
-    gap: 12px; align-items: center; padding: 10px 14px;
-    background: rgba(15,20,32,.88); border-bottom: 1px solid #232c44; }
+    gap: 14px; align-items: center; flex-wrap: wrap; padding: 10px 14px;
+    background: rgba(15,20,32,.92); border-bottom: 1px solid #232c44; }
   #topbar h1 { font-size: 14px; margin: 0; font-weight: 600; color: #8ea6d8; }
-  #search { flex: 0 0 260px; padding: 5px 10px; border-radius: 6px;
+  #views { display: flex; border: 1px solid #2c3757; border-radius: 8px;
+    overflow: hidden; }
+  .vw { padding: 6px 14px; background: #171e30; color: #8ea6d8; border: none;
+    cursor: pointer; font-size: 13px; }
+  .vw + .vw { border-left: 1px solid #2c3757; }
+  .vw.active { background: #2c3757; color: #fff; }
+  .vw:hover:not(.active) { color: #dbe2ef; }
+  #search { flex: 0 0 220px; padding: 6px 10px; border-radius: 6px;
     border: 1px solid #2c3757; background: #171e30; color: #dbe2ef; }
-  #fit { padding: 5px 10px; border-radius: 6px; border: 1px solid #2c3757;
+  #fit { padding: 6px 12px; border-radius: 6px; border: 1px solid #2c3757;
     background: #171e30; color: #8ea6d8; cursor: pointer; }
   #fit:hover { color: #dbe2ef; border-color: #46578a; }
+  #sliders { display: flex; gap: 18px; align-items: center; }
+  #sliders label { display: flex; flex-direction: column; gap: 2px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+    color: #56618a; user-select: none; }
+  #sliders input[type="range"] { width: 180px; height: 22px;
+    accent-color: #63b3ed; cursor: pointer; }
   #legend { display: flex; gap: 10px; flex-wrap: wrap; }
   .lg { display: flex; gap: 5px; align-items: center; cursor: pointer;
     opacity: 1; user-select: none; }
   .lg.off { opacity: .3; }
   .dot { width: 10px; height: 10px; border-radius: 50%; }
-  #detail { position: fixed; top: 52px; right: 0; bottom: 0; width: 320px;
+  #detail { position: fixed; top: 96px; right: 0; bottom: 0; width: 320px;
     background: rgba(18,24,40,.95); border-left: 1px solid #232c44;
     padding: 16px; overflow-y: auto; display: none; }
   #detail h2 { font-size: 13px; word-break: break-all; color: #9fd3a8;
@@ -135,15 +157,25 @@ _TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
 <div id="topbar">
-  <h1>CGIR component graph</h1>
-  <input id="search" placeholder="search components…" autocomplete="off">
+  <h1>CGIR</h1>
+  <div id="views">
+    <button class="vw active" data-view="components">Components</button>
+    <button class="vw" data-view="files">Files</button>
+    <button class="vw" data-view="layers">Layers</button>
+  </div>
+  <input id="search" placeholder="search…" autocomplete="off">
   <button id="fit" title="Zoom to fit (F)">⤢ fit</button>
+  <div id="sliders">
+    <label>spacing <input type="range" id="s-spacing" min="0.3" max="3" step="0.05" value="1"></label>
+    <label>link length <input type="range" id="s-links" min="0.3" max="3" step="0.05" value="1"></label>
+    <label>node size <input type="range" id="s-size" min="0.5" max="2.5" step="0.05" value="1"></label>
+  </div>
   <div id="legend"></div>
 </div>
 <canvas id="canvas"></canvas>
 <div id="tooltip"></div>
 <div id="detail"><span class="close" id="close">✕</span><div id="detail-body"></div></div>
-<div id="hint">drag nodes · wheel to zoom · drag background to pan · click a node for details</div>
+<div id="hint">drag nodes · wheel to zoom · drag background to pan · click a node to trace it</div>
 <script>
 const DATA = /*CGIR_DATA*/__CGIR_JSON__/*END_CGIR_DATA*/;
 
@@ -168,51 +200,122 @@ function resize() {
 window.addEventListener("resize", () => { resize(); kick(); });
 resize();
 
-// --- graph model -----------------------------------------------------------
-// Seed each file's components together on a ring of file-cluster slots, so
-// the layout starts separated instead of interleaved.
+// --- tunables (sliders) ------------------------------------------------------
+let SP = 1;   // spacing: cluster padding + repulsion
+let LK = 1;   // link length: spring rest distances
+let SZ = 1;   // node size
+const rad = n => n.r * SZ;
+
+// --- base graph model --------------------------------------------------------
 const fileNames = [...new Set(DATA.nodes.map(n => n.file))];
 const fileSlot = {};
 fileNames.forEach((f, i) => { fileSlot[f] = i; });
 const ringR = Math.max(380, fileNames.length * 52);
-const nodes = DATA.nodes.map((n, i) => {
-  const slot = fileSlot[n.file];
-  const slotAngle = (slot / Math.max(fileNames.length, 1)) * Math.PI * 2;
+function seedPos(slotCount, slot, i) {
+  const slotAngle = (slot / Math.max(slotCount, 1)) * Math.PI * 2;
   const jitterAngle = (i * 2.399963) % (Math.PI * 2); // golden-angle spread
   const jitterR = 20 + (i % 5) * 14;
-  return { ...n,
-           x: W / 2 + Math.cos(slotAngle) * ringR + Math.cos(jitterAngle) * jitterR,
-           y: H / 2 + Math.sin(slotAngle) * ringR + Math.sin(jitterAngle) * jitterR,
-           vx: 0, vy: 0, deg: 0, fixed: false };
-});
-const edges = DATA.edges.map(e => ({ s: e.s, t: e.t, kind: e.kind || "call", type: e.type }));
-edges.forEach(e => { nodes[e.s].deg++; nodes[e.t].deg++; });
-nodes.forEach(n => { n.r = 5 + Math.min(11, Math.sqrt(n.deg) * 2.4); });
-
-// adjacency for transitive tracing
-const outAdj = nodes.map(() => []), inAdj = nodes.map(() => []);
-edges.forEach((e, ei) => { outAdj[e.s].push({ n: e.t, ei }); inAdj[e.t].push({ n: e.s, ei }); });
-function traceFrom(start) {
-  const tracedNodes = new Set([start]), tracedEdges = new Set();
-  [outAdj, inAdj].forEach(adj => {
-    const frontier = [start], visited = new Set([start]);
-    while (frontier.length) {
-      const cur = frontier.pop();
-      adj[cur].forEach(({ n, ei }) => {
-        tracedEdges.add(ei); tracedNodes.add(n);
-        if (!visited.has(n)) { visited.add(n); frontier.push(n); }
-      });
-    }
-  });
-  return { nodes: tracedNodes, edges: tracedEdges };
+  return {
+    x: W / 2 + Math.cos(slotAngle) * ringR + Math.cos(jitterAngle) * jitterR,
+    y: H / 2 + Math.sin(slotAngle) * ringR + Math.sin(jitterAngle) * jitterR,
+  };
 }
-let traced = null;
-
-// group pull: components in the same file drift together
-const fileCenters = {};
-nodes.forEach(n => {
-  if (!fileCenters[n.file]) fileCenters[n.file] = { x: 0, y: 0, count: 0 };
+const baseNodes = DATA.nodes.map((n, i) => {
+  const p = seedPos(fileNames.length, fileSlot[n.file], i);
+  return { ...n, x: p.x, y: p.y, vx: 0, vy: 0, deg: 0, fixed: false, layer: 0 };
 });
+const baseEdges = DATA.edges.map(e => ({ s: e.s, t: e.t, kind: e.kind || "call", type: e.type, w: 1 }));
+baseEdges.forEach(e => { baseNodes[e.s].deg++; baseNodes[e.t].deg++; });
+baseNodes.forEach(n => { n.r = 5 + Math.min(11, Math.sqrt(n.deg) * 2.4); });
+
+// layer = longest call-path depth from any root (bounded relaxation, cycle-safe)
+{
+  for (let pass = 0; pass < 24; pass++) {
+    let changed = false;
+    baseEdges.forEach(e => {
+      if (baseNodes[e.t].layer < baseNodes[e.s].layer + 1) {
+        baseNodes[e.t].layer = baseNodes[e.s].layer + 1;
+        changed = true;
+      }
+    });
+    if (!changed) break;
+  }
+}
+
+// --- files view: one node per file, aggregated weighted edges -----------------
+function buildFilesView() {
+  const byFile = {};
+  baseNodes.forEach(n => { (byFile[n.file] = byFile[n.file] || []).push(n); });
+  const fnodes = [];
+  const idx = {};
+  Object.entries(byFile).forEach(([file, members]) => {
+    const kinds = {};
+    members.forEach(m => { kinds[m.kind] = (kinds[m.kind] || 0) + 1; });
+    const domKind = Object.entries(kinds).sort((a, b) => b[1] - a[1])[0][0];
+    const effects = [...new Set(members.flatMap(m => m.effects))].sort();
+    idx[file] = fnodes.length;
+    const p = seedPos(Object.keys(byFile).length, fnodes.length, fnodes.length);
+    fnodes.push({
+      id: file, kind: domKind, file, purity: null, effects,
+      inputs: [], calls: [], constructs: [], outputs: [], trace: [],
+      signature: null, members: members.map(m => m.id).sort(),
+      x: p.x, y: p.y, vx: 0, vy: 0, deg: 0, fixed: false, layer: 0,
+    });
+  });
+  const weight = {};
+  baseEdges.forEach(e => {
+    const fa = baseNodes[e.s].file, fb = baseNodes[e.t].file;
+    if (fa === fb) return;
+    const key = idx[fa] + ":" + idx[fb] + ":" + e.kind;
+    weight[key] = (weight[key] || 0) + 1;
+  });
+  const fedges = Object.entries(weight).map(([key, w]) => {
+    const [s, t, kind] = key.split(":");
+    return { s: +s, t: +t, kind, type: w > 1 ? w + " calls" : null, w };
+  });
+  fedges.forEach(e => { fnodes[e.s].deg += e.w; fnodes[e.t].deg += e.w; });
+  fnodes.forEach(n => {
+    n.r = 9 + Math.min(18, 3.2 * Math.sqrt((byFile[n.id] || []).length));
+  });
+  return { nodes: fnodes, edges: fedges };
+}
+
+// --- active view state ---------------------------------------------------------
+let currentView = "components";
+let nodes = baseNodes, edges = baseEdges;
+let outAdj = [], inAdj = [];
+function rebuildAdjacency() {
+  outAdj = nodes.map(() => []); inAdj = nodes.map(() => []);
+  edges.forEach((e, ei) => { outAdj[e.s].push({ n: e.t, ei }); inAdj[e.t].push({ n: e.s, ei }); });
+}
+rebuildAdjacency();
+
+const LAYER_GAP = 340;
+function layerX(n) { return 160 + n.layer * LAYER_GAP * LK; }
+
+function setView(name) {
+  currentView = name;
+  select(null);
+  hovered = null;
+  if (name === "files") {
+    const v = buildFilesView();
+    nodes = v.nodes; edges = v.edges;
+  } else {
+    nodes = baseNodes; edges = baseEdges;
+  }
+  if (name === "layers") {
+    nodes.forEach(n => { n.x = layerX(n); n.vx = 0; });
+  }
+  rebuildAdjacency();
+  buildLegend();
+  userAdjustedView = false;
+  frameCount = 0;
+  alpha = 1;
+  document.querySelectorAll(".vw").forEach(b =>
+    b.classList.toggle("active", b.dataset.view === name));
+}
+document.querySelectorAll(".vw").forEach(b =>
+  b.addEventListener("click", () => setView(b.dataset.view)));
 
 const kindVisible = {};
 Object.keys(KIND_COLORS).forEach(k => kindVisible[k] = true);
@@ -222,12 +325,13 @@ let alpha = 1;
 function kick() { alpha = Math.max(alpha, 0.35); }
 
 // --- physics ----------------------------------------------------------------
+const fileCenters = {};
 function step() {
   if (alpha < 0.005) return;
   alpha *= 0.985;
   const vis = nodes.filter(n => kindVisible[n.kind]);
-  // repulsion — exact for small graphs, sampled for large ones so a
-  // several-thousand-node repo stays interactive
+  // repulsion — exact for small graphs, sampled for large ones
+  const rep = 2600 * SP;
   if (vis.length > 1200) {
     const K = 25, boost = 3;
     for (let i = 0; i < vis.length; i++) {
@@ -239,8 +343,8 @@ function step() {
         let dx = a.x - b.x, dy = a.y - b.y;
         let d2 = dx * dx + dy * dy;
         if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
-        if (d2 > 250000) continue;
-        const f = (2600 * boost / d2) * alpha;
+        if (d2 > 250000 * SP) continue;
+        const f = (rep * boost / d2) * alpha;
         const d = Math.sqrt(d2);
         a.vx += (dx / d) * f; a.vy += (dy / d) * f;
       }
@@ -253,8 +357,8 @@ function step() {
         let dx = a.x - b.x, dy = a.y - b.y;
         let d2 = dx * dx + dy * dy;
         if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
-        if (d2 > 250000) continue;
-        const f = (2600 / d2) * alpha;
+        if (d2 > 250000 * SP) continue;
+        const f = (rep / d2) * alpha;
         const d = Math.sqrt(d2);
         const fx = (dx / d) * f, fy = (dy / d) * f;
         if (!a.fixed) { a.vx += fx; a.vy += fy; }
@@ -262,61 +366,63 @@ function step() {
       }
     }
   }
-  // springs — long enough that connected clusters don't collapse together
+  // springs
   edges.forEach(e => {
     const a = nodes[e.s], b = nodes[e.t];
     if (!kindVisible[a.kind] || !kindVisible[b.kind]) return;
     const dx = b.x - a.x, dy = b.y - a.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 1;
-    const rest = a.file === b.file ? 70 : 380;
+    const base = currentView === "files" ? 260
+      : (a.file === b.file ? 70 : 380);
+    const rest = base * LK;
     const f = (d - rest) * 0.006 * alpha;
     const fx = (dx / d) * f, fy = (dy / d) * f;
     if (!a.fixed) { a.vx += fx; a.vy += fy; }
     if (!b.fixed) { b.vx -= fx; b.vy -= fy; }
   });
-  // same-file cohesion
-  Object.values(fileCenters).forEach(c => { c.x = 0; c.y = 0; c.count = 0; });
+  // same-file cohesion + cluster separation (components view only)
+  Object.keys(fileCenters).forEach(k => delete fileCenters[k]);
   vis.forEach(n => {
-    const c = fileCenters[n.file];
+    const c = fileCenters[n.file] = fileCenters[n.file] || { x: 0, y: 0, count: 0 };
     c.x += n.x; c.y += n.y; c.count++;
   });
-  // cluster-vs-cluster separation: file hulls repel each other so groups
-  // stay visually distinct instead of piling onto the center
-  const centerList = Object.entries(fileCenters).filter(([, c]) => c.count > 0);
-  for (let i = 0; i < centerList.length; i++) {
-    for (let j = i + 1; j < centerList.length; j++) {
-      const [fa, a] = centerList[i], [fb, b] = centerList[j];
-      const ax = a.x / a.count, ay = a.y / a.count;
-      const bx = b.x / b.count, by = b.y / b.count;
-      let dx = ax - bx, dy = ay - by;
-      let d = Math.hypot(dx, dy);
-      if (d < 1) { dx = 1; dy = 0; d = 1; }
-      const ra = 34 + 13 * Math.sqrt(a.count), rb = 34 + 13 * Math.sqrt(b.count);
-      const minD = ra + rb + 150;
-      if (d < minD) {
-        const f = ((minD - d) / d) * 0.07 * alpha;
-        const fx = dx * f, fy = dy * f;
-        vis.forEach(n => {
-          if (n.fixed) return;
-          if (n.file === fa) { n.vx += fx; n.vy += fy; }
-          else if (n.file === fb) { n.vx -= fx; n.vy -= fy; }
-        });
+  if (currentView === "components") {
+    const centerList = Object.entries(fileCenters).filter(([, c]) => c.count > 0);
+    for (let i = 0; i < centerList.length; i++) {
+      for (let j = i + 1; j < centerList.length; j++) {
+        const [fa, a] = centerList[i], [fb, b] = centerList[j];
+        const ax = a.x / a.count, ay = a.y / a.count;
+        const bx = b.x / b.count, by = b.y / b.count;
+        let dx = ax - bx, dy = ay - by;
+        let d = Math.hypot(dx, dy);
+        if (d < 1) { dx = 1; dy = 0; d = 1; }
+        const ra = 34 + 13 * Math.sqrt(a.count), rb = 34 + 13 * Math.sqrt(b.count);
+        const minD = ra + rb + 150 * SP;
+        if (d < minD) {
+          const f = ((minD - d) / d) * 0.07 * alpha;
+          const fx = dx * f, fy = dy * f;
+          vis.forEach(n => {
+            if (n.fixed) return;
+            if (n.file === fa) { n.vx += fx; n.vy += fy; }
+            else if (n.file === fb) { n.vx -= fx; n.vy -= fy; }
+          });
+        }
       }
     }
   }
   vis.forEach(n => {
     const c = fileCenters[n.file];
-    if (c.count > 1 && !n.fixed) {
+    if (currentView === "components" && c.count > 1 && !n.fixed) {
       n.vx += ((c.x / c.count) - n.x) * 0.025 * alpha;
       n.vy += ((c.y / c.count) - n.y) * 0.025 * alpha;
     }
     if (!n.fixed) {
-      // gentle gravity only — strong pull was piling every cluster onto center
-      n.vx += (W / 2 - n.x) * 0.0002 * alpha;
-      n.vy += (H / 2 - n.y) * 0.0002 * alpha;
+      n.vx += (W / 2 - n.x) * (0.0002 / SP) * alpha;
+      n.vy += (H / 2 - n.y) * (0.0002 / SP) * alpha;
       n.vx *= 0.86; n.vy *= 0.86;
       n.x += n.vx; n.y += n.vy;
     }
+    if (currentView === "layers") { n.x = layerX(n); n.vx = 0; }
   });
 }
 
@@ -334,11 +440,28 @@ function fitView() {
     if (n.y > maxY) maxY = n.y;
   });
   const pad = 90;
-  const sx = W / (maxX - minX + 2 * pad), sy = (H - 60) / (maxY - minY + 2 * pad);
-  view.scale = Math.min(1.4, Math.max(0.12, Math.min(sx, sy)));
+  const sx = W / (maxX - minX + 2 * pad), sy = (H - 110) / (maxY - minY + 2 * pad);
+  view.scale = Math.min(1.4, Math.max(0.08, Math.min(sx, sy)));
   view.x = W / 2 - ((minX + maxX) / 2) * view.scale;
-  view.y = (H + 52) / 2 - ((minY + maxY) / 2) * view.scale;
+  view.y = (H + 96) / 2 - ((minY + maxY) / 2) * view.scale;
 }
+
+// --- transitive tracing --------------------------------------------------------
+function traceFrom(start) {
+  const tracedNodes = new Set([start]), tracedEdges = new Set();
+  [outAdj, inAdj].forEach(adj => {
+    const frontier = [start], visited = new Set([start]);
+    while (frontier.length) {
+      const cur = frontier.pop();
+      adj[cur].forEach(({ n, ei }) => {
+        tracedEdges.add(ei); tracedNodes.add(n);
+        if (!visited.has(n)) { visited.add(n); frontier.push(n); }
+      });
+    }
+  });
+  return { nodes: tracedNodes, edges: tracedEdges };
+}
+let traced = null;
 
 // --- rendering ---------------------------------------------------------------
 let hovered = null, selected = null, query = "";
@@ -350,38 +473,56 @@ function draw() {
   ctx.translate(view.x, view.y);
   ctx.scale(view.scale, view.scale);
 
-  // file cluster hulls: same-file components render as one visible unit
-  const groups = {};
-  nodes.forEach(n => {
-    if (!kindVisible[n.kind]) return;
-    (groups[n.file] = groups[n.file] || []).push(n);
-  });
-  Object.entries(groups).forEach(([file, members]) => {
-    if (members.length < 2) return;
-    let cx = 0, cy = 0;
-    members.forEach(m => { cx += m.x; cy += m.y; });
-    cx /= members.length; cy /= members.length;
-    let r = 0;
-    members.forEach(m => {
-      const d = Math.hypot(m.x - cx, m.y - cy) + m.r;
-      if (d > r) r = d;
+  // file cluster hulls (components view only)
+  if (currentView === "components") {
+    const groups = {};
+    nodes.forEach(n => {
+      if (!kindVisible[n.kind]) return;
+      (groups[n.file] = groups[n.file] || []).push(n);
     });
-    r += 20;
-    ctx.fillStyle = "rgba(90,110,170,0.08)";
-    ctx.strokeStyle = "rgba(90,110,170,0.28)";
-    ctx.lineWidth = 1 / view.scale;
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    if (view.scale > 0.45) {
-      ctx.fillStyle = "#7484b8";
-      ctx.font = `${12 / view.scale}px sans-serif`;
-      ctx.textAlign = "center";
-      ctx.fillText(file, cx, cy - r - 6 / view.scale);
-      ctx.textAlign = "left";
-    }
-  });
+    Object.entries(groups).forEach(([file, members]) => {
+      if (members.length < 2) return;
+      let cx = 0, cy = 0;
+      members.forEach(m => { cx += m.x; cy += m.y; });
+      cx /= members.length; cy /= members.length;
+      let r = 0;
+      members.forEach(m => {
+        const d = Math.hypot(m.x - cx, m.y - cy) + rad(m);
+        if (d > r) r = d;
+      });
+      r += 20;
+      ctx.fillStyle = "rgba(90,110,170,0.08)";
+      ctx.strokeStyle = "rgba(90,110,170,0.28)";
+      ctx.lineWidth = 1 / view.scale;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      if (view.scale > 0.45) {
+        ctx.fillStyle = "#7484b8";
+        ctx.font = `${12 / view.scale}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText(file, cx, cy - r - 6 / view.scale);
+        ctx.textAlign = "left";
+      }
+    });
+  }
 
-  // Selected node: highlight the full transitive trace (upstream + downstream).
-  // Hover only: highlight 1-hop neighbors.
+  // layer guides (layers view only)
+  if (currentView === "layers") {
+    const maxLayer = Math.max(...nodes.map(n => n.layer), 0);
+    ctx.textAlign = "center";
+    for (let l = 0; l <= maxLayer; l++) {
+      const x = 160 + l * LAYER_GAP * LK;
+      ctx.strokeStyle = "rgba(90,110,170,0.12)";
+      ctx.lineWidth = 1 / view.scale;
+      ctx.beginPath(); ctx.moveTo(x, -100000); ctx.lineTo(x, 100000); ctx.stroke();
+      ctx.fillStyle = "#56618a";
+      ctx.font = `${12 / view.scale}px sans-serif`;
+      const wy = (110 - view.y) / view.scale;
+      ctx.fillText("depth " + l, x, wy);
+    }
+    ctx.textAlign = "left";
+  }
+
+  // Selected node: highlight the full transitive trace. Hover: 1-hop.
   const focus = selected !== null ? selected : hovered;
   const neighbor = new Set();
   if (focus !== null && traced === null) {
@@ -400,15 +541,16 @@ function draw() {
     if (!kindVisible[a.kind] || !kindVisible[b.kind]) return;
     const hot = edgeHot(e, ei);
     const dimmed = focus !== null && !hot;
+    const baseW = 0.8 + (e.w ? Math.min(4, Math.sqrt(e.w) - 1) : 0);
     ctx.strokeStyle = hot && focus !== null ? "#e9c46a"
       : dimmed ? "rgba(120,140,190,0.08)" : "rgba(120,140,190,0.28)";
-    ctx.lineWidth = ((hot && focus !== null) ? 1.8 : 0.8) / view.scale;
+    ctx.lineWidth = ((hot && focus !== null) ? baseW + 1 : baseW) / view.scale;
     if (e.kind === "construct") ctx.setLineDash([5 / view.scale, 4 / view.scale]);
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     ctx.setLineDash([]);
     // arrowhead
     const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
-    const tx = b.x - (dx / d) * (b.r + 4), ty = b.y - (dy / d) * (b.r + 4);
+    const tx = b.x - (dx / d) * (rad(b) + 4), ty = b.y - (dy / d) * (rad(b) + 4);
     const ang = Math.atan2(dy, dx), s = 5 / Math.sqrt(view.scale);
     ctx.fillStyle = ctx.strokeStyle;
     ctx.beginPath();
@@ -416,7 +558,7 @@ function draw() {
     ctx.lineTo(tx - s * Math.cos(ang - 0.4), ty - s * Math.sin(ang - 0.4));
     ctx.lineTo(tx - s * Math.cos(ang + 0.4), ty - s * Math.sin(ang + 0.4));
     ctx.fill();
-    // data-type label: what flows back along this edge
+    // data-type / weight label
     if (e.type && !dimmed && (view.scale > 1.3 || hot)) {
       ctx.fillStyle = e.kind === "construct" ? "#b794f4" : "#8ea6d8";
       ctx.font = `${10 / view.scale}px sans-serif`;
@@ -430,21 +572,24 @@ function draw() {
     ctx.globalAlpha = dim ? 0.16 : 1;
     ctx.fillStyle = KIND_COLORS[n.kind] || KIND_COLORS.unknown;
     ctx.beginPath();
+    const r = rad(n);
     if (n.kind === "type") {
-      const r = n.r;
       ctx.rect(n.x - r, n.y - r, r * 2, r * 2);
     } else {
-      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
     }
     ctx.fill();
     if (i === selected) {
       ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 / view.scale; ctx.stroke();
     }
-    if (view.scale > 0.9 && !dim && (n.deg > 2 || view.scale > 1.6 || i === hovered)) {
+    const labelAlways = currentView !== "components";
+    if (view.scale > (labelAlways ? 0.3 : 0.9) && !dim &&
+        (labelAlways || n.deg > 2 || view.scale > 1.6 || i === hovered)) {
       ctx.fillStyle = "#c8d3ea";
       ctx.font = `${11 / view.scale}px sans-serif`;
-      const label = n.id.split(".").slice(-2).join(".");
-      ctx.fillText(label, n.x + n.r + 3 / view.scale, n.y + 3 / view.scale);
+      const label = currentView === "files" ? n.id
+        : n.id.split(".").slice(-2).join(".");
+      ctx.fillText(label, n.x + r + 3 / view.scale, n.y + 3 / view.scale);
     }
     ctx.globalAlpha = 1;
   });
@@ -454,7 +599,6 @@ function draw() {
 function frame() {
   step();
   frameCount++;
-  // fit early (seeded layout) and again once roughly settled
   if (!userAdjustedView && (frameCount === 5 || frameCount === 200)) fitView();
   draw();
   requestAnimationFrame(frame);
@@ -471,7 +615,8 @@ function pick(px, py) {
     const n = nodes[i];
     if (!kindVisible[n.kind]) continue;
     const dx = p.x - n.x, dy = p.y - n.y;
-    if (dx * dx + dy * dy <= (n.r + 3) * (n.r + 3)) return i;
+    const r = rad(n) + 3;
+    if (dx * dx + dy * dy <= r * r) return i;
   }
   return null;
 }
@@ -502,8 +647,9 @@ window.addEventListener("mousemove", ev => {
       tooltip.style.display = "block";
       tooltip.style.left = (ev.clientX + 14) + "px";
       tooltip.style.top = (ev.clientY + 14) + "px";
-      tooltip.textContent = `${n.id} — ${n.kind}` +
-        (n.effects.length ? ` [${n.effects.join(", ")}]` : "");
+      tooltip.textContent = n.members
+        ? `${n.id} — ${n.members.length} components`
+        : `${n.id} — ${n.kind}` + (n.effects.length ? ` [${n.effects.join(", ")}]` : "");
       canvas.style.cursor = "pointer";
     } else {
       tooltip.style.display = "none";
@@ -511,7 +657,7 @@ window.addEventListener("mousemove", ev => {
     }
   }
 });
-window.addEventListener("mouseup", ev => {
+window.addEventListener("mouseup", () => {
   if (dragNode !== null && !moved) select(dragNode);
   else if (panning && !moved) select(null);
   if (dragNode !== null) nodes[dragNode].fixed = false;
@@ -535,29 +681,41 @@ function select(i) {
   const panel = document.getElementById("detail");
   if (i === null) { panel.style.display = "none"; return; }
   const n = nodes[i];
-  const callers = edges.filter(e => e.t === i && e.kind === "call").map(e => nodes[e.s].id);
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
   const list = xs => xs.length
     ? "<dd>" + xs.map(esc).join("</dd><dd>") + "</dd>" : "<dd>—</dd>";
-  document.getElementById("detail-body").innerHTML = `
-    <h2>${esc(n.id)}</h2>
-    <dl>
-      <dt>kind</dt><dd>${esc(n.kind)}</dd>
-      <dt>purity</dt><dd>${n.purity == null ? "—" : n.purity}</dd>
-      <dt>signature</dt><dd>${esc(n.signature || "—")}</dd>
-      <dt>returns</dt>${list(n.outputs || [])}
-      <dt>effects</dt>${list(n.effects)}
-      <dt>inputs</dt>${list(n.inputs)}
-      <dt>calls</dt>${list(n.calls)}
-      <dt>constructs</dt>${list(n.constructs || [])}
-      <dt>called by</dt>${list(callers)}
-      <dt>trace</dt>${list(n.trace)}
-    </dl>`;
+  if (n.members) {
+    const outFiles = edges.filter(e => e.s === i).map(e => `${nodes[e.t].id} (${e.w})`);
+    const inFiles = edges.filter(e => e.t === i).map(e => `${nodes[e.s].id} (${e.w})`);
+    document.getElementById("detail-body").innerHTML = `
+      <h2>${esc(n.id)}</h2>
+      <dl>
+        <dt>calls into</dt>${list(outFiles)}
+        <dt>called from</dt>${list(inFiles)}
+        <dt>components (${n.members.length})</dt>${list(n.members)}
+      </dl>`;
+  } else {
+    const callers = edges.filter(e => e.t === i && e.kind === "call").map(e => nodes[e.s].id);
+    document.getElementById("detail-body").innerHTML = `
+      <h2>${esc(n.id)}</h2>
+      <dl>
+        <dt>kind</dt><dd>${esc(n.kind)}</dd>
+        <dt>purity</dt><dd>${n.purity == null ? "—" : n.purity}</dd>
+        <dt>signature</dt><dd>${esc(n.signature || "—")}</dd>
+        <dt>returns</dt>${list(n.outputs || [])}
+        <dt>effects</dt>${list(n.effects)}
+        <dt>inputs</dt>${list(n.inputs)}
+        <dt>calls</dt>${list(n.calls)}
+        <dt>constructs</dt>${list(n.constructs || [])}
+        <dt>called by</dt>${list(callers)}
+        <dt>trace</dt>${list(n.trace)}
+      </dl>`;
+  }
   panel.style.display = "block";
 }
 document.getElementById("close").addEventListener("click", () => select(null));
 
-// --- search + legend -----------------------------------------------------------
+// --- search, fit, sliders, legend ----------------------------------------------
 document.getElementById("search").addEventListener("input", ev => {
   query = ev.target.value.trim().toLowerCase();
 });
@@ -570,22 +728,39 @@ window.addEventListener("keydown", ev => {
     fitView();
   }
 });
-const legend = document.getElementById("legend");
-const counts = {};
-nodes.forEach(n => counts[n.kind] = (counts[n.kind] || 0) + 1);
-Object.entries(KIND_COLORS).forEach(([kind, color]) => {
-  if (!counts[kind]) return;
-  const el = document.createElement("div");
-  el.className = "lg";
-  el.innerHTML = `<span class="dot" style="background:${color}"></span>` +
-    `${kind} (${counts[kind]})`;
-  el.addEventListener("click", () => {
-    kindVisible[kind] = !kindVisible[kind];
-    el.classList.toggle("off", !kindVisible[kind]);
-    kick();
-  });
-  legend.appendChild(el);
+document.getElementById("s-spacing").addEventListener("input", ev => {
+  SP = +ev.target.value; kick();
+  if (!userAdjustedView) fitView();
 });
+document.getElementById("s-links").addEventListener("input", ev => {
+  LK = +ev.target.value; kick();
+  if (currentView === "layers") nodes.forEach(n => { n.x = layerX(n); });
+  if (!userAdjustedView) fitView();
+});
+document.getElementById("s-size").addEventListener("input", ev => {
+  SZ = +ev.target.value;
+});
+
+const legend = document.getElementById("legend");
+function buildLegend() {
+  legend.innerHTML = "";
+  const counts = {};
+  nodes.forEach(n => { counts[n.kind] = (counts[n.kind] || 0) + 1; });
+  Object.entries(KIND_COLORS).forEach(([kind, color]) => {
+    if (!counts[kind]) return;
+    const el = document.createElement("div");
+    el.className = "lg" + (kindVisible[kind] ? "" : " off");
+    el.innerHTML = `<span class="dot" style="background:${color}"></span>` +
+      `${kind} (${counts[kind]})`;
+    el.addEventListener("click", () => {
+      kindVisible[kind] = !kindVisible[kind];
+      el.classList.toggle("off", !kindVisible[kind]);
+      kick();
+    });
+    legend.appendChild(el);
+  });
+}
+buildLegend();
 </script>
 </body>
 </html>
