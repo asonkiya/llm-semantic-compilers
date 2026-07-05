@@ -108,6 +108,9 @@ _TEMPLATE = """<!DOCTYPE html>
   #topbar h1 { font-size: 14px; margin: 0; font-weight: 600; color: #8ea6d8; }
   #search { flex: 0 0 260px; padding: 5px 10px; border-radius: 6px;
     border: 1px solid #2c3757; background: #171e30; color: #dbe2ef; }
+  #fit { padding: 5px 10px; border-radius: 6px; border: 1px solid #2c3757;
+    background: #171e30; color: #8ea6d8; cursor: pointer; }
+  #fit:hover { color: #dbe2ef; border-color: #46578a; }
   #legend { display: flex; gap: 10px; flex-wrap: wrap; }
   .lg { display: flex; gap: 5px; align-items: center; cursor: pointer;
     opacity: 1; user-select: none; }
@@ -134,6 +137,7 @@ _TEMPLATE = """<!DOCTYPE html>
 <div id="topbar">
   <h1>CGIR component graph</h1>
   <input id="search" placeholder="search components…" autocomplete="off">
+  <button id="fit" title="Zoom to fit (F)">⤢ fit</button>
   <div id="legend"></div>
 </div>
 <canvas id="canvas"></canvas>
@@ -165,10 +169,20 @@ window.addEventListener("resize", () => { resize(); kick(); });
 resize();
 
 // --- graph model -----------------------------------------------------------
+// Seed each file's components together on a ring of file-cluster slots, so
+// the layout starts separated instead of interleaved.
+const fileNames = [...new Set(DATA.nodes.map(n => n.file))];
+const fileSlot = {};
+fileNames.forEach((f, i) => { fileSlot[f] = i; });
+const ringR = Math.max(300, fileNames.length * 34);
 const nodes = DATA.nodes.map((n, i) => {
-  const angle = (i / Math.max(DATA.nodes.length, 1)) * Math.PI * 2;
-  const r = 120 + (i % 7) * 60;
-  return { ...n, x: W / 2 + Math.cos(angle) * r, y: H / 2 + Math.sin(angle) * r,
+  const slot = fileSlot[n.file];
+  const slotAngle = (slot / Math.max(fileNames.length, 1)) * Math.PI * 2;
+  const jitterAngle = (i * 2.399963) % (Math.PI * 2); // golden-angle spread
+  const jitterR = 20 + (i % 5) * 14;
+  return { ...n,
+           x: W / 2 + Math.cos(slotAngle) * ringR + Math.cos(jitterAngle) * jitterR,
+           y: H / 2 + Math.sin(slotAngle) * ringR + Math.sin(jitterAngle) * jitterR,
            vx: 0, vy: 0, deg: 0, fixed: false };
 });
 const edges = DATA.edges.map(e => ({ s: e.s, t: e.t, kind: e.kind || "call", type: e.type }));
@@ -248,36 +262,82 @@ function step() {
       }
     }
   }
-  // springs
+  // springs — long enough that connected clusters don't collapse together
   edges.forEach(e => {
     const a = nodes[e.s], b = nodes[e.t];
     if (!kindVisible[a.kind] || !kindVisible[b.kind]) return;
     const dx = b.x - a.x, dy = b.y - a.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 1;
-    const f = (d - 90) * 0.012 * alpha;
+    const rest = a.file === b.file ? 70 : 220;
+    const f = (d - rest) * 0.008 * alpha;
     const fx = (dx / d) * f, fy = (dy / d) * f;
     if (!a.fixed) { a.vx += fx; a.vy += fy; }
     if (!b.fixed) { b.vx -= fx; b.vy -= fy; }
   });
-  // same-file cohesion + center gravity
+  // same-file cohesion
   Object.values(fileCenters).forEach(c => { c.x = 0; c.y = 0; c.count = 0; });
   vis.forEach(n => {
     const c = fileCenters[n.file];
     c.x += n.x; c.y += n.y; c.count++;
   });
+  // cluster-vs-cluster separation: file hulls repel each other so groups
+  // stay visually distinct instead of piling onto the center
+  const centerList = Object.entries(fileCenters).filter(([, c]) => c.count > 0);
+  for (let i = 0; i < centerList.length; i++) {
+    for (let j = i + 1; j < centerList.length; j++) {
+      const [fa, a] = centerList[i], [fb, b] = centerList[j];
+      const ax = a.x / a.count, ay = a.y / a.count;
+      const bx = b.x / b.count, by = b.y / b.count;
+      let dx = ax - bx, dy = ay - by;
+      let d = Math.hypot(dx, dy);
+      if (d < 1) { dx = 1; dy = 0; d = 1; }
+      const ra = 34 + 13 * Math.sqrt(a.count), rb = 34 + 13 * Math.sqrt(b.count);
+      const minD = ra + rb + 40;
+      if (d < minD) {
+        const f = ((minD - d) / d) * 0.05 * alpha;
+        const fx = dx * f, fy = dy * f;
+        vis.forEach(n => {
+          if (n.fixed) return;
+          if (n.file === fa) { n.vx += fx; n.vy += fy; }
+          else if (n.file === fb) { n.vx -= fx; n.vy -= fy; }
+        });
+      }
+    }
+  }
   vis.forEach(n => {
     const c = fileCenters[n.file];
     if (c.count > 1 && !n.fixed) {
-      n.vx += ((c.x / c.count) - n.x) * 0.02 * alpha;
-      n.vy += ((c.y / c.count) - n.y) * 0.02 * alpha;
+      n.vx += ((c.x / c.count) - n.x) * 0.025 * alpha;
+      n.vy += ((c.y / c.count) - n.y) * 0.025 * alpha;
     }
     if (!n.fixed) {
-      n.vx += (W / 2 - n.x) * 0.0016 * alpha;
-      n.vy += (H / 2 - n.y) * 0.0016 * alpha;
+      // gentle gravity only — strong pull was piling every cluster onto center
+      n.vx += (W / 2 - n.x) * 0.0004 * alpha;
+      n.vy += (H / 2 - n.y) * 0.0004 * alpha;
       n.vx *= 0.86; n.vy *= 0.86;
       n.x += n.vx; n.y += n.vy;
     }
   });
+}
+
+// --- fit view ----------------------------------------------------------------
+let userAdjustedView = false;
+let frameCount = 0;
+function fitView() {
+  const vis = nodes.filter(n => kindVisible[n.kind]);
+  if (!vis.length) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  vis.forEach(n => {
+    if (n.x < minX) minX = n.x;
+    if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y;
+    if (n.y > maxY) maxY = n.y;
+  });
+  const pad = 90;
+  const sx = W / (maxX - minX + 2 * pad), sy = (H - 60) / (maxY - minY + 2 * pad);
+  view.scale = Math.min(1.4, Math.max(0.12, Math.min(sx, sy)));
+  view.x = W / 2 - ((minX + maxX) / 2) * view.scale;
+  view.y = (H + 52) / 2 - ((minY + maxY) / 2) * view.scale;
 }
 
 // --- rendering ---------------------------------------------------------------
@@ -391,7 +451,14 @@ function draw() {
   ctx.restore();
 }
 
-function frame() { step(); draw(); requestAnimationFrame(frame); }
+function frame() {
+  step();
+  frameCount++;
+  // fit early (seeded layout) and again once roughly settled
+  if (!userAdjustedView && (frameCount === 5 || frameCount === 200)) fitView();
+  draw();
+  requestAnimationFrame(frame);
+}
 requestAnimationFrame(frame);
 
 // --- interactions ------------------------------------------------------------
@@ -427,6 +494,7 @@ window.addEventListener("mousemove", ev => {
   } else if (panning) {
     view.x += ev.clientX - last.x; view.y += ev.clientY - last.y;
     last = { x: ev.clientX, y: ev.clientY }; moved = true;
+    userAdjustedView = true;
   } else {
     hovered = pick(ev.clientX, ev.clientY);
     if (hovered !== null) {
@@ -452,9 +520,10 @@ window.addEventListener("mouseup", ev => {
 });
 canvas.addEventListener("wheel", ev => {
   ev.preventDefault();
+  userAdjustedView = true;
   const factor = Math.exp(-ev.deltaY * 0.0012);
   const p = toWorld(ev.clientX, ev.clientY);
-  view.scale = Math.min(6, Math.max(0.15, view.scale * factor));
+  view.scale = Math.min(6, Math.max(0.08, view.scale * factor));
   view.x = ev.clientX - p.x * view.scale;
   view.y = ev.clientY - p.y * view.scale;
 }, { passive: false });
@@ -491,6 +560,15 @@ document.getElementById("close").addEventListener("click", () => select(null));
 // --- search + legend -----------------------------------------------------------
 document.getElementById("search").addEventListener("input", ev => {
   query = ev.target.value.trim().toLowerCase();
+});
+document.getElementById("fit").addEventListener("click", () => {
+  userAdjustedView = false;
+  fitView();
+});
+window.addEventListener("keydown", ev => {
+  if (ev.key === "f" && document.activeElement !== document.getElementById("search")) {
+    fitView();
+  }
 });
 const legend = document.getElementById("legend");
 const counts = {};
