@@ -26,17 +26,28 @@ from pathlib import Path
 from cgir.ir.component_spec import ComponentSpec
 
 
-def write(out_dir: Path, specs: list[ComponentSpec]) -> Path:
-    """Write ``<out_dir>/viz.html`` and return its path."""
+def write(
+    out_dir: Path,
+    specs: list[ComponentSpec],
+    arg_flows: dict[str, list[dict[str, object]]] | None = None,
+) -> Path:
+    """Write ``<out_dir>/viz.html`` and return its path.
+
+    ``arg_flows`` (from :mod:`cgir.analyses.param_flow`, keyed by spec id)
+    adds caller→callee argument edges typed by the parameter annotation.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    data = _build_data(specs)
+    data = _build_data(specs, arg_flows)
     html = _TEMPLATE.replace("__CGIR_JSON__", json.dumps(data, sort_keys=True))
     path = out_dir / "viz.html"
     path.write_text(html)
     return path
 
 
-def _build_data(specs: list[ComponentSpec]) -> dict[str, object]:
+def _build_data(
+    specs: list[ComponentSpec],
+    arg_flows: dict[str, list[dict[str, object]]] | None = None,
+) -> dict[str, object]:
     index_of = {spec.id: i for i, spec in enumerate(specs)}
     nodes = []
     for spec in specs:
@@ -100,15 +111,31 @@ def _build_data(specs: list[ComponentSpec]) -> dict[str, object]:
                     "type": type_name.rsplit(".", 1)[-1],
                 }
             )
+    if arg_flows:
+        spec_by_id = {spec.id: spec for spec in specs}
+        for caller_id, entries in arg_flows.items():
+            src = index_of.get(caller_id)
+            caller = spec_by_id.get(caller_id)
+            if src is None or caller is None:
+                continue
+            annotations = dict(_param_items(caller.signature))
+            for entry in entries:
+                dst = index_of.get(str(entry.get("callee")))
+                if dst is None:
+                    continue
+                raw_params = entry.get("params")
+                params = [str(p) for p in raw_params] if isinstance(raw_params, list) else []
+                labels = [annotations.get(p) or p for p in params]
+                edges.append({"s": src, "t": dst, "kind": "arg", "type": ", ".join(labels)})
     return {"nodes": nodes, "edges": edges}
 
 
-def _param_types(signature: str | None) -> list[str]:
-    """Best-effort parameter annotations from a rendered signature.
+def _param_items(signature: str | None) -> list[tuple[str, str | None]]:
+    """Best-effort ``(name, annotation)`` pairs from a rendered signature.
 
     ``f(price: float, table: dict[str, int], x=1) -> float`` gives
-    ``["float", "dict[str, int]", "?"]`` — bracket-aware comma split,
-    defaults stripped, unannotated params marked ``?``.
+    ``[("price", "float"), ("table", "dict[str, int]"), ("x", None)]`` —
+    bracket-aware comma split, defaults stripped.
     """
     if not signature or "(" not in signature or ")" not in signature:
         return []
@@ -141,12 +168,18 @@ def _param_types(signature: str | None) -> list[str]:
         else:
             current += ch
     parts.append(current)
-    types: list[str] = []
+    items: list[tuple[str, str | None]] = []
     for part in parts:
-        _, _, annotation = part.partition(":")
+        name, _, annotation = part.partition(":")
+        name = name.split("=", 1)[0].strip().lstrip("*")
         annotation = annotation.split("=", 1)[0].strip()
-        types.append(annotation or "?")
-    return types
+        items.append((name, annotation or None))
+    return items
+
+
+def _param_types(signature: str | None) -> list[str]:
+    """Annotation list from :func:`_param_items`; unannotated marked ``?``."""
+    return [annotation or "?" for _, annotation in _param_items(signature)]
 
 
 _TEMPLATE = """<!DOCTYPE html>
@@ -273,7 +306,11 @@ const baseNodes = DATA.nodes.map((n, i) => {
   const p = seedPos(fileNames.length, fileSlot[n.file], i);
   return { ...n, x: p.x, y: p.y, vx: 0, vy: 0, deg: 0, fixed: false, layer: 0 };
 });
-const baseEdges = DATA.edges.map(e => ({ s: e.s, t: e.t, kind: e.kind || "call", type: e.type, w: 1 }));
+const allEdges = DATA.edges.map(e => ({ s: e.s, t: e.t, kind: e.kind || "call", type: e.type, w: 1 }));
+// PDG-derived arg edges only appear in the Flow view; the structural views
+// use call/construct edges so pairs aren't double-drawn.
+const argEdges = allEdges.filter(e => e.kind === "arg");
+const baseEdges = allEdges.filter(e => e.kind !== "arg");
 baseEdges.forEach(e => { baseNodes[e.s].deg++; baseNodes[e.t].deg++; });
 baseNodes.forEach(n => { n.r = 5 + Math.min(11, Math.sqrt(n.deg) * 2.4); });
 
@@ -310,6 +347,8 @@ baseEdges.forEach(e => {
   }
 });
 {
+  // Stage layout ignores arg edges (they run opposite the return edges and
+  // would cycle every caller/callee pair).
   baseNodes.forEach(n => { n.flowLayer = 0; });
   for (let pass = 0; pass < 24; pass++) {
     let changed = false;
@@ -322,6 +361,7 @@ baseEdges.forEach(e => {
     if (!changed) break;
   }
 }
+argEdges.forEach(e => flowEdges.push(e));
 
 function typeColor(t) {
   let h = 0;
@@ -636,8 +676,9 @@ function draw() {
     const baseW = 0.8 + (e.w ? Math.min(4, Math.sqrt(e.w) - 1) : 0);
     let idleColor = "rgba(120,140,190,0.28)";
     if (currentView === "flow") {
-      // data edges carry their type's color; commands stay faint gray
-      idleColor = e.kind === "data" && e.type ? typeColor(e.type) : "rgba(120,140,190,0.18)";
+      // data/arg edges carry their type's color; commands stay faint gray
+      idleColor = (e.kind === "data" || e.kind === "arg") && e.type
+        ? typeColor(e.type) : "rgba(120,140,190,0.18)";
     }
     ctx.strokeStyle = hot && focus !== null ? "#e9c46a"
       : dimmed ? "rgba(120,140,190,0.08)" : idleColor;
@@ -645,6 +686,8 @@ function draw() {
     ctx.lineWidth = ((hot && focus !== null) ? baseW + 1 : baseW) / view.scale;
     if (e.kind === "construct" || e.kind === "command") {
       ctx.setLineDash([5 / view.scale, 4 / view.scale]);
+    } else if (e.kind === "arg") {
+      ctx.setLineDash([2 / view.scale, 3 / view.scale]);
     }
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     ctx.setLineDash([]);
@@ -662,7 +705,8 @@ function draw() {
     ctx.fill();
     // data-type / weight label
     if (e.type && !dimmed && (view.scale > 1.3 || hot || currentView === "flow")) {
-      ctx.fillStyle = currentView === "flow" && e.kind === "data" ? typeColor(e.type)
+      ctx.fillStyle = currentView === "flow" && (e.kind === "data" || e.kind === "arg")
+        ? typeColor(e.type)
         : e.kind === "construct" ? "#b794f4" : "#8ea6d8";
       ctx.font = `${10 / view.scale}px sans-serif`;
       ctx.fillText(e.type, (a.x + b.x) / 2 + 4 / view.scale, (a.y + b.y) / 2 - 4 / view.scale);

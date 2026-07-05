@@ -13,6 +13,7 @@ from typing import Annotated
 
 import typer
 
+from cgir.analyses import param_flow
 from cgir.export import graphml as graphml_export
 from cgir.export import html_viz
 from cgir.export.json_export import read_specs
@@ -91,7 +92,7 @@ def viz(
     """Render the component graph — a self-contained HTML page or Mermaid text."""
     specs = _load_specs(index_dir)
     if fmt == "html":
-        path = html_viz.write(index_dir, specs)
+        path = html_viz.write(index_dir, specs, arg_flows=_arg_flows(index_dir))
         typer.echo(f"Wrote {path} — open it in a browser.")
     elif fmt == "mermaid":
         typer.echo(render_call_graph(specs), nl=False)
@@ -131,6 +132,27 @@ def _load_graph(index_dir: Path) -> RepoGraph:
     if not graph_path.exists():
         raise typer.BadParameter(f"No graph at {graph_path}; run `cgir scan` first")
     return RepoGraph.from_jsonable(json.loads(graph_path.read_text()))
+
+
+def _arg_flows(index_dir: Path) -> dict[str, list[dict[str, object]]] | None:
+    """PDG-derived param→callee flows, re-keyed by spec id (qualname)."""
+    graph_path = index_dir / "repo_graph.json"
+    if not graph_path.exists():
+        return None
+    graph = RepoGraph.from_jsonable(json.loads(graph_path.read_text()))
+    flows = param_flow.compute(graph)
+
+    def qual(node_id: str) -> str:
+        node = graph.get_node(node_id)
+        q = node.attrs.get("qualname") if node.attrs else None
+        return str(q) if isinstance(q, str) else node.name
+
+    return {
+        qual(caller): [
+            {"callee": qual(str(entry["callee"])), "params": entry["params"]} for entry in entries
+        ]
+        for caller, entries in flows.items()
+    }
 
 
 def _load_specs(index_dir: Path) -> list[ComponentSpec]:

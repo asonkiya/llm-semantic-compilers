@@ -15,3 +15,22 @@ def test_orchestrator_calls_pricing(python_sample_repo: Path) -> None:
     add_tax_id = "func:pricing.add_tax"
     callees = {e.dst for e in graph.out_edges(quote_id, EdgeKind.CALLS)}
     assert add_tax_id in callees
+
+
+def test_calls_edge_records_argument_names_and_line(python_sample_repo: Path) -> None:
+    """Sprint 15: CALLS edges carry the call site's arg identifiers + line.
+
+    Feeds param-flow analysis (which caller params reach which callee).
+    The fixture's orchestrator.quote body is `return add_tax(price, 0.08)`.
+    """
+    graph = TreeSitterSource().ingest(python_sample_repo)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, python_sample_repo)
+
+    [edge] = (
+        e
+        for e in graph.out_edges("func:orchestrator.quote", EdgeKind.CALLS)
+        if e.dst == "func:pricing.add_tax"
+    )
+    assert edge.attrs.get("args") == ["price"]
+    assert isinstance(edge.attrs.get("line"), int)

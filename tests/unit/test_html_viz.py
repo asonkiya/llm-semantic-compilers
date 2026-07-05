@@ -105,6 +105,25 @@ def test_param_types_empty_without_signature(tmp_path: Path) -> None:
     assert data["nodes"][0]["param_types"] == []
 
 
+def test_arg_flow_edges_embedded(tmp_path: Path) -> None:
+    """Sprint 15: PDG-derived arg edges (caller -> callee, typed by param)."""
+    callee = _spec("m.save")
+    caller = _spec("m.create", calls=["m.save"])
+    caller.signature = "create(db: Session, payload: dict) -> None"
+    arg_flows = {"m.create": [{"callee": "m.save", "params": ["db"]}]}
+    html = write(tmp_path, [callee, caller], arg_flows=arg_flows).read_text()
+    match = re.search(r"/\*CGIR_DATA\*/(.*?)/\*END_CGIR_DATA\*/", html, re.DOTALL)
+    assert match
+    data = json.loads(match.group(1))
+    arg_edges = [e for e in data["edges"] if e["kind"] == "arg"]
+    assert len(arg_edges) == 1
+    assert arg_edges[0]["type"] == "Session"
+    # direction: caller -> callee
+    ids = [n["id"] for n in data["nodes"]]
+    assert ids[arg_edges[0]["s"]] == "m.create"
+    assert ids[arg_edges[0]["t"]] == "m.save"
+
+
 def test_construct_edges_target_type_nodes(tmp_path: Path) -> None:
     """Constructs become dashed edges to synthetic type nodes."""
     spec = _spec("m.make")
