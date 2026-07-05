@@ -92,6 +92,19 @@ def test_call_edges_carry_kind_and_return_type(tmp_path: Path) -> None:
     assert edge["type"] == "float"
 
 
+def test_param_types_parsed_from_signature(tmp_path: Path) -> None:
+    """Flow view needs input types; parsed bracket-aware from the signature."""
+    spec = _spec("m.f")
+    spec.signature = "f(price: float, table: dict[str, int], x=1) -> float"
+    data = _data_island(tmp_path, [spec])
+    assert data["nodes"][0]["param_types"] == ["float", "dict[str, int]", "?"]
+
+
+def test_param_types_empty_without_signature(tmp_path: Path) -> None:
+    data = _data_island(tmp_path, [_spec("m.f")])
+    assert data["nodes"][0]["param_types"] == []
+
+
 def test_construct_edges_target_type_nodes(tmp_path: Path) -> None:
     """Constructs become dashed edges to synthetic type nodes."""
     spec = _spec("m.make")

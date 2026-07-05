@@ -51,6 +51,7 @@ def _build_data(specs: list[ComponentSpec]) -> dict[str, object]:
                 "calls": spec.calls,
                 "constructs": spec.constructs,
                 "outputs": spec.outputs,
+                "param_types": _param_types(spec.signature),
                 "file": file,
                 "trace": spec.trace,
                 "signature": spec.signature,
@@ -70,6 +71,7 @@ def _build_data(specs: list[ComponentSpec]) -> dict[str, object]:
                 "calls": [],
                 "constructs": [],
                 "outputs": [],
+                "param_types": [],
                 "file": "(types)",
                 "trace": [],
                 "signature": None,
@@ -99,6 +101,52 @@ def _build_data(specs: list[ComponentSpec]) -> dict[str, object]:
                 }
             )
     return {"nodes": nodes, "edges": edges}
+
+
+def _param_types(signature: str | None) -> list[str]:
+    """Best-effort parameter annotations from a rendered signature.
+
+    ``f(price: float, table: dict[str, int], x=1) -> float`` gives
+    ``["float", "dict[str, int]", "?"]`` — bracket-aware comma split,
+    defaults stripped, unannotated params marked ``?``.
+    """
+    if not signature or "(" not in signature or ")" not in signature:
+        return []
+    start = signature.index("(") + 1
+    end = len(signature)
+    depth = 0
+    for i in range(start, len(signature)):
+        ch = signature[i]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0 and ch == ")":
+                end = i
+                break
+            depth -= 1
+    inner = signature[start:end]
+    if not inner.strip():
+        return []
+    parts: list[str] = []
+    depth = 0
+    current = ""
+    for ch in inner:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += ch
+    parts.append(current)
+    types: list[str] = []
+    for part in parts:
+        _, _, annotation = part.partition(":")
+        annotation = annotation.split("=", 1)[0].strip()
+        types.append(annotation or "?")
+    return types
 
 
 _TEMPLATE = """<!DOCTYPE html>
@@ -162,6 +210,7 @@ _TEMPLATE = """<!DOCTYPE html>
     <button class="vw active" data-view="components">Components</button>
     <button class="vw" data-view="files">Files</button>
     <button class="vw" data-view="layers">Layers</button>
+    <button class="vw" data-view="flow">Flow</button>
   </div>
   <input id="search" placeholder="search…" autocomplete="off">
   <button id="fit" title="Zoom to fit (F)">⤢ fit</button>
@@ -242,6 +291,44 @@ baseNodes.forEach(n => { n.r = 5 + Math.min(11, Math.sqrt(n.deg) * 2.4); });
   }
 }
 
+// --- flow view: edges follow DATA, not calls ----------------------------------
+// A callee returning a value sends data back up: edge callee -> caller,
+// colored by the returned type. Void calls are "commands" (effects, thin
+// gray). Constructs reverse too: the type feeds the function that builds it.
+const flowEdges = [];
+baseEdges.forEach(e => {
+  if (e.kind === "construct") {
+    flowEdges.push({ s: e.t, t: e.s, kind: "data", type: e.type, w: 1 });
+    return;
+  }
+  const callee = baseNodes[e.t];
+  const rt = (callee.outputs && callee.outputs[0]) || null;
+  if (rt && rt !== "None") {
+    flowEdges.push({ s: e.t, t: e.s, kind: "data", type: rt, w: 1 });
+  } else {
+    flowEdges.push({ s: e.s, t: e.t, kind: "command", type: null, w: 1 });
+  }
+});
+{
+  baseNodes.forEach(n => { n.flowLayer = 0; });
+  for (let pass = 0; pass < 24; pass++) {
+    let changed = false;
+    flowEdges.forEach(e => {
+      if (baseNodes[e.t].flowLayer < baseNodes[e.s].flowLayer + 1) {
+        baseNodes[e.t].flowLayer = baseNodes[e.s].flowLayer + 1;
+        changed = true;
+      }
+    });
+    if (!changed) break;
+  }
+}
+
+function typeColor(t) {
+  let h = 0;
+  for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) % 360;
+  return `hsl(${h}, 62%, 64%)`;
+}
+
 // --- files view: one node per file, aggregated weighted edges -----------------
 function buildFilesView() {
   const byFile = {};
@@ -291,7 +378,9 @@ function rebuildAdjacency() {
 rebuildAdjacency();
 
 const LAYER_GAP = 340;
-function layerX(n) { return 160 + n.layer * LAYER_GAP * LK; }
+function isPinnedView() { return currentView === "layers" || currentView === "flow"; }
+function pinnedLayer(n) { return currentView === "flow" ? n.flowLayer : n.layer; }
+function layerX(n) { return 160 + pinnedLayer(n) * LAYER_GAP * LK; }
 
 function setView(name) {
   currentView = name;
@@ -300,10 +389,12 @@ function setView(name) {
   if (name === "files") {
     const v = buildFilesView();
     nodes = v.nodes; edges = v.edges;
+  } else if (name === "flow") {
+    nodes = baseNodes; edges = flowEdges;
   } else {
     nodes = baseNodes; edges = baseEdges;
   }
-  if (name === "layers") {
+  if (isPinnedView()) {
     nodes.forEach(n => { n.x = layerX(n); n.vx = 0; });
   }
   rebuildAdjacency();
@@ -422,7 +513,7 @@ function step() {
       n.vx *= 0.86; n.vy *= 0.86;
       n.x += n.vx; n.y += n.vy;
     }
-    if (currentView === "layers") { n.x = layerX(n); n.vx = 0; }
+    if (isPinnedView()) { n.x = layerX(n); n.vx = 0; }
   });
 }
 
@@ -505,9 +596,10 @@ function draw() {
     });
   }
 
-  // layer guides (layers view only)
-  if (currentView === "layers") {
-    const maxLayer = Math.max(...nodes.map(n => n.layer), 0);
+  // layer guides (pinned views)
+  if (isPinnedView()) {
+    const maxLayer = Math.max(...nodes.map(n => pinnedLayer(n)), 0);
+    const guideLabel = currentView === "flow" ? "stage " : "depth ";
     ctx.textAlign = "center";
     for (let l = 0; l <= maxLayer; l++) {
       const x = 160 + l * LAYER_GAP * LK;
@@ -517,7 +609,7 @@ function draw() {
       ctx.fillStyle = "#56618a";
       ctx.font = `${12 / view.scale}px sans-serif`;
       const wy = (110 - view.y) / view.scale;
-      ctx.fillText("depth " + l, x, wy);
+      ctx.fillText(guideLabel + l, x, wy);
     }
     ctx.textAlign = "left";
   }
@@ -542,15 +634,25 @@ function draw() {
     const hot = edgeHot(e, ei);
     const dimmed = focus !== null && !hot;
     const baseW = 0.8 + (e.w ? Math.min(4, Math.sqrt(e.w) - 1) : 0);
+    let idleColor = "rgba(120,140,190,0.28)";
+    if (currentView === "flow") {
+      // data edges carry their type's color; commands stay faint gray
+      idleColor = e.kind === "data" && e.type ? typeColor(e.type) : "rgba(120,140,190,0.18)";
+    }
     ctx.strokeStyle = hot && focus !== null ? "#e9c46a"
-      : dimmed ? "rgba(120,140,190,0.08)" : "rgba(120,140,190,0.28)";
+      : dimmed ? "rgba(120,140,190,0.08)" : idleColor;
+    ctx.globalAlpha = (currentView === "flow" && !dimmed && !(hot && focus !== null)) ? 0.6 : 1;
     ctx.lineWidth = ((hot && focus !== null) ? baseW + 1 : baseW) / view.scale;
-    if (e.kind === "construct") ctx.setLineDash([5 / view.scale, 4 / view.scale]);
+    if (e.kind === "construct" || e.kind === "command") {
+      ctx.setLineDash([5 / view.scale, 4 / view.scale]);
+    }
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
     // arrowhead
     const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
-    const tx = b.x - (dx / d) * (rad(b) + 4), ty = b.y - (dy / d) * (rad(b) + 4);
+    const bOffset = (currentView === "flow" && b._bw) ? Math.min(b._bw, b._bh) + 3 : rad(b) + 4;
+    const tx = b.x - (dx / d) * bOffset, ty = b.y - (dy / d) * bOffset;
     const ang = Math.atan2(dy, dx), s = 5 / Math.sqrt(view.scale);
     ctx.fillStyle = ctx.strokeStyle;
     ctx.beginPath();
@@ -559,8 +661,9 @@ function draw() {
     ctx.lineTo(tx - s * Math.cos(ang + 0.4), ty - s * Math.sin(ang + 0.4));
     ctx.fill();
     // data-type / weight label
-    if (e.type && !dimmed && (view.scale > 1.3 || hot)) {
-      ctx.fillStyle = e.kind === "construct" ? "#b794f4" : "#8ea6d8";
+    if (e.type && !dimmed && (view.scale > 1.3 || hot || currentView === "flow")) {
+      ctx.fillStyle = currentView === "flow" && e.kind === "data" ? typeColor(e.type)
+        : e.kind === "construct" ? "#b794f4" : "#8ea6d8";
       ctx.font = `${10 / view.scale}px sans-serif`;
       ctx.fillText(e.type, (a.x + b.x) / 2 + 4 / view.scale, (a.y + b.y) / 2 - 4 / view.scale);
     }
@@ -570,9 +673,39 @@ function draw() {
     if (!kindVisible[n.kind]) return;
     const dim = (query && !matches(n)) || (focus !== null && !nodeHot(i));
     ctx.globalAlpha = dim ? 0.16 : 1;
-    ctx.fillStyle = KIND_COLORS[n.kind] || KIND_COLORS.unknown;
-    ctx.beginPath();
+    const kindColor = KIND_COLORS[n.kind] || KIND_COLORS.unknown;
     const r = rad(n);
+    if (currentView === "flow" && n.kind !== "type") {
+      // transformation box: name + return type, bordered by kind
+      const name = n.id.split(".").slice(-1)[0];
+      const rt = (n.outputs && n.outputs[0]) || null;
+      ctx.font = "12px sans-serif";
+      const tw = ctx.measureText(name).width;
+      const rw = rt ? ctx.measureText("-> " + rt).width : 0;
+      const bw = Math.max(tw, rw) / 2 + 9;
+      const bh = rt ? 17 : 11;
+      n._bw = bw; n._bh = bh;
+      ctx.fillStyle = "#1a2238";
+      ctx.strokeStyle = kindColor;
+      ctx.lineWidth = i === selected ? 2.5 : 1.3;
+      ctx.beginPath();
+      ctx.roundRect(n.x - bw, n.y - bh, bw * 2, bh * 2, 5);
+      ctx.fill(); ctx.stroke();
+      ctx.textAlign = "center";
+      ctx.fillStyle = dim ? "#56618a" : "#dbe2ef";
+      ctx.fillText(name, n.x, n.y + (rt ? -2 : 4));
+      if (rt) {
+        ctx.font = "10px sans-serif";
+        ctx.fillStyle = typeColor(rt);
+        ctx.fillText("-> " + rt, n.x, n.y + 11);
+      }
+      ctx.textAlign = "left";
+      ctx.globalAlpha = 1;
+      return;
+    }
+    n._bw = null; n._bh = null;
+    ctx.fillStyle = kindColor;
+    ctx.beginPath();
     if (n.kind === "type") {
       ctx.rect(n.x - r, n.y - r, r * 2, r * 2);
     } else {
@@ -614,6 +747,10 @@ function pick(px, py) {
   for (let i = nodes.length - 1; i >= 0; i--) {
     const n = nodes[i];
     if (!kindVisible[n.kind]) continue;
+    if (currentView === "flow" && n._bw) {
+      if (Math.abs(p.x - n.x) <= n._bw + 3 && Math.abs(p.y - n.y) <= n._bh + 3) return i;
+      continue;
+    }
     const dx = p.x - n.x, dy = p.y - n.y;
     const r = rad(n) + 3;
     if (dx * dx + dy * dy <= r * r) return i;
