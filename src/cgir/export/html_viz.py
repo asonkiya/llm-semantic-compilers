@@ -428,8 +428,11 @@ function layerX(n) { return 160 + pinnedLayer(n) * LAYER_GAP * LK; }
 // columns wrap sideways, and unconnected nodes park in a labeled block
 // below instead of drifting to the fringes.
 let isolatedTop = null;
+let pinnedPitch = 44;
 function layoutPinned() {
-  const pitch = 36;
+  // flow boxes are ~34px tall; give them clear air between rows
+  const pitch = currentView === "flow" ? 54 : 44;
+  pinnedPitch = pitch;
   const maxRows = 40;
   const isolated = [], connected = [];
   nodes.forEach((n, i) => {
@@ -475,7 +478,7 @@ function layoutPinned() {
     byLayer[l].forEach((n, i) => {
       const col = Math.floor(i / maxRows);
       const row = i % maxRows;
-      n.x = layerX(n) + col * 180;
+      n.x = layerX(n) + col * 230;
       n.y = 200 + row * pitch;
       n.vx = 0; n.vy = 0;
     });
@@ -486,7 +489,7 @@ function layoutPinned() {
     const cols = Math.max(1, Math.ceil(Math.sqrt(isolated.length * 2)));
     isolated.sort((a, b) => (a.file + a.id).localeCompare(b.file + b.id));
     isolated.forEach((n, i) => {
-      n.x = 160 + (i % cols) * 190;
+      n.x = 160 + (i % cols) * 250;
       n.y = isolatedTop + Math.floor(i / cols) * pitch;
       n.vx = 0; n.vy = 0;
     });
@@ -669,6 +672,18 @@ let traced = null;
 let hovered = null, selected = null, query = "";
 function matches(n) { return query && n.id.toLowerCase().includes(query); }
 
+const short = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+// text with a dark halo so labels stay legible over edges
+function haloText(text, x, y, color, sizePx) {
+  ctx.font = `${sizePx}px sans-serif`;
+  ctx.strokeStyle = "rgba(15,20,32,0.85)";
+  ctx.lineWidth = sizePx / 3.5;
+  ctx.lineJoin = "round";
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+}
+
 function draw() {
   ctx.clearRect(0, 0, W, H);
   ctx.save();
@@ -698,10 +713,8 @@ function draw() {
       ctx.lineWidth = 1 / view.scale;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       if (view.scale > 0.45) {
-        ctx.fillStyle = "#7484b8";
-        ctx.font = `${12 / view.scale}px sans-serif`;
         ctx.textAlign = "center";
-        ctx.fillText(file, cx, cy - r - 6 / view.scale);
+        haloText(file, cx, cy - r - 6 / view.scale, "#8ea6d8", 12 / view.scale);
         ctx.textAlign = "left";
       }
     });
@@ -717,16 +730,12 @@ function draw() {
       ctx.strokeStyle = "rgba(90,110,170,0.12)";
       ctx.lineWidth = 1 / view.scale;
       ctx.beginPath(); ctx.moveTo(x, -100000); ctx.lineTo(x, 100000); ctx.stroke();
-      ctx.fillStyle = "#56618a";
-      ctx.font = `${12 / view.scale}px sans-serif`;
       const wy = (110 - view.y) / view.scale;
-      ctx.fillText(guideLabel + l, x, wy);
+      haloText(guideLabel + l, x, wy, "#7484b8", 12 / view.scale);
     }
     if (isolatedTop !== null) {
-      ctx.fillStyle = "#56618a";
-      ctx.font = `${12 / view.scale}px sans-serif`;
       ctx.textAlign = "left";
-      ctx.fillText("unconnected", 160, isolatedTop - 24);
+      haloText("unconnected", 160, isolatedTop - 24, "#7484b8", 12 / view.scale);
     }
     ctx.textAlign = "left";
   }
@@ -811,11 +820,11 @@ function draw() {
     const wantLabel = dense ? (hot || view.scale > 1.6)
       : (view.scale > 1.3 || hot || currentView === "flow");
     if (e.type && !dimmed && wantLabel) {
-      ctx.fillStyle = currentView === "flow" && (e.kind === "data" || e.kind === "arg")
+      const color = currentView === "flow" && (e.kind === "data" || e.kind === "arg")
         ? typeColor(e.type)
         : e.kind === "construct" ? "#b794f4" : "#8ea6d8";
-      ctx.font = `${10 / view.scale}px sans-serif`;
-      ctx.fillText(e.type, midX + 4 / view.scale, midY - 4 / view.scale);
+      haloText(short(e.type, 24), midX + 4 / view.scale, midY - 4 / view.scale,
+        color, 10 / view.scale);
     }
     ctx.globalAlpha = 1;
   });
@@ -828,26 +837,27 @@ function draw() {
     const r = rad(n);
     if (currentView === "flow" && n.kind !== "type") {
       // transformation box: name + return type, bordered by kind
-      const name = n.id.split(".").slice(-1)[0];
-      const rt = (n.outputs && n.outputs[0]) || null;
+      const name = short(n.id.split(".").slice(-1)[0], 24);
+      const rt = n.outputs && n.outputs[0] ? short(n.outputs[0], 22) : null;
       ctx.font = "12px sans-serif";
       const tw = ctx.measureText(name).width;
       const rw = rt ? ctx.measureText("-> " + rt).width : 0;
-      const bw = Math.max(tw, rw) / 2 + 9;
-      const bh = rt ? 17 : 11;
+      const bw = Math.max(tw, rw) / 2 + 10;
+      const bh = rt ? 18 : 12;
       n._bw = bw; n._bh = bh;
       ctx.fillStyle = "#1a2238";
       ctx.strokeStyle = kindColor;
       ctx.lineWidth = i === selected ? 2.5 : 1.3;
       ctx.beginPath();
-      ctx.roundRect(n.x - bw, n.y - bh, bw * 2, bh * 2, 5);
+      ctx.roundRect(n.x - bw, n.y - bh, bw * 2, bh * 2, 6);
       ctx.fill(); ctx.stroke();
       ctx.textAlign = "center";
+      ctx.font = "12px sans-serif";
       ctx.fillStyle = dim ? "#56618a" : "#dbe2ef";
-      ctx.fillText(name, n.x, n.y + (rt ? -2 : 4));
+      ctx.fillText(name, n.x, n.y + (rt ? -3 : 4));
       if (rt) {
         ctx.font = "10px sans-serif";
-        ctx.fillStyle = typeColor(rt);
+        ctx.fillStyle = typeColor(n.outputs[0]);
         ctx.fillText("-> " + rt, n.x, n.y + 11);
       }
       ctx.textAlign = "left";
@@ -878,14 +888,22 @@ function draw() {
       else ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
       ctx.stroke();
     }
-    const labelAlways = currentView !== "components";
-    if (view.scale > (labelAlways ? 0.3 : 0.9) && !dim &&
-        (labelAlways || n.deg > 2 || view.scale > 1.6 || i === hovered)) {
-      ctx.fillStyle = "#c8d3ea";
-      ctx.font = `${11 / view.scale}px sans-serif`;
-      const label = currentView === "files" ? n.id
-        : n.id.split(".").slice(-2).join(".");
-      ctx.fillText(label, n.x + r + 3 / view.scale, n.y + 3 / view.scale);
+    // Label thinning: only draw when rows have on-screen room (pinned
+    // views), or per the density rules elsewhere. Hot nodes always label.
+    const isHot = i === hovered || i === selected || (traced && traced.nodes.has(i));
+    let wantLabel;
+    if (isPinnedView()) {
+      wantLabel = isHot || pinnedPitch * view.scale >= 14;
+    } else if (currentView === "files") {
+      wantLabel = view.scale > 0.3;
+    } else {
+      wantLabel = view.scale > 0.9 && (n.deg > 2 || view.scale > 1.6 || isHot);
+    }
+    if (wantLabel && !dim) {
+      const label = currentView === "files" ? short(n.id, 34)
+        : short(n.id.split(".").slice(-2).join("."), 28);
+      haloText(label, n.x + r + 4 / view.scale, n.y + 3.5 / view.scale,
+        "#c8d3ea", 11 / view.scale);
     }
     ctx.globalAlpha = 1;
   });
