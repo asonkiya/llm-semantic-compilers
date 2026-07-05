@@ -31,6 +31,9 @@
     "signature": {
       "type": "string"
     },
+    "entrypoint": {
+      "type": "string"
+    },
     "inputs": {
       "type": "array",
       "items": {

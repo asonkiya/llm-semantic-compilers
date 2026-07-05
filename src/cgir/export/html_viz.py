@@ -63,6 +63,7 @@ def _build_data(
                 "constructs": spec.constructs,
                 "outputs": spec.outputs,
                 "param_types": _param_types(spec.signature),
+                "entrypoint": spec.entrypoint,
                 "file": file,
                 "trace": spec.trace,
                 "signature": spec.signature,
@@ -83,6 +84,7 @@ def _build_data(
                 "constructs": [],
                 "outputs": [],
                 "param_types": [],
+                "entrypoint": None,
                 "file": "(types)",
                 "trace": [],
                 "signature": None,
@@ -802,8 +804,20 @@ function draw() {
       ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
     }
     ctx.fill();
+    if (n.entrypoint) {
+      // outer ring: reachable from the outside world (HTTP/CLI/task)
+      ctx.strokeStyle = "#e9c46a";
+      ctx.lineWidth = 1.4 / view.scale;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 3.5 / view.scale, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     if (i === selected) {
-      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 / view.scale; ctx.stroke();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 / view.scale;
+      ctx.beginPath();
+      if (n.kind === "type") ctx.rect(n.x - r, n.y - r, r * 2, r * 2);
+      else ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.stroke();
     }
     const labelAlways = currentView !== "components";
     if (view.scale > (labelAlways ? 0.3 : 0.9) && !dim &&
@@ -876,7 +890,8 @@ window.addEventListener("mousemove", ev => {
       tooltip.style.top = (ev.clientY + 14) + "px";
       tooltip.textContent = n.members
         ? `${n.id} — ${n.members.length} components`
-        : `${n.id} — ${n.kind}` + (n.effects.length ? ` [${n.effects.join(", ")}]` : "");
+        : (n.entrypoint ? `${n.entrypoint} · ` : "") +
+          `${n.id} — ${n.kind}` + (n.effects.length ? ` [${n.effects.join(", ")}]` : "");
       canvas.style.cursor = "pointer";
     } else {
       tooltip.style.display = "none";
@@ -927,6 +942,7 @@ function select(i) {
       <h2>${esc(n.id)}</h2>
       <dl>
         <dt>kind</dt><dd>${esc(n.kind)}</dd>
+        <dt>entrypoint</dt><dd>${esc(n.entrypoint || "—")}</dd>
         <dt>purity</dt><dd>${n.purity == null ? "—" : n.purity}</dd>
         <dt>signature</dt><dd>${esc(n.signature || "—")}</dd>
         <dt>returns</dt>${list(n.outputs || [])}

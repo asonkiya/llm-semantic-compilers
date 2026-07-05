@@ -79,4 +79,6 @@ def _describe(spec: ComponentSpec) -> str:
     parts[-1] += "]"
     if spec.outputs:
         parts.append(f"-> {spec.outputs[0]}")
+    if spec.entrypoint:
+        parts.append(f"({spec.entrypoint})")
     return "  ".join(parts)

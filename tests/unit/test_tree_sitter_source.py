@@ -79,6 +79,45 @@ def test_custom_ignore_does_not_replace_default(tmp_path: Path) -> None:
 # --- Decorated function / class definitions --------------------------------
 
 
+def test_decorator_texts_recorded(tmp_path: Path) -> None:
+    """Sprint 17: decorated functions keep their decorator texts (sans @)."""
+    _write(
+        tmp_path,
+        "routes.py",
+        """
+        @router.get("/novels/{novel_id}")
+        def get_novel(novel_id: int):
+            return novel_id
+        """,
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    [func] = graph.nodes(NodeKind.Function)
+    assert func.attrs.get("decorators") == ['router.get("/novels/{novel_id}")']
+
+
+def test_undecorated_function_has_empty_decorators(tmp_path: Path) -> None:
+    _write(tmp_path, "m.py", "def f():\n    pass\n")
+    graph = TreeSitterSource().ingest(tmp_path)
+    [func] = graph.nodes(NodeKind.Function)
+    assert func.attrs.get("decorators") == []
+
+
+def test_decorated_method_records_decorators(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "m.py",
+        """
+        class C:
+            @property
+            def x(self):
+                return self._x
+        """,
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    [method] = graph.nodes(NodeKind.Method)
+    assert method.attrs.get("decorators") == ["property"]
+
+
 def test_property_method_surfaced(tmp_path: Path) -> None:
     _write(
         tmp_path,

@@ -44,6 +44,25 @@ def test_constructs_field_round_trips() -> None:
     assert restored.constructs == ["models.chapter.Chapter"]
 
 
+def test_entrypoint_field_round_trips() -> None:
+    """Sprint 17 schema addition: how the outside world reaches a component."""
+    spec = ComponentSpec(
+        id="routes.get_novel",
+        kind=ComponentKind.orchestrator,
+        inputs=["novel_id"],
+        outputs=["Novel"],
+        effects=["raise"],
+        calls=[],
+        trace=["routes.py:10"],
+        language="python",
+        purity=0.7,
+        entrypoint="HTTP GET /novels/{novel_id}",
+    )
+    spec.validate()
+    data = json.loads(spec.to_json())
+    assert ComponentSpec.from_dict(data).entrypoint == "HTTP GET /novels/{novel_id}"
+
+
 def test_rejects_bad_kind() -> None:
     with pytest.raises(ValidationError):
         bad = {

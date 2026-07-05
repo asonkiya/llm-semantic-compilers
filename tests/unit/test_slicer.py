@@ -126,6 +126,24 @@ def test_mutating_a_global_is_state_transformation(tmp_path: Path) -> None:
     assert specs["m.remember"].kind == ComponentKind.state_transformer
 
 
+def test_entrypoint_detected_on_route(tmp_path: Path) -> None:
+    """Sprint 17: decorated routes carry their entrypoint label on the spec."""
+    specs = _specs_for(
+        tmp_path,
+        """
+        @router.get("/novels/{novel_id}")
+        def get_novel(novel_id: int):
+            return novel_id
+        """,
+    )
+    assert specs["m.get_novel"].entrypoint == "HTTP GET /novels/{novel_id}"
+
+
+def test_plain_function_has_no_entrypoint(tmp_path: Path) -> None:
+    specs = _specs_for(tmp_path, "def f(x):\n    return x\n")
+    assert specs["m.f"].entrypoint is None
+
+
 def test_raise_only_route_is_not_effect_adapter(tmp_path: Path) -> None:
     """Raising HTTPException alone must not lump a route in with real I/O."""
     specs = _specs_for(

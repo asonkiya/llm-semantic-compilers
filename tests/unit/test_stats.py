@@ -104,6 +104,13 @@ def test_top_constructed_counts_types() -> None:
     assert stats["top_constructed"][0] == {"id": "models.Chapter", "constructors": 2}
 
 
+def test_entrypoints_listed() -> None:
+    specs = _sample()
+    specs[2].entrypoint = "HTTP GET /top"
+    stats = compute_stats(specs)
+    assert stats["entrypoints"] == [{"id": "n.top", "entrypoint": "HTTP GET /top"}]
+
+
 def test_empty_specs() -> None:
     stats = compute_stats([])
     assert stats["total"] == 0

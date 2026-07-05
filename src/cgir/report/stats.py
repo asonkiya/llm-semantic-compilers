@@ -59,6 +59,11 @@ def compute_stats(specs: list[ComponentSpec], top_n: int = TOP_N) -> dict[str, A
         "top_constructed": [
             {"id": type_name, "constructors": n} for type_name, n in constructed.most_common(top_n)
         ],
+        "entrypoints": [
+            {"id": s.id, "entrypoint": s.entrypoint}
+            for s in sorted(specs, key=lambda s: (s.entrypoint or "", s.id))
+            if s.entrypoint
+        ],
     }
 
 
@@ -80,6 +85,12 @@ def render_text(stats: dict[str, Any]) -> str:
     if stats["effects"]:
         effects = " · ".join(f"{k} {n}" for k, n in sorted(stats["effects"].items()))
         lines.append(f"Effects:    {effects}")
+
+    if stats["entrypoints"]:
+        lines.append("Entrypoints:")
+        width = max(len(e["entrypoint"]) for e in stats["entrypoints"])
+        for entry in stats["entrypoints"]:
+            lines.append(f"  {entry['entrypoint']:<{width}}  {entry['id']}")
 
     for title, key, count_key in (
         ("Most called", "most_called", "callers"),

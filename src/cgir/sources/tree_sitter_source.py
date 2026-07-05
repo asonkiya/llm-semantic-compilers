@@ -151,7 +151,13 @@ class TreeSitterSource(GraphSource):
             inner = _undecorated(ts_node)
             if inner is None:
                 return
-            self._dispatch_top_level(graph, module_id, module_name, rel_path, source, inner)
+            decorators = _decorator_texts(ts_node, source)
+            if inner.type == "function_definition":
+                self._add_function(
+                    graph, module_id, module_name, rel_path, source, inner, decorators
+                )
+            else:
+                self._dispatch_top_level(graph, module_id, module_name, rel_path, source, inner)
         elif ts_node.type in {"import_statement", "import_from_statement"}:
             self._add_imports(graph, module_id, module_name, rel_path, source, ts_node)
 
@@ -163,6 +169,7 @@ class TreeSitterSource(GraphSource):
         rel_path: str,
         source: bytes,
         ts_node: TSNode,
+        decorators: list[str] | None = None,
     ) -> str:
         name = _identifier_text(ts_node.child_by_field_name("name"), source) or "<anonymous>"
         is_method = parent_id.startswith("class:")
@@ -182,6 +189,7 @@ class TreeSitterSource(GraphSource):
                     "qualname": qual,
                     "signature": _signature_text(ts_node, source),
                     "returns": _return_annotation_text(ts_node, source),
+                    "decorators": list(decorators or []),
                 },
             )
         )
@@ -233,7 +241,15 @@ class TreeSitterSource(GraphSource):
         elif ts_node.type == "decorated_definition":
             inner = _undecorated(ts_node)
             if inner is not None and inner.type == "function_definition":
-                self._add_function(graph, class_id, class_qual, rel_path, source, inner)
+                self._add_function(
+                    graph,
+                    class_id,
+                    class_qual,
+                    rel_path,
+                    source,
+                    inner,
+                    _decorator_texts(ts_node, source),
+                )
 
     def _add_parameters(
         self,
@@ -300,6 +316,16 @@ def _undecorated(decorated_ts: TSNode) -> TSNode | None:
         if child.type in {"function_definition", "class_definition"}:
             return child
     return None
+
+
+def _decorator_texts(decorated_ts: TSNode, source: bytes) -> list[str]:
+    """Each decorator's call text, without the leading ``@``."""
+    texts: list[str] = []
+    for child in decorated_ts.named_children:
+        if child.type == "decorator":
+            raw = source[child.start_byte : child.end_byte].decode("utf-8", errors="replace")
+            texts.append(raw.lstrip("@").strip())
+    return texts
 
 
 def _identifier_text(node: TSNode | None, source: bytes) -> str | None:

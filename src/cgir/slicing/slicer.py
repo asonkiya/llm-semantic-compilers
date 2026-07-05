@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from cgir.analyses.effects import IMPURE_EFFECT_TAGS, TRANSITIVE_TAG
+from cgir.analyses.entrypoints import detect as detect_entrypoint
 from cgir.analyses.purity import PLACEHOLDER_SCORE
 from cgir.ir.component_spec import ComponentKind, ComponentSpec
 from cgir.ir.edges import EdgeKind
@@ -38,6 +39,7 @@ def slice_components(
 
         signature = node.attrs.get("signature") if node.attrs else None
         returns = node.attrs.get("returns") if node.attrs else None
+        decorators = node.attrs.get("decorators") if node.attrs else None
 
         specs.append(
             ComponentSpec(
@@ -51,6 +53,9 @@ def slice_components(
                 trace=trace,
                 language=language,
                 signature=signature if isinstance(signature, str) else None,
+                entrypoint=detect_entrypoint(
+                    decorators if isinstance(decorators, list) else [], node.name
+                ),
                 purity=purity_score,
             )
         )
