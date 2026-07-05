@@ -174,7 +174,7 @@ resize();
 const fileNames = [...new Set(DATA.nodes.map(n => n.file))];
 const fileSlot = {};
 fileNames.forEach((f, i) => { fileSlot[f] = i; });
-const ringR = Math.max(300, fileNames.length * 34);
+const ringR = Math.max(380, fileNames.length * 52);
 const nodes = DATA.nodes.map((n, i) => {
   const slot = fileSlot[n.file];
   const slotAngle = (slot / Math.max(fileNames.length, 1)) * Math.PI * 2;
@@ -268,8 +268,8 @@ function step() {
     if (!kindVisible[a.kind] || !kindVisible[b.kind]) return;
     const dx = b.x - a.x, dy = b.y - a.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 1;
-    const rest = a.file === b.file ? 70 : 220;
-    const f = (d - rest) * 0.008 * alpha;
+    const rest = a.file === b.file ? 70 : 380;
+    const f = (d - rest) * 0.006 * alpha;
     const fx = (dx / d) * f, fy = (dy / d) * f;
     if (!a.fixed) { a.vx += fx; a.vy += fy; }
     if (!b.fixed) { b.vx -= fx; b.vy -= fy; }
@@ -292,9 +292,9 @@ function step() {
       let d = Math.hypot(dx, dy);
       if (d < 1) { dx = 1; dy = 0; d = 1; }
       const ra = 34 + 13 * Math.sqrt(a.count), rb = 34 + 13 * Math.sqrt(b.count);
-      const minD = ra + rb + 40;
+      const minD = ra + rb + 150;
       if (d < minD) {
-        const f = ((minD - d) / d) * 0.05 * alpha;
+        const f = ((minD - d) / d) * 0.07 * alpha;
         const fx = dx * f, fy = dy * f;
         vis.forEach(n => {
           if (n.fixed) return;
@@ -312,8 +312,8 @@ function step() {
     }
     if (!n.fixed) {
       // gentle gravity only — strong pull was piling every cluster onto center
-      n.vx += (W / 2 - n.x) * 0.0004 * alpha;
-      n.vy += (H / 2 - n.y) * 0.0004 * alpha;
+      n.vx += (W / 2 - n.x) * 0.0002 * alpha;
+      n.vy += (H / 2 - n.y) * 0.0002 * alpha;
       n.vx *= 0.86; n.vy *= 0.86;
       n.x += n.vx; n.y += n.vy;
     }
