@@ -20,10 +20,12 @@ from cgir.export.json_export import read_specs
 from cgir.export.mermaid import render_call_graph
 from cgir.ir.component_spec import ComponentSpec
 from cgir.ir.graph import RepoGraph
+from cgir.ir.nodes import NodeKind
 from cgir.pipeline import scan_repo
 from cgir.regenerate import regenerate as run_regenerate
 from cgir.report.diff import compute_diff, render_diff, violations
 from cgir.report.flow import render_flow
+from cgir.report.pack import build_pack, render_pack
 from cgir.report.stats import compute_stats, render_text
 from cgir.trace import TraceMap
 
@@ -126,6 +128,46 @@ def flow(
         typer.echo(render_flow(specs, component_id, depth), nl=False)
     except KeyError as exc:
         raise typer.BadParameter(f"Unknown component: {component_id}") from exc
+
+
+@app.command()
+def pack(
+    component_id: Annotated[str, typer.Argument(metavar="ID")],
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+    repo: Annotated[
+        Path | None,
+        typer.Option("--repo", help="Repo root, for embedding the target's source."),
+    ] = None,
+    budget: Annotated[int, typer.Option("--budget", help="Approximate token budget.")] = 4000,
+) -> None:
+    """Emit the minimal context bundle for working on one component."""
+    specs = _load_specs(index_dir)
+    source = _component_source(index_dir, component_id, repo)
+    try:
+        bundle = build_pack(specs, component_id, source=source, budget=budget)
+    except KeyError as exc:
+        raise typer.BadParameter(f"Unknown component: {component_id}") from exc
+    typer.echo(render_pack(bundle), nl=False)
+
+
+def _component_source(index_dir: Path, component_id: str, repo: Path | None) -> str | None:
+    """The target's source lines, via the graph's span (best-effort)."""
+    if repo is None or not (index_dir / "repo_graph.json").exists():
+        return None
+    graph = _load_graph(index_dir)
+    for node in graph.nodes():
+        if node.kind not in {NodeKind.Function, NodeKind.Method}:
+            continue
+        if node.attrs.get("qualname") != component_id:
+            continue
+        if node.path is None or node.start_line is None or node.end_line is None:
+            return None
+        try:
+            all_lines = (repo / node.path).read_text().splitlines()
+        except OSError:
+            return None
+        return "\n".join(all_lines[node.start_line - 1 : node.end_line]) + "\n"
+    return None
 
 
 @app.command()

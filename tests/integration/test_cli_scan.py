@@ -144,6 +144,28 @@ def test_flow_unknown_component_fails(tmp_path: Path, python_sample_repo: Path) 
     assert result.exit_code != 0
 
 
+# --- pack (Sprint 18 — context packer) ------------------------------------------
+
+
+def test_pack_emits_bundle_with_source(tmp_path: Path, python_sample_repo: Path) -> None:
+    out_dir = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(
+        app,
+        ["pack", "orchestrator.quote", "--index", str(out_dir), "--repo", str(python_sample_repo)],
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("# orchestrator.quote")
+    # Callee interface present, and the target's real source embedded.
+    assert "pricing.add_tax" in result.output
+    assert "def quote" in result.output
+
+
+def test_pack_unknown_component_fails(tmp_path: Path, python_sample_repo: Path) -> None:
+    out_dir = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(app, ["pack", "nope.x", "--index", str(out_dir)])
+    assert result.exit_code != 0
+
+
 # --- diff (Sprint 16 — effect-drift CI) ----------------------------------------
 
 
