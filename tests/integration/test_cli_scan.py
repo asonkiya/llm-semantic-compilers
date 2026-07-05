@@ -142,3 +142,56 @@ def test_flow_unknown_component_fails(tmp_path: Path, python_sample_repo: Path) 
     out_dir = _scanned_index(tmp_path, python_sample_repo)
     result = CliRunner().invoke(app, ["flow", "nope.nothing", "--index", str(out_dir)])
     assert result.exit_code != 0
+
+
+# --- diff (Sprint 16 — effect-drift CI) ----------------------------------------
+
+
+def _drifted_repos(tmp_path: Path) -> tuple[Path, Path]:
+    """Two scans of the same function, where the new one gained io."""
+    old_repo = tmp_path / "old-repo"
+    new_repo = tmp_path / "new-repo"
+    _write(old_repo, "pricing.py", "def add_tax(price, rate):\n    return price * (1 + rate)\n")
+    _write(
+        new_repo,
+        "pricing.py",
+        "def add_tax(price, rate):\n    print(price)\n    return price * (1 + rate)\n",
+    )
+    runner = CliRunner()
+    old_idx = tmp_path / "old-idx"
+    new_idx = tmp_path / "new-idx"
+    assert runner.invoke(app, ["scan", str(old_repo), "--out", str(old_idx)]).exit_code == 0
+    assert runner.invoke(app, ["scan", str(new_repo), "--out", str(new_idx)]).exit_code == 0
+    return old_idx, new_idx
+
+
+def test_diff_reports_drift(tmp_path: Path) -> None:
+    old_idx, new_idx = _drifted_repos(tmp_path)
+    result = CliRunner().invoke(app, ["diff", str(old_idx), str(new_idx)])
+    assert result.exit_code == 0, result.output
+    assert "pricing.add_tax" in result.output
+    assert "io" in result.output
+
+
+def test_diff_fail_on_effect_gain(tmp_path: Path) -> None:
+    old_idx, new_idx = _drifted_repos(tmp_path)
+    result = CliRunner().invoke(
+        app, ["diff", str(old_idx), str(new_idx), "--fail-on", "effect-gain"]
+    )
+    assert result.exit_code == 1
+    assert "pricing.add_tax" in result.output
+
+
+def test_diff_identical_indexes_clean(tmp_path: Path, python_sample_repo: Path) -> None:
+    idx = _scanned_index(tmp_path, python_sample_repo)
+    result = CliRunner().invoke(app, ["diff", str(idx), str(idx), "--fail-on", "effect-gain"])
+    assert result.exit_code == 0, result.output
+    assert "no changes" in result.output.lower()
+
+
+def test_diff_json_output(tmp_path: Path) -> None:
+    old_idx, new_idx = _drifted_repos(tmp_path)
+    result = CliRunner().invoke(app, ["diff", str(old_idx), str(new_idx), "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["changed"][0]["id"] == "pricing.add_tax"

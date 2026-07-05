@@ -22,6 +22,7 @@ from cgir.ir.component_spec import ComponentSpec
 from cgir.ir.graph import RepoGraph
 from cgir.pipeline import scan_repo
 from cgir.regenerate import regenerate as run_regenerate
+from cgir.report.diff import compute_diff, render_diff, violations
 from cgir.report.flow import render_flow
 from cgir.report.stats import compute_stats, render_text
 from cgir.trace import TraceMap
@@ -125,6 +126,34 @@ def flow(
         typer.echo(render_flow(specs, component_id, depth), nl=False)
     except KeyError as exc:
         raise typer.BadParameter(f"Unknown component: {component_id}") from exc
+
+
+@app.command()
+def diff(
+    old_index: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
+    new_index: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
+    as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON.")] = False,
+    fail_on: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--fail-on",
+            help="Exit 1 on drift: effect-gain[:tag] | purity-drop | kind-change (repeatable).",
+        ),
+    ] = None,
+) -> None:
+    """Compare two scan indexes: added/removed components and contract drift."""
+    result = compute_diff(_load_specs(old_index), _load_specs(new_index))
+    if as_json:
+        typer.echo(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        typer.echo(render_diff(result), nl=False)
+    found = violations(result, list(fail_on or []))
+    if found:
+        typer.echo("")
+        typer.echo(f"drift violations ({len(found)}):")
+        for line in found:
+            typer.echo(f"  ! {line}")
+        raise typer.Exit(code=1)
 
 
 def _load_graph(index_dir: Path) -> RepoGraph:
