@@ -79,6 +79,20 @@ _DB_METHODS: frozenset[str] = frozenset(
 
 _IO_BUILTINS: frozenset[str] = frozenset({"print", "input", "open"})
 
+# Dotted calls that are device/terminal IO. cv2 is deliberately *not* a
+# blanket prefix — resize/cvtColor and friends are pure image math; only
+# the device- and window-touching calls count (found on a real CV repo
+# where opening an RTSP stream classified pure).
+_IO_DOTTED_EXACT: frozenset[str] = frozenset(
+    {
+        "cv2.VideoCapture",
+        "cv2.VideoWriter",
+        "cv2.imshow",
+        "cv2.waitKey",
+        "cv2.destroyAllWindows",
+    }
+)
+
 _NET_PREFIXES: tuple[str, ...] = (
     "requests.",
     # urllib.parse is pure string manipulation — only the request side is net.
@@ -106,6 +120,17 @@ _FS_EXACT: frozenset[str] = frozenset(
         "os.symlink",
         "os.link",
         "os.truncate",
+        # path-taking media / model IO (CV & ML codebases)
+        "cv2.imread",
+        "cv2.imwrite",
+        "torch.load",
+        "torch.save",
+        "np.load",
+        "np.save",
+        "np.savez",
+        "numpy.load",
+        "numpy.save",
+        "numpy.savez",
     }
 )
 _FS_METHOD_SUFFIXES: tuple[str, ...] = (
@@ -117,7 +142,13 @@ _FS_METHOD_SUFFIXES: tuple[str, ...] = (
     ".touch",
 )
 
-_NONDETERM_PREFIXES: tuple[str, ...] = ("random.", "secrets.")
+_NONDETERM_PREFIXES: tuple[str, ...] = (
+    "random.",
+    "secrets.",
+    "np.random.",
+    "numpy.random.",
+    "torch.rand",
+)
 _NONDETERM_EXACT: frozenset[str] = frozenset(
     {
         "time.time",
@@ -229,6 +260,8 @@ def _classify_dotted_call(dotted: str) -> str | None:
     parts = dotted.split(".")
     if len(parts) >= 2 and parts[-1] in _DB_METHODS and parts[-2] in _DB_RECEIVERS:
         return "db"
+    if dotted in _IO_DOTTED_EXACT:
+        return "io"
     if dotted.startswith(_NET_PREFIXES):
         return "net"
     if (

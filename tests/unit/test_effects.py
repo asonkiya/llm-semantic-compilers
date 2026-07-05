@@ -364,6 +364,95 @@ def test_non_db_receiver_is_not_tagged(repo: Path) -> None:
     assert effects["func:m.read"] == []
 
 
+# --- CV / ML media and model IO (found on camera-tracking) ---------------------
+
+
+def test_cv2_videocapture_is_io(repo: Path) -> None:
+    """Opening a camera device / RTSP stream is IO — found classified pure."""
+    _write(
+        repo,
+        "m.py",
+        """
+        import cv2
+
+        def read_video(source):
+            cap = cv2.VideoCapture(source)
+            return cap
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "io" in effects["func:m.read_video"]
+
+
+def test_cv2_imread_imwrite_are_fs(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        import cv2
+
+        def snapshot(path, frame):
+            cv2.imwrite(path, frame)
+
+        def load(path):
+            return cv2.imread(path)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "fs" in effects["func:m.snapshot"]
+    assert "fs" in effects["func:m.load"]
+
+
+def test_cv2_pure_image_ops_stay_untagged(repo: Path) -> None:
+    """resize/cvtColor are pure math — a blanket cv2. prefix would be wrong."""
+    _write(
+        repo,
+        "m.py",
+        """
+        import cv2
+
+        def shrink(frame):
+            return cv2.resize(frame, (640, 360))
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert effects["func:m.shrink"] == []
+
+
+def test_torch_load_save_are_fs(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        import torch
+
+        def load_model(path):
+            return torch.load(path)
+
+        def save_model(model, path):
+            torch.save(model, path)
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "fs" in effects["func:m.load_model"]
+    assert "fs" in effects["func:m.save_model"]
+
+
+def test_np_random_is_nondeterm(repo: Path) -> None:
+    _write(
+        repo,
+        "m.py",
+        """
+        import numpy as np
+
+        def jitter(x):
+            return x + np.random.rand()
+        """,
+    )
+    effects = classify(_ingest(repo), repo)
+    assert "nondeterm" in effects["func:m.jitter"]
+
+
 # --- raise is not impure (settled Sprint 13) -----------------------------------
 
 
