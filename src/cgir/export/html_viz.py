@@ -440,17 +440,46 @@ function layoutPinned() {
   connected.forEach(n => {
     (byLayer[pinnedLayer(n)] = byLayer[pinnedLayer(n)] || []).push(n);
   });
+  const layerKeys = Object.keys(byLayer).map(Number).sort((x, y) => x - y);
+  layerKeys.forEach(l =>
+    byLayer[l].sort((a, b) => (a.file + a.id).localeCompare(b.file + b.id)));
+
+  // Barycenter sweeps: order each column by the mean row of its neighbors
+  // so edges run roughly horizontally instead of slashing across the grid.
+  const indexOfNode = new Map(nodes.map((n, i) => [n, i]));
+  const rowOf = new Map();
+  layerKeys.forEach(l => byLayer[l].forEach((n, i) => rowOf.set(n, i)));
+  const meanNeighborRow = n => {
+    const i = indexOfNode.get(n);
+    let sum = 0, count = 0;
+    outAdj[i].forEach(({ n: t }) => {
+      if (rowOf.has(nodes[t])) { sum += rowOf.get(nodes[t]); count++; }
+    });
+    inAdj[i].forEach(({ n: s }) => {
+      if (rowOf.has(nodes[s])) { sum += rowOf.get(nodes[s]); count++; }
+    });
+    return count ? sum / count : rowOf.get(n);
+  };
+  for (let sweep = 0; sweep < 4; sweep++) {
+    const keys = sweep % 2 === 0 ? layerKeys : [...layerKeys].reverse();
+    keys.forEach(l => {
+      byLayer[l].sort((a, b) =>
+        meanNeighborRow(a) - meanNeighborRow(b) ||
+        (a.file + a.id).localeCompare(b.file + b.id));
+      byLayer[l].forEach((n, i) => rowOf.set(n, i));
+    });
+  }
+
   let maxBottom = 200;
-  Object.values(byLayer).forEach(members => {
-    members.sort((a, b) => (a.file + a.id).localeCompare(b.file + b.id));
-    members.forEach((n, i) => {
+  layerKeys.forEach(l => {
+    byLayer[l].forEach((n, i) => {
       const col = Math.floor(i / maxRows);
       const row = i % maxRows;
       n.x = layerX(n) + col * 180;
       n.y = 200 + row * pitch;
       n.vx = 0; n.vy = 0;
     });
-    maxBottom = Math.max(maxBottom, 200 + Math.min(members.length, maxRows) * pitch);
+    maxBottom = Math.max(maxBottom, 200 + Math.min(byLayer[l].length, maxRows) * pitch);
   });
   if (isolated.length) {
     isolatedTop = maxBottom + 130;
@@ -716,10 +745,14 @@ function draw() {
   const edgeHot = (e, ei) => traced ? traced.edges.has(ei)
     : (focus !== null && (e.s === focus || e.t === focus));
 
+  // Dense pinned views: idle edges recede; hover/click brings a path forward.
+  const pinned = isPinnedView();
+  const dense = pinned && edges.length > 250;
   edges.forEach((e, ei) => {
     const a = nodes[e.s], b = nodes[e.t];
     if (!kindVisible[a.kind] || !kindVisible[b.kind]) return;
     const hot = edgeHot(e, ei);
+    const hotFocus = hot && focus !== null;
     const dimmed = focus !== null && !hot;
     const baseW = 0.8 + (e.w ? Math.min(4, Math.sqrt(e.w) - 1) : 0);
     let idleColor = "rgba(120,140,190,0.28)";
@@ -728,37 +761,63 @@ function draw() {
       idleColor = (e.kind === "data" || e.kind === "arg") && e.type
         ? typeColor(e.type) : "rgba(120,140,190,0.18)";
     }
-    ctx.strokeStyle = hot && focus !== null ? "#e9c46a"
+    ctx.strokeStyle = hotFocus ? "#e9c46a"
       : dimmed ? "rgba(120,140,190,0.08)" : idleColor;
-    ctx.globalAlpha = (currentView === "flow" && !dimmed && !(hot && focus !== null)) ? 0.6 : 1;
-    ctx.lineWidth = ((hot && focus !== null) ? baseW + 1 : baseW) / view.scale;
+    let edgeAlpha = 1;
+    if (!hotFocus && !dimmed) {
+      if (currentView === "flow") edgeAlpha = 0.6;
+      if (dense) edgeAlpha = 0.18;
+    }
+    ctx.globalAlpha = edgeAlpha;
+    ctx.lineWidth = (hotFocus ? baseW + 1 : baseW) / view.scale;
     if (e.kind === "construct" || e.kind === "command") {
       ctx.setLineDash([5 / view.scale, 4 / view.scale]);
     } else if (e.kind === "arg") {
       ctx.setLineDash([2 / view.scale, 3 / view.scale]);
     }
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
-    // arrowhead
     const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
     const bOffset = (currentView === "flow" && b._bw) ? Math.min(b._bw, b._bh) + 3 : rad(b) + 4;
-    const tx = b.x - (dx / d) * bOffset, ty = b.y - (dy / d) * bOffset;
-    const ang = Math.atan2(dy, dx), s = 5 / Math.sqrt(view.scale);
+    let tx, ty, ang, midX, midY;
+    if (pinned) {
+      // horizontal-tangent S-curve (dagre-style): edges leave and enter
+      // columns sideways instead of slashing across the grid
+      const dir = Math.sign(dx) || 1;
+      const bend = Math.max(50, Math.abs(dx) * 0.4);
+      const c1x = a.x + bend * dir, c2x = b.x - bend * dir;
+      tx = b.x - dir * bOffset; ty = b.y;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.bezierCurveTo(c1x, a.y, c2x, b.y, tx, ty);
+      ctx.stroke();
+      ang = dir > 0 ? 0 : Math.PI;
+      midX = (a.x + 3 * c1x + 3 * c2x + b.x) / 8;
+      midY = (a.y + b.y) / 2;
+    } else {
+      tx = b.x - (dx / d) * bOffset; ty = b.y - (dy / d) * bOffset;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ang = Math.atan2(dy, dx);
+      midX = (a.x + b.x) / 2; midY = (a.y + b.y) / 2;
+    }
+    ctx.setLineDash([]);
+    // arrowhead
+    const s = 5 / Math.sqrt(view.scale);
     ctx.fillStyle = ctx.strokeStyle;
     ctx.beginPath();
     ctx.moveTo(tx, ty);
     ctx.lineTo(tx - s * Math.cos(ang - 0.4), ty - s * Math.sin(ang - 0.4));
     ctx.lineTo(tx - s * Math.cos(ang + 0.4), ty - s * Math.sin(ang + 0.4));
     ctx.fill();
-    // data-type / weight label
-    if (e.type && !dimmed && (view.scale > 1.3 || hot || currentView === "flow")) {
+    // data-type / weight label: in dense views only when hot or zoomed in
+    const wantLabel = dense ? (hot || view.scale > 1.6)
+      : (view.scale > 1.3 || hot || currentView === "flow");
+    if (e.type && !dimmed && wantLabel) {
       ctx.fillStyle = currentView === "flow" && (e.kind === "data" || e.kind === "arg")
         ? typeColor(e.type)
         : e.kind === "construct" ? "#b794f4" : "#8ea6d8";
       ctx.font = `${10 / view.scale}px sans-serif`;
-      ctx.fillText(e.type, (a.x + b.x) / 2 + 4 / view.scale, (a.y + b.y) / 2 - 4 / view.scale);
+      ctx.fillText(e.type, midX + 4 / view.scale, midY - 4 / view.scale);
     }
+    ctx.globalAlpha = 1;
   });
 
   nodes.forEach((n, i) => {
