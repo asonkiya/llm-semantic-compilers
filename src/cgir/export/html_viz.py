@@ -417,10 +417,52 @@ function rebuildAdjacency() {
 }
 rebuildAdjacency();
 
-const LAYER_GAP = 340;
+const LAYER_GAP = 260;
 function isPinnedView() { return currentView === "layers" || currentView === "flow"; }
 function pinnedLayer(n) { return currentView === "flow" ? n.flowLayer : n.layer; }
 function layerX(n) { return 160 + pinnedLayer(n) * LAYER_GAP * LK; }
+
+// Deterministic grid layout for pinned views: tight column slots, tall
+// columns wrap sideways, and unconnected nodes park in a labeled block
+// below instead of drifting to the fringes.
+let isolatedTop = null;
+function layoutPinned() {
+  const pitch = 36;
+  const maxRows = 40;
+  const isolated = [], connected = [];
+  nodes.forEach((n, i) => {
+    const degHere = outAdj[i].length + inAdj[i].length;
+    (degHere === 0 ? isolated : connected).push(n);
+  });
+  const byLayer = {};
+  connected.forEach(n => {
+    (byLayer[pinnedLayer(n)] = byLayer[pinnedLayer(n)] || []).push(n);
+  });
+  let maxBottom = 200;
+  Object.values(byLayer).forEach(members => {
+    members.sort((a, b) => (a.file + a.id).localeCompare(b.file + b.id));
+    members.forEach((n, i) => {
+      const col = Math.floor(i / maxRows);
+      const row = i % maxRows;
+      n.x = layerX(n) + col * 180;
+      n.y = 200 + row * pitch;
+      n.vx = 0; n.vy = 0;
+    });
+    maxBottom = Math.max(maxBottom, 200 + Math.min(members.length, maxRows) * pitch);
+  });
+  if (isolated.length) {
+    isolatedTop = maxBottom + 130;
+    const cols = Math.max(1, Math.ceil(Math.sqrt(isolated.length * 2)));
+    isolated.sort((a, b) => (a.file + a.id).localeCompare(b.file + b.id));
+    isolated.forEach((n, i) => {
+      n.x = 160 + (i % cols) * 190;
+      n.y = isolatedTop + Math.floor(i / cols) * pitch;
+      n.vx = 0; n.vy = 0;
+    });
+  } else {
+    isolatedTop = null;
+  }
+}
 
 function setView(name) {
   currentView = name;
@@ -434,10 +476,8 @@ function setView(name) {
   } else {
     nodes = baseNodes; edges = baseEdges;
   }
-  if (isPinnedView()) {
-    nodes.forEach(n => { n.x = layerX(n); n.vx = 0; });
-  }
   rebuildAdjacency();
+  if (isPinnedView()) layoutPinned();
   buildLegend();
   userAdjustedView = false;
   frameCount = 0;
@@ -458,6 +498,7 @@ function kick() { alpha = Math.max(alpha, 0.35); }
 // --- physics ----------------------------------------------------------------
 const fileCenters = {};
 function step() {
+  if (isPinnedView()) return; // pinned views are deterministic grids
   if (alpha < 0.005) return;
   alpha *= 0.985;
   const vis = nodes.filter(n => kindVisible[n.kind]);
@@ -553,7 +594,6 @@ function step() {
       n.vx *= 0.86; n.vy *= 0.86;
       n.x += n.vx; n.y += n.vy;
     }
-    if (isPinnedView()) { n.x = layerX(n); n.vx = 0; }
   });
 }
 
@@ -650,6 +690,12 @@ function draw() {
       ctx.font = `${12 / view.scale}px sans-serif`;
       const wy = (110 - view.y) / view.scale;
       ctx.fillText(guideLabel + l, x, wy);
+    }
+    if (isolatedTop !== null) {
+      ctx.fillStyle = "#56618a";
+      ctx.font = `${12 / view.scale}px sans-serif`;
+      ctx.textAlign = "left";
+      ctx.fillText("unconnected", 160, isolatedTop - 24);
     }
     ctx.textAlign = "left";
   }
@@ -915,7 +961,7 @@ document.getElementById("s-spacing").addEventListener("input", ev => {
 });
 document.getElementById("s-links").addEventListener("input", ev => {
   LK = +ev.target.value; kick();
-  if (currentView === "layers") nodes.forEach(n => { n.x = layerX(n); });
+  if (isPinnedView()) layoutPinned();
   if (!userAdjustedView) fitView();
 });
 document.getElementById("s-size").addEventListener("input", ev => {
