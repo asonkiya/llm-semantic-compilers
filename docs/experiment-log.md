@@ -44,12 +44,36 @@ The residual 6 failures split cleanly:
    return* types only; these need free names referenced in the *body*.
    Fix: extend module-constant closure to body free-references.
 
+## Round 3 (Sprint 25 pack — + linked test source via covered_by)
+
+| condition | pass | avg context |
+|---|---|---|
+| pack | **8/12** | ~470 tok |
+| file | 8/12 | ~3,360 tok |
+
+**Pack now ties the full-file baseline at 1/7th the context** — and passes
+three components the file condition *fails* (`update_iou_tracker`,
+`zones_for_points`, `topo_sort`). Those are test-pinned semantics: the
+linked tests encode the exact expiry behavior / tie-break order that the
+surrounding *code* never states. The contract bundle is, for that class,
+**better than the raw file, not just smaller.**
+
+Progression as enrichment landed: **4 → 6 → 8 / 12**.
+
+Remaining 4 pack failures:
+- `validate` — fails under file too (semantics beyond types+tests in a
+  single-function splice).
+- `default_pipeline`, `get_daily_rollup`, `authorize_url` — file passes,
+  pack fails. All in the **body free-name closure** bucket: module
+  constants / config-dict keys referenced in the *body*, not the signature.
+  This is the one scoped, un-built enrichment left.
+
 ## Takeaway
 
-The compression thesis holds *for the class of components whose contract is
-its types* — pack ties file at an order of magnitude less context. It does
-not hold for test-pinned semantics without the tests, nor for body-level
-free names without closure. Both are addressable and scheduled. This is the
-evidence base for continuing pack → verify → benchmark.
+The compression thesis is confirmed with a monotonic evidence trail
+(4→6→8): **an enriched contract bundle matches full-file context at ~7x
+less, and exceeds it where tests pin behavior.** The only residual gap is
+body free-name closure — a known, small, scheduled follow-up. This is the
+evidence base for the pack → verify → gate loop.
 
-Cost: round 1 ~$0.25, round 2 ~$0.10 (Sonnet 4.6).
+Cost: round 1 ~$0.25, round 2 ~$0.10, round 3 ~$0.10 (Sonnet 4.6).
