@@ -14,8 +14,10 @@ from pathlib import Path
 from cgir.analyses.symbols import SymbolTable, module_of
 from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
-from cgir.ir.nodes import NodeKind
+from cgir.ir.nodes import Node, NodeKind
 from cgir.languages import LanguageAdapter, SourceCache
+
+_SELF_RECEIVERS: frozenset[str] = frozenset({"this", "self"})
 
 
 def build_call_graph(
@@ -41,8 +43,11 @@ def build_call_graph(
         func_ts = file_adapter.locate_function(root, func.name, (func.start_line or 1) - 1)
         if func_ts is None:
             continue
+        class_fields = _owning_class_fields(graph, func)
         for callee_name, arg_names, line in file_adapter.call_sites(func_ts, source):
             target = _resolve_callee(tables, table, callee_name)
+            if target is None and class_fields:
+                target = _resolve_field_call(graph, table, class_fields, callee_name)
             if target is None:
                 continue
             # Note: multi-edges collapse per (caller, callee) pair, so the
@@ -55,6 +60,38 @@ def build_call_graph(
                     attrs={"args": arg_names, "line": line},
                 )
             )
+
+
+def _owning_class_fields(graph: RepoGraph, func: Node) -> dict[str, str]:
+    """The field→type map of the class owning a method (empty for free functions)."""
+    for edge in graph.in_edges(func.id, EdgeKind.CONTAINS):
+        parent = graph.get_node(edge.src)
+        if parent.kind == NodeKind.Class:
+            fields = parent.attrs.get("fields")
+            return fields if isinstance(fields, dict) else {}
+    return {}
+
+
+def _resolve_field_call(
+    graph: RepoGraph, table: SymbolTable, class_fields: dict[str, str], dotted: str
+) -> str | None:
+    """Resolve ``this.<field>.<method>`` via the field's declared type.
+
+    ``this.svc.translate`` where ``svc: ChaptersService`` resolves to the
+    method on the class that ``ChaptersService`` binds to (DI / receiver
+    calls). Requires the type to resolve to an in-repo Class node.
+    """
+    parts = dotted.split(".")
+    if len(parts) < 3 or parts[0] not in _SELF_RECEIVERS:
+        return None
+    type_name = class_fields.get(parts[1])
+    if type_name is None:
+        return None
+    binding = table.bindings.get(type_name)
+    if binding is None or not binding.startswith("class:"):
+        return None
+    method_id = f"method:{binding[len('class:') :]}.{parts[2]}"
+    return method_id if graph.has_node(method_id) else None
 
 
 def _resolve_callee(tables: dict[str, SymbolTable], table: SymbolTable, dotted: str) -> str | None:

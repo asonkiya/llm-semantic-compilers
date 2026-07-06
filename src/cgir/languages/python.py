@@ -325,8 +325,10 @@ class PythonAdapter(LanguageAdapter):
     # --- phase 3: ingest extraction ------------------------------------------
 
     def module_declarations(
-        self, root: TSNode, source: bytes, module_name: str
+        self, root: TSNode, source: bytes, module_name: str, rel_path: str
     ) -> list[Declaration]:
+        # Python resolves relative imports against the dotted module name;
+        # rel_path is unused.
         decls: list[Declaration] = []
         for child in root.children:
             decls.extend(self._top_level_decl(child, source, module_name))

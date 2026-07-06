@@ -145,6 +145,9 @@ class ClassDecl:
     node: TSNode
     name: str
     methods: list[FunctionDecl] = field(default_factory=list)
+    # field name → declared type name, for DI/receiver call resolution
+    # (``this.svc.method()`` where ``svc: ChaptersService``).
+    fields: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -206,11 +209,13 @@ class LanguageAdapter(ABC):
 
     @abstractmethod
     def module_declarations(
-        self, root: TSNode, source: bytes, module_name: str
+        self, root: TSNode, source: bytes, module_name: str, rel_path: str
     ) -> list[Declaration]:
         """Top-level declarations of a module, fully extracted.
 
-        ``module_name`` is the dotted module path — needed for languages
-        with relative imports (``from ..a import x``). Method params exclude
-        implicit receivers (``self``/``this``).
+        ``module_name`` is the dotted module path (for languages with dotted
+        relative imports, e.g. Python ``from ..a import x``); ``rel_path`` is
+        the repo-relative file path (for path-specifier imports, e.g. TS
+        ``from './util'``). Method params exclude implicit receivers
+        (``self``/``this``).
         """

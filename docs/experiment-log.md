@@ -141,6 +141,12 @@ precision*, not the LLM:
 
 **Honest read:** on TS the contract oracle measures a *mix* of LLM fidelity
 and CGIR's TS effect precision. The headline (pack ≈ file at 7x less) holds;
-the failures point at the next TS improvement — DI-aware cross-service call
-resolution so orchestration methods carry their true `calls_effectful`
-contract. Cost: ~$0.13 (Sonnet 4.6).
+the failures pointed at the next TS improvement — DI-aware cross-service call
+resolution. Cost: ~$0.13 (Sonnet 4.6).
+
+**Follow-up (landed):** DI-aware resolution now resolves `this.<field>.<method>`
+via constructor-injected field types. On the frontend, the misclassified
+orchestration methods (`translate`, `onFormat`, `load`) went from
+`pure_function []` to `orchestrator ['calls_effectful']` — their true
+contract. The distribution shifted 9-pure/8-adapter → 14-pure/5-orchestrator/
+8-adapter. This removes the CGIR-precision confound the benchmark exposed.

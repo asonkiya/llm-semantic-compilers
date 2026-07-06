@@ -81,10 +81,70 @@ def test_cfg_built_for_typescript() -> None:
     tables = build_symbol_tables(graph)
     build_call_graph(graph, tables, FIXTURE)
     build_cfg(graph, FIXTURE)
-    branches = [
-        c for c in graph.children("func:util.format") if c.kind == NodeKind.Branch
-    ]
+    branches = [c for c in graph.children("func:util.format") if c.kind == NodeKind.Branch]
     assert branches, "expected a Branch node from the if-statement"
+
+
+def test_di_field_types_extracted(tmp_path: Path) -> None:
+    """Constructor-injected service fields are recorded as class field types."""
+    (tmp_path / "cmp.ts").write_text(
+        "class Reader {\n"
+        "  private base = '/api';\n"
+        "  constructor(private svc: ChaptersService, plain: number) {}\n"
+        "  go() { return this.svc.translate(1); }\n"
+        "}\n"
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    cls = next(n for n in graph.nodes(NodeKind.Class) if n.name == "Reader")
+    fields = cls.attrs.get("fields")
+    assert fields is not None
+    assert fields.get("svc") == "ChaptersService"
+    assert "plain" not in fields  # a plain (non-field) param
+
+
+def test_di_cross_service_call_resolves(tmp_path: Path) -> None:
+    """`this.svc.method()` resolves to the injected service's method (CALLS)."""
+    (tmp_path / "chapters.service.ts").write_text(
+        "export class ChaptersService {\n"
+        "  constructor(private http: HttpClient) {}\n"
+        "  translate(id: number) { return this.http.post(`/x/${id}`, {}); }\n"
+        "}\n"
+    )
+    (tmp_path / "reader.component.ts").write_text(
+        "import { ChaptersService } from './chapters.service';\n"
+        "export class ReaderComponent {\n"
+        "  constructor(private svc: ChaptersService) {}\n"
+        "  run() { return this.svc.translate(1); }\n"
+        "}\n"
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, tmp_path)
+    run_id = "method:reader.component.ReaderComponent.run"
+    callees = {e.dst for e in graph.out_edges(run_id, EdgeKind.CALLS)}
+    assert "method:chapters.service.ChaptersService.translate" in callees
+
+
+def test_di_call_makes_caller_effectful(tmp_path: Path) -> None:
+    """Once the service call resolves, the caller inherits calls_effectful."""
+    (tmp_path / "chapters.service.ts").write_text(
+        "export class ChaptersService {\n"
+        "  constructor(private http: HttpClient) {}\n"
+        "  translate(id: number) { return this.http.post(`/x/${id}`, {}); }\n"
+        "}\n"
+    )
+    (tmp_path / "reader.component.ts").write_text(
+        "import { ChaptersService } from './chapters.service';\n"
+        "export class ReaderComponent {\n"
+        "  constructor(private svc: ChaptersService) {}\n"
+        "  run() { return this.svc.translate(1); }\n"
+        "}\n"
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, tmp_path)
+    effects = classify(graph, tmp_path)
+    assert "calls_effectful" in effects["method:reader.component.ReaderComponent.run"]
 
 
 def test_adapter_direct_effects_unit() -> None:

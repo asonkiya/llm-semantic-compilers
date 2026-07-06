@@ -135,7 +135,7 @@ class TreeSitterSource(GraphSource):
         )
         graph.add_edge(Edge(src=file_id, dst=module_id, kind=EdgeKind.CONTAINS))
 
-        for decl in adapter.module_declarations(root, source, module_name):
+        for decl in adapter.module_declarations(root, source, module_name, rel_str):
             if isinstance(decl, FunctionDecl):
                 self._add_function(graph, module_id, module_name, rel_str, decl, is_method=False)
             elif isinstance(decl, ClassDecl):
@@ -221,7 +221,7 @@ class TreeSitterSource(GraphSource):
                 path=rel_path,
                 start_line=decl.node.start_point[0] + 1,
                 end_line=decl.node.end_point[0] + 1,
-                attrs={"qualname": qual},
+                attrs={"qualname": qual, "fields": dict(decl.fields)},
             )
         )
         graph.add_edge(Edge(src=parent_id, dst=node_id, kind=EdgeKind.CONTAINS))

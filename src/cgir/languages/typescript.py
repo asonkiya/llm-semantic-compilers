@@ -9,6 +9,7 @@ call sites, and a JS/TS-flavoured effect table.
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Iterator
 
 import tree_sitter_typescript as tsts
@@ -382,18 +383,18 @@ class TypeScriptAdapter(LanguageAdapter):
     # --- ingest --------------------------------------------------------------
 
     def module_declarations(
-        self, root: TSNode, source: bytes, module_name: str
+        self, root: TSNode, source: bytes, module_name: str, rel_path: str
     ) -> list[Declaration]:
         decls: list[Declaration] = []
         for child in root.children:
-            decls.extend(self._top_level(child, source, module_name))
+            decls.extend(self._top_level(child, source, rel_path))
         return decls
 
-    def _top_level(self, node: TSNode, source: bytes, module_name: str) -> list[Declaration]:
+    def _top_level(self, node: TSNode, source: bytes, rel_path: str) -> list[Declaration]:
         t = node.type
         if t == "export_statement":
             inner = node.child_by_field_name("declaration")
-            return self._top_level(inner, source, module_name) if inner is not None else []
+            return self._top_level(inner, source, rel_path) if inner is not None else []
         if t == "function_declaration":
             return [self._function_decl(node, source, is_method=False)]
         if t == "class_declaration":
@@ -414,7 +415,7 @@ class TypeScriptAdapter(LanguageAdapter):
                     out.append(VariableDecl(node=node, name=name))
             return out
         if t == "import_statement":
-            return list(self._imports(node, source, module_name))
+            return list(self._imports(node, source, rel_path))
         return []
 
     def _class_decl(self, node: TSNode, source: bytes) -> ClassDecl:
@@ -424,12 +425,20 @@ class TypeScriptAdapter(LanguageAdapter):
             else "<anonymous>"
         )
         methods: list[FunctionDecl] = []
+        fields: dict[str, str] = {}
         body = node.child_by_field_name("body")
         if body is not None:
             for child in body.named_children:
                 if child.type == "method_definition":
                     methods.append(self._function_decl(child, source, is_method=True))
-        return ClassDecl(node=node, name=name, methods=methods)
+                    if _node_name(child) == "constructor":
+                        fields.update(_di_fields(child, source))
+                elif child.type == "public_field_definition":
+                    fname = child.child_by_field_name("name")
+                    tname = _type_base(child.child_by_field_name("type"), source)
+                    if fname is not None and tname:
+                        fields[_text(fname, source)] = tname
+        return ClassDecl(node=node, name=name, methods=methods, fields=fields)
 
     def _function_decl(self, node: TSNode, source: bytes, is_method: bool) -> FunctionDecl:
         name = _fn_name(node, source)
@@ -460,12 +469,12 @@ class TypeScriptAdapter(LanguageAdapter):
             free_names=_free_names(arrow, source),
         )
 
-    def _imports(self, node: TSNode, source: bytes, module_name: str) -> Iterator[ImportDecl]:
+    def _imports(self, node: TSNode, source: bytes, rel_path: str) -> Iterator[ImportDecl]:
         src_node = node.child_by_field_name("source")
         if src_node is None:
             return
         specifier = _string_value(src_node, source)
-        base = _resolve_specifier(specifier, module_name)
+        base = _resolve_specifier(specifier, rel_path)
         clause = next((c for c in node.named_children if c.type == "import_clause"), None)
         if clause is None:
             return
@@ -505,6 +514,55 @@ def _node_text(node: TSNode | None) -> str:
     return node.text.decode("utf-8", errors="replace") if node is not None and node.text else ""
 
 
+def _di_fields(ctor: TSNode, source: bytes) -> dict[str, str]:
+    """Constructor params with an access modifier become class fields.
+
+    ``constructor(private svc: ChaptersService)`` → ``{"svc": "ChaptersService"}``.
+    Plain params (no modifier) are locals, not fields.
+    """
+    out: dict[str, str] = {}
+    params = ctor.child_by_field_name("parameters")
+    if params is None:
+        return out
+    for p in params.named_children:
+        if p.type not in {"required_parameter", "optional_parameter"}:
+            continue
+        has_modifier = any(
+            c.type in {"accessibility_modifier", "readonly", "override_modifier"}
+            for c in p.children
+        )
+        if not has_modifier:
+            continue
+        pattern = p.child_by_field_name("pattern")
+        tname = _type_base(p.child_by_field_name("type"), source)
+        if pattern is not None and pattern.type == "identifier" and tname:
+            out[_text(pattern, source)] = tname
+    return out
+
+
+def _type_base(type_annotation: TSNode | None, source: bytes) -> str | None:
+    """Base class name of a ``: T`` annotation (``Chapter[]`` → ``Chapter``)."""
+    if type_annotation is None:
+        return None
+    inner = next((c for c in type_annotation.named_children), None)
+    if inner is None:
+        return None
+    if inner.type == "type_identifier":
+        return _text(inner, source)
+    if inner.type == "array_type":
+        return _type_base_of_node(inner.named_children[0], source) if inner.named_children else None
+    if inner.type == "generic_type":
+        base = inner.child_by_field_name("name") or (
+            inner.named_children[0] if inner.named_children else None
+        )
+        return _text(base, source).split("<")[0] if base is not None else None
+    return None
+
+
+def _type_base_of_node(node: TSNode, source: bytes) -> str | None:
+    return _text(node, source) if node.type == "type_identifier" else None
+
+
 def _node_name(node: TSNode) -> str:
     return _node_text(node.child_by_field_name("name"))
 
@@ -522,19 +580,21 @@ def _string_value(node: TSNode, source: bytes) -> str:
     return _text(node, source).strip("\"'")
 
 
-def _resolve_specifier(specifier: str, module_name: str) -> str:
-    """Map an import specifier to a module qualname (relative ones resolved)."""
+def _resolve_specifier(specifier: str, rel_path: str) -> str:
+    """Map an import specifier to a module qualname (relative ones resolved).
+
+    Resolved against the importing file's *path* (not its dotted module
+    name) so Angular-style dotted filenames (``reader.component.ts``) don't
+    get mis-split. ``"./chapters.service"`` from ``core/api/reader.component.ts``
+    → ``core.api.chapters.service``.
+    """
     if not specifier.startswith("."):
         return specifier  # bare package — stays opaque (third-party)
-    parts = module_name.split(".")[:-1]  # current file's directory
-    for seg in specifier.split("/"):
-        if seg in {"", "."}:
-            continue
-        if seg == "..":
-            parts = parts[:-1]
-        else:
-            parts.append(seg)
-    return ".".join(parts)
+    base_dir = posixpath.dirname(rel_path.replace("\\", "/"))
+    resolved = posixpath.normpath(posixpath.join(base_dir, specifier))
+    for ext in (".ts", ".tsx", ".js"):
+        resolved = resolved.removesuffix(ext)
+    return resolved.strip("/").replace("/", ".")
 
 
 def _classify_call(dotted: str) -> str | None:
