@@ -1,50 +1,42 @@
-"""Intra-procedural control-flow graph construction.
+"""Intra-procedural control-flow graph construction — language-neutral.
 
-For each Function/Method node we walk the body with tree-sitter and emit:
+For each Function/Method node we walk the body via the active
+:class:`~cgir.languages.LanguageAdapter` and emit:
 
-* ``Assignment`` for ``x = expr`` and ``x += expr`` statements
-* ``Return`` for ``return [expr]``
-* ``Branch`` for each ``if`` / ``elif`` condition, ``except`` clause, and
-  ``match`` case
-* ``Loop`` for ``for`` and ``while`` headers (``for`` records its target
-  names in ``writes``)
-* ``Statement`` for everything else — including the ``with`` header, which
-  records its ``as`` aliases in ``writes`` and its context expressions in
-  ``reads``, and bare mutator method calls (``xs.append(x)``), which record
-  the receiver base name in ``mutates``
+* ``Assignment`` for binding statements (``x = e``, ``x += e``)
+* ``Return`` for returns (CFG sinks)
+* ``Branch`` for each conditional arm, exception handler, and match case
+* ``Loop`` for loop headers (for-targets recorded in ``writes``)
+* ``Statement`` for everything else — including resource headers (``with``),
+  which record their aliases in ``writes``, and mutator calls in ``mutates``
 
 Edges:
 
 * ``Function -[CONTAINS]-> <cfg-node>``  for every CFG node we emit
 * ``<node> -[CONTROLS]-> <next-node>``   for control-flow successors
 
-Topology rules:
+The *topology* rules here are language-universal (branch fall-through, loop
+back-edges, try/finally joins, case chains); everything grammar-specific —
+what node type is a loop, where its condition lives, which names it binds —
+comes from the adapter as a normalized
+:class:`~cgir.languages.base.StatementDesc`:
 
-* The Function node is the CFG entry — it has outgoing ``CONTROLS`` to the
-  first body node.
-* ``Return`` is a sink: no outgoing ``CONTROLS``.
-* An ``if`` without an ``else`` falls through; the Branch node itself is
-  added to the post-branch successor set so the caller wires
-  ``Branch -[CONTROLS]-> <after>``.
-* A ``Loop`` header has two outgoing successors: the body and the fall-through
-  exit. The body's tail nodes get a back-edge to the header.
+* The Function node is the CFG entry; ``Return`` is a sink.
+* A branch without an else falls through (the Branch node joins the
+  post-branch successor set); else-if arms chain as nested Branch nodes,
+  each control-dependent on its parent.
+* A ``Loop`` header has two successors (body, fall-through); body tails
+  get a back-edge to the header.
+* Resource headers (``with``) introduce no control dependence — the body
+  keeps the outer controller.
+* ``try`` bodies keep the outer controller; each handler is a ``Branch``
+  whose predecessors include the try entry *and* the body tails; ``else``
+  chains off the no-exception path; ``finally`` joins every path.
+* ``match``/``switch`` cases chain like else-if arms, with the last case's
+  Branch left open as the no-match fall-through.
 
-``with`` / ``try`` / ``match`` bodies are traversed (Sprint 5):
-
-* ``with`` introduces no control dependence — its body keeps the outer
-  controller. The header defines the ``as`` aliases.
-* ``try`` bodies keep the outer controller (they always start executing).
-  Each ``except`` clause becomes a ``Branch`` whose predecessors are the
-  try entry *and* the try-body tails (an exception may fire at any point);
-  handler bodies are control-dependent on their clause. ``else`` chains off
-  the no-exception path; ``finally`` joins every path.
-* ``match`` mirrors ``if``/``elif``: one ``Branch`` per case, chained, with
-  the last case's Branch left open as the no-match fall-through. Case
-  patterns that *bind* names (``case Point(x=a)``) are not extracted.
-
-Inter-procedural CFG, ``break`` / ``continue`` jump targets, and
-``for``/``while`` ``else`` clauses are out of scope here — flag and follow
-up rather than guess.
+``break``/``continue`` jump targets and loop ``else`` clauses are out of
+scope — flag rather than guess.
 """
 
 from __future__ import annotations
@@ -54,14 +46,25 @@ from pathlib import Path
 
 from tree_sitter import Node as TSNode
 
-from cgir.analyses._python_ast import SourceCache, locate_function, python_parser
 from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
+from cgir.languages import DEFAULT_ADAPTER, LanguageAdapter, SourceCache
+from cgir.languages.base import (
+    AssignDesc,
+    BranchDesc,
+    LoopDesc,
+    MatchDesc,
+    ReturnDesc,
+    SimpleDesc,
+    TryDesc,
+    WithDesc,
+)
 
 
-def build(graph: RepoGraph, repo_path: Path) -> None:
-    cache = SourceCache(python_parser(), repo_path)
+def build(graph: RepoGraph, repo_path: Path, adapter: LanguageAdapter | None = None) -> None:
+    adapter = adapter or DEFAULT_ADAPTER
+    cache = SourceCache(adapter, repo_path)
     for func in list(graph.nodes()):
         if func.kind not in {NodeKind.Function, NodeKind.Method}:
             continue
@@ -71,13 +74,13 @@ def build(graph: RepoGraph, repo_path: Path) -> None:
         if parsed is None:
             continue
         source, root = parsed
-        func_ts = locate_function(root, func.name, func.start_line - 1)
+        func_ts = adapter.locate_function(root, func.name, func.start_line - 1)
         if func_ts is None:
             continue
-        body = func_ts.child_by_field_name("body")
+        body = adapter.function_body(func_ts)
         if body is None:
             continue
-        builder = _CFGBuilder(graph=graph, owner=func, source=source)
+        builder = _CFGBuilder(graph=graph, owner=func, source=source, adapter=adapter)
         builder.build_block(body, predecessors=[func.id], controller=None)
 
 
@@ -86,6 +89,7 @@ class _CFGBuilder:
     graph: RepoGraph
     owner: Node
     source: bytes
+    adapter: LanguageAdapter
     _counter: int = field(default=0, init=False)
 
     def build_block(
@@ -93,70 +97,62 @@ class _CFGBuilder:
     ) -> list[str]:
         """Build a straight-line block. Returns the open predecessors at the block's tail."""
         current_preds = list(predecessors)
-        for child in block_ts.named_children:
-            if child.type == "comment":
-                continue
+        for child in self.adapter.block_statements(block_ts):
             current_preds = self.build_stmt(child, current_preds, controller)
         return current_preds
 
     def build_stmt(self, ts_node: TSNode, preds: list[str], controller: str | None) -> list[str]:
-        if ts_node.type == "if_statement":
-            return self._build_if(ts_node, preds, controller)
-        if ts_node.type in {"for_statement", "while_statement"}:
-            return self._build_loop(ts_node, preds, controller)
-        if ts_node.type == "return_statement":
-            return self._build_return(ts_node, preds, controller)
-        if ts_node.type == "with_statement":
-            return self._build_with(ts_node, preds, controller)
-        if ts_node.type == "try_statement":
-            return self._build_try(ts_node, preds, controller)
-        if ts_node.type == "match_statement":
-            return self._build_match(ts_node, preds, controller)
-        if ts_node.type == "expression_statement" and _is_assignment(ts_node):
-            return self._build_assignment(ts_node, preds, controller)
-        return self._emit_simple(ts_node, preds, NodeKind.Statement, "stmt", controller)
+        desc = self.adapter.describe_statement(ts_node, self.source)
+        if isinstance(desc, BranchDesc):
+            return self._build_branch(ts_node, desc, preds, controller)
+        if isinstance(desc, LoopDesc):
+            return self._build_loop(ts_node, desc, preds, controller)
+        if isinstance(desc, ReturnDesc):
+            return self._build_return(ts_node, desc, preds, controller)
+        if isinstance(desc, WithDesc):
+            return self._build_with(ts_node, desc, preds, controller)
+        if isinstance(desc, TryDesc):
+            return self._build_try(desc, preds, controller)
+        if isinstance(desc, MatchDesc):
+            return self._build_match(desc, preds, controller)
+        if isinstance(desc, AssignDesc):
+            return self._build_assignment(ts_node, desc, preds, controller)
+        return self._emit_simple(ts_node, desc, preds, controller)
 
     def _emit_simple(
-        self,
-        ts_node: TSNode,
-        preds: list[str],
-        kind: NodeKind,
-        prefix: str,
-        controller: str | None,
+        self, ts_node: TSNode, desc: SimpleDesc, preds: list[str], controller: str | None
     ) -> list[str]:
-        node_id = self._new_id(prefix)
+        node_id = self._new_id("stmt")
         attrs: dict[str, object] = {
-            "reads": _extract_reads(ts_node, self.source),
-            "mutates": _extract_call_mutations(ts_node, self.source),
+            "reads": desc.reads,
+            "mutates": desc.mutates,
             "controlled_by": controller,
         }
-        self._add_node(node_id, kind, ts_node, attrs=attrs)
+        self._add_node(node_id, NodeKind.Statement, ts_node, attrs=attrs)
         self._wire(preds, node_id)
         return [node_id]
 
     def _build_assignment(
-        self, ts_node: TSNode, preds: list[str], controller: str | None
+        self, ts_node: TSNode, desc: AssignDesc, preds: list[str], controller: str | None
     ) -> list[str]:
         node_id = self._new_id("assign")
-        writes, mutates = _extract_lhs_targets(ts_node, self.source)
-        for base in _extract_call_mutations(ts_node, self.source):
-            if base not in mutates:
-                mutates.append(base)
         attrs: dict[str, object] = {
-            "writes": writes,
-            "mutates": mutates,
-            "reads": _extract_reads(ts_node, self.source),
+            "writes": desc.writes,
+            "mutates": desc.mutates,
+            "reads": desc.reads,
             "controlled_by": controller,
         }
         self._add_node(node_id, NodeKind.Assignment, ts_node, attrs=attrs)
         self._wire(preds, node_id)
         return [node_id]
 
-    def _build_return(self, ts_node: TSNode, preds: list[str], controller: str | None) -> list[str]:
+    def _build_return(
+        self, ts_node: TSNode, desc: ReturnDesc, preds: list[str], controller: str | None
+    ) -> list[str]:
         node_id = self._new_id("return")
         attrs: dict[str, object] = {
-            "reads": _extract_reads(ts_node, self.source),
-            "mutates": _extract_call_mutations(ts_node, self.source),
+            "reads": desc.reads,
+            "mutates": desc.mutates,
             "controlled_by": controller,
         }
         self._add_node(node_id, NodeKind.Return, ts_node, attrs=attrs)
@@ -164,193 +160,118 @@ class _CFGBuilder:
         # Return is a sink — no open successors for the caller to wire.
         return []
 
-    def _build_if(self, ts_node: TSNode, preds: list[str], controller: str | None) -> list[str]:
+    def _build_branch(
+        self, ts_node: TSNode, desc: BranchDesc, preds: list[str], controller: str | None
+    ) -> list[str]:
         branch_id = self._new_id("branch")
-        attrs: dict[str, object] = {
-            "reads": _extract_reads(ts_node, self.source),
-            "controlled_by": controller,
-        }
+        attrs: dict[str, object] = {"reads": desc.reads, "controlled_by": controller}
         self._add_node(branch_id, NodeKind.Branch, ts_node, attrs=attrs)
         self._wire(preds, branch_id)
 
         exits: list[str] = []
+        if desc.consequence is not None:
+            exits.extend(self.build_block(desc.consequence, [branch_id], controller=branch_id))
 
-        consequence = ts_node.child_by_field_name("consequence")
-        if consequence is not None:
-            exits.extend(self.build_block(consequence, [branch_id], controller=branch_id))
-
-        alternative = ts_node.child_by_field_name("alternative")
-        if alternative is None:
+        if desc.next_branch is not None:
+            # else-if arm: its own Branch, control-dependent on this one.
+            next_desc = self.adapter.describe_statement(desc.next_branch, self.source)
+            if isinstance(next_desc, BranchDesc):
+                exits.extend(
+                    self._build_branch(desc.next_branch, next_desc, [branch_id], branch_id)
+                )
+            else:  # defensive: treat unexpected shapes as an else block
+                exits.extend(self.build_stmt(desc.next_branch, [branch_id], branch_id))
+        elif desc.else_block is not None:
+            exits.extend(self.build_block(desc.else_block, [branch_id], controller=branch_id))
+        else:
             # No else: the branch itself is an open predecessor for fall-through.
             exits.append(branch_id)
-        elif alternative.type == "else_clause":
-            else_body = alternative.child_by_field_name("body")
-            if else_body is not None:
-                exits.extend(self.build_block(else_body, [branch_id], controller=branch_id))
-            else:
-                exits.append(branch_id)
-        elif alternative.type == "elif_clause":
-            # Each elif gets its own Branch node, rooted at the parent branch.
-            # The elif's *own* outer controller is the parent branch — so the
-            # elif's condition is control-dependent on the parent.
-            exits.extend(self._build_elif(alternative, [branch_id], controller=branch_id))
-
         return exits
 
-    def _build_elif(self, ts_node: TSNode, preds: list[str], controller: str | None) -> list[str]:
-        branch_id = self._new_id("branch")
-        attrs: dict[str, object] = {
-            "reads": _extract_reads(ts_node, self.source),
-            "controlled_by": controller,
-        }
-        self._add_node(branch_id, NodeKind.Branch, ts_node, attrs=attrs)
-        self._wire(preds, branch_id)
-
-        exits: list[str] = []
-        consequence = ts_node.child_by_field_name("consequence")
-        if consequence is not None:
-            exits.extend(self.build_block(consequence, [branch_id], controller=branch_id))
-
-        alternative = ts_node.child_by_field_name("alternative")
-        if alternative is None:
-            exits.append(branch_id)
-        elif alternative.type == "else_clause":
-            else_body = alternative.child_by_field_name("body")
-            if else_body is not None:
-                exits.extend(self.build_block(else_body, [branch_id], controller=branch_id))
-            else:
-                exits.append(branch_id)
-        elif alternative.type == "elif_clause":
-            exits.extend(self._build_elif(alternative, [branch_id], controller=branch_id))
-
-        return exits
-
-    def _build_loop(self, ts_node: TSNode, preds: list[str], controller: str | None) -> list[str]:
+    def _build_loop(
+        self, ts_node: TSNode, desc: LoopDesc, preds: list[str], controller: str | None
+    ) -> list[str]:
         loop_id = self._new_id("loop")
-        writes: list[str] = []
-        if ts_node.type == "for_statement":
-            left = ts_node.child_by_field_name("left")
-            if left is not None:
-                writes, _ = _split_pattern(left, self.source)
         attrs: dict[str, object] = {
-            "writes": writes,
-            "reads": _extract_reads(ts_node, self.source),
+            "writes": desc.writes,
+            "reads": desc.reads,
             "controlled_by": controller,
         }
         self._add_node(loop_id, NodeKind.Loop, ts_node, attrs=attrs)
         self._wire(preds, loop_id)
 
-        body = ts_node.child_by_field_name("body")
-        if body is not None:
-            body_tail = self.build_block(body, [loop_id], controller=loop_id)
+        if desc.body is not None:
+            body_tail = self.build_block(desc.body, [loop_id], controller=loop_id)
             for tail in body_tail:
                 self.graph.add_edge(Edge(src=tail, dst=loop_id, kind=EdgeKind.CONTROLS))
 
         # Fall-through exit: loop header itself.
         return [loop_id]
 
-    def _build_with(self, ts_node: TSNode, preds: list[str], controller: str | None) -> list[str]:
+    def _build_with(
+        self, ts_node: TSNode, desc: WithDesc, preds: list[str], controller: str | None
+    ) -> list[str]:
         header_id = self._new_id("with")
-        writes, reads = _with_targets(ts_node, self.source)
         attrs: dict[str, object] = {
-            "writes": writes,
-            "reads": reads,
+            "writes": desc.writes,
+            "reads": desc.reads,
             "mutates": [],
             "controlled_by": controller,
         }
         self._add_node(header_id, NodeKind.Statement, ts_node, attrs=attrs)
         self._wire(preds, header_id)
 
-        body = ts_node.child_by_field_name("body")
-        if body is None:
+        if desc.body is None:
             return [header_id]
         # The body always executes: it keeps the *outer* controller.
-        return self.build_block(body, [header_id], controller=controller)
+        return self.build_block(desc.body, [header_id], controller=controller)
 
-    def _build_try(self, ts_node: TSNode, preds: list[str], controller: str | None) -> list[str]:
-        body = ts_node.child_by_field_name("body")
-        body_tails = self.build_block(body, preds, controller) if body is not None else list(preds)
+    def _build_try(self, desc: TryDesc, preds: list[str], controller: str | None) -> list[str]:
+        body_tails = (
+            self.build_block(desc.body, preds, controller) if desc.body is not None else list(preds)
+        )
 
         no_exception_tails = body_tails
         handler_exits: list[str] = []
-        for child in ts_node.named_children:
-            if child.type == "except_clause":
-                # An exception may fire before any try-body statement completes,
-                # so the handler's predecessors include the try entry.
-                handler_preds = _dedupe(list(preds) + body_tails)
-                handler_exits.extend(self._build_except(child, handler_preds, controller))
-            elif child.type == "else_clause":
-                else_body = child.child_by_field_name("body")
-                if else_body is not None:
-                    no_exception_tails = self.build_block(else_body, no_exception_tails, controller)
+        for handler in desc.handlers:
+            # An exception may fire before any try-body statement completes,
+            # so the handler's predecessors include the try entry.
+            handler_preds = _dedupe(list(preds) + body_tails)
+            branch_id = self._new_id("except")
+            attrs: dict[str, object] = {
+                "writes": handler.writes,
+                "reads": [],
+                "controlled_by": controller,
+            }
+            self._add_node(branch_id, NodeKind.Branch, handler.node, attrs=attrs)
+            self._wire(handler_preds, branch_id)
+            if handler.block is not None:
+                handler_exits.extend(self.build_block(handler.block, [branch_id], branch_id))
+            else:
+                handler_exits.append(branch_id)
+
+        if desc.else_block is not None:
+            no_exception_tails = self.build_block(desc.else_block, no_exception_tails, controller)
 
         exits = _dedupe(no_exception_tails + handler_exits)
 
-        finally_clause = next(
-            (c for c in ts_node.named_children if c.type == "finally_clause"), None
-        )
-        if finally_clause is not None:
-            finally_body = next((c for c in finally_clause.children if c.type == "block"), None)
-            if finally_body is not None:
-                exits = self.build_block(finally_body, exits, controller)
+        if desc.finally_block is not None:
+            exits = self.build_block(desc.finally_block, exits, controller)
         return exits
 
-    def _build_except(self, ts_node: TSNode, preds: list[str], controller: str | None) -> list[str]:
-        branch_id = self._new_id("except")
-        writes: list[str] = []
-        value = ts_node.child_by_field_name("value")
-        if value is not None and value.type == "as_pattern":
-            alias = value.child_by_field_name("alias")
-            if alias is not None and alias.named_children:
-                writes, _ = _split_pattern(alias.named_children[0], self.source)
-        attrs: dict[str, object] = {
-            "writes": writes,
-            "reads": [],
-            "controlled_by": controller,
-        }
-        self._add_node(branch_id, NodeKind.Branch, ts_node, attrs=attrs)
-        self._wire(preds, branch_id)
-
-        block = next((c for c in ts_node.children if c.type == "block"), None)
-        if block is None:
-            return [branch_id]
-        return self.build_block(block, [branch_id], controller=branch_id)
-
-    def _build_match(self, ts_node: TSNode, preds: list[str], controller: str | None) -> list[str]:
-        subject = ts_node.child_by_field_name("subject")
-        subject_reads: list[str] = []
-        if subject is not None:
-            seen: set[str] = set()
-            _collect_reads(subject, self.source, subject_reads, seen)
-
-        body = ts_node.child_by_field_name("body")
-        case_clauses = (
-            [c for c in body.named_children if c.type == "case_clause"] if body is not None else []
-        )
-        if not case_clauses:
-            return self._emit_simple(ts_node, preds, NodeKind.Statement, "stmt", controller)
-
+    def _build_match(self, desc: MatchDesc, preds: list[str], controller: str | None) -> list[str]:
         exits: list[str] = []
         current_preds = list(preds)
         current_controller = controller
         last_branch: str | None = None
-        for case in case_clauses:
+        for case in desc.cases:
             branch_id = self._new_id("case")
-            reads = list(subject_reads)
-            guard = case.child_by_field_name("guard")
-            if guard is not None:
-                seen_g: set[str] = set(reads)
-                _collect_reads(guard, self.source, reads, seen_g)
-            attrs: dict[str, object] = {
-                "reads": reads,
-                "controlled_by": current_controller,
-            }
-            self._add_node(branch_id, NodeKind.Branch, case, attrs=attrs)
+            attrs: dict[str, object] = {"reads": case.reads, "controlled_by": current_controller}
+            self._add_node(branch_id, NodeKind.Branch, case.node, attrs=attrs)
             self._wire(current_preds, branch_id)
 
-            consequence = case.child_by_field_name("consequence")
-            if consequence is not None:
-                exits.extend(self.build_block(consequence, [branch_id], controller=branch_id))
+            if case.consequence is not None:
+                exits.extend(self.build_block(case.consequence, [branch_id], branch_id))
 
             current_preds = [branch_id]
             current_controller = branch_id
@@ -390,240 +311,8 @@ class _CFGBuilder:
         return f"{prefix}:{self.owner.id}#{self._counter}"
 
 
-_ASSIGNMENT_TYPES: frozenset[str] = frozenset({"assignment", "augmented_assignment"})
-
-_MUTATOR_METHODS: frozenset[str] = frozenset(
-    {
-        "add",
-        "append",
-        "appendleft",
-        "clear",
-        "discard",
-        "extend",
-        "extendleft",
-        "insert",
-        "pop",
-        "popitem",
-        "popleft",
-        "put",
-        "remove",
-        "reverse",
-        "setdefault",
-        "sort",
-        "update",
-        "write",
-        "writelines",
-        # DB-session style mutators (SQLAlchemy et al.) — found on real repos
-        # where `db.delete(ch)` classified pure while `db.add(ch)` didn't.
-        "delete",
-        "commit",
-        "rollback",
-        "flush",
-        "merge",
-        "expunge",
-    }
-)
-
-
 def _dedupe(ids: list[str]) -> list[str]:
     return list(dict.fromkeys(ids))
-
-
-def _is_assignment(expr_stmt: TSNode) -> bool:
-    return any(child.type in _ASSIGNMENT_TYPES for child in expr_stmt.children)
-
-
-def _extract_lhs_targets(expr_stmt: TSNode, source: bytes) -> tuple[list[str], list[str]]:
-    """Split an assignment's LHS into (writes, mutates).
-
-    * ``writes`` — names *bound* by this statement (identifier LHS, recursed
-      through tuple/list patterns).
-    * ``mutates`` — base names of attribute/subscript LHS targets (these
-      mutate existing objects but don't introduce a new binding).
-
-    ``self.x = 1`` records ``mutates=["self"]``; ``xs[0] = 1`` records
-    ``mutates=["xs"]``; ``x, obj.y = ...`` records ``writes=["x"]`` and
-    ``mutates=["obj"]``. Augmented assignments (``x += 1``,
-    ``self.total += n``) follow the same LHS rules.
-    """
-    for child in expr_stmt.children:
-        if child.type in _ASSIGNMENT_TYPES:
-            left = child.child_by_field_name("left")
-            if left is not None:
-                return _split_pattern(left, source)
-    return [], []
-
-
-def _split_pattern(ts_node: TSNode, source: bytes) -> tuple[list[str], list[str]]:
-    if ts_node.type == "identifier":
-        return [_text(ts_node, source)], []
-    if ts_node.type == "attribute":
-        obj = ts_node.child_by_field_name("object")
-        return [], _base_names(obj, source) if obj is not None else []
-    if ts_node.type == "subscript":
-        base = ts_node.child_by_field_name("value")
-        return [], _base_names(base, source) if base is not None else []
-    if ts_node.type in {"tuple_pattern", "list_pattern", "pattern_list"}:
-        writes: list[str] = []
-        mutates: list[str] = []
-        for child in ts_node.named_children:
-            w, m = _split_pattern(child, source)
-            writes.extend(w)
-            mutates.extend(m)
-        return writes, mutates
-    return [], []
-
-
-def _base_names(ts_node: TSNode, source: bytes) -> list[str]:
-    """For ``a.b.c`` return ``['a']``; for ``xs`` return ``['xs']``."""
-    cur = ts_node
-    while cur.type in {"attribute", "subscript"}:
-        nxt = cur.child_by_field_name("object" if cur.type == "attribute" else "value")
-        if nxt is None:
-            return []
-        cur = nxt
-    if cur.type == "identifier":
-        return [_text(cur, source)]
-    return []
-
-
-# ---- reads extraction (drives PDG data dependence) ---------------------------
-
-
-def _extract_reads(stmt_ts: TSNode, source: bytes) -> list[str]:
-    """Identifier names read as data by this statement.
-
-    Per stmt kind we pick the right sub-expression (RHS / condition /
-    iterable / returned value / generic). Attribute names and called
-    function names are excluded — only data identifiers count.
-
-    Augmented assignments read both sides: ``x += y`` reads ``x`` and ``y``;
-    ``self.total += n`` reads ``self`` (attribute base) and ``n``.
-    """
-    names: list[str] = []
-    seen: set[str] = set()
-    if stmt_ts.type == "expression_statement":
-        aug = next((c for c in stmt_ts.children if c.type == "augmented_assignment"), None)
-        if aug is not None:
-            left = aug.child_by_field_name("left")
-            right = aug.child_by_field_name("right")
-            if left is not None:
-                _collect_reads(left, source, names, seen)
-            if right is not None:
-                _collect_reads(right, source, names, seen)
-            return names
-    target = _read_target(stmt_ts)
-    if target is None:
-        return []
-    _collect_reads(target, source, names, seen)
-    return names
-
-
-def _with_targets(with_ts: TSNode, source: bytes) -> tuple[list[str], list[str]]:
-    """(writes, reads) for a ``with`` header.
-
-    Each ``with_item`` contributes its context expression's data reads;
-    an ``as`` alias contributes a write.
-    """
-    writes: list[str] = []
-    reads: list[str] = []
-    seen: set[str] = set()
-    clause = next((c for c in with_ts.children if c.type == "with_clause"), None)
-    if clause is None:
-        return writes, reads
-    for item in clause.named_children:
-        if item.type != "with_item":
-            continue
-        value = item.child_by_field_name("value")
-        if value is None:
-            continue
-        if value.type == "as_pattern":
-            context = value.named_children[0] if value.named_children else None
-            alias = value.child_by_field_name("alias")
-            if context is not None:
-                _collect_reads(context, source, reads, seen)
-            if alias is not None and alias.named_children:
-                w, _ = _split_pattern(alias.named_children[0], source)
-                writes.extend(w)
-        else:
-            _collect_reads(value, source, reads, seen)
-    return writes, reads
-
-
-def _extract_call_mutations(stmt_ts: TSNode, source: bytes) -> list[str]:
-    """Receiver base names mutated by mutator method calls in this statement.
-
-    Walks the whole statement subtree, so ``xs.append(x)``, assignment RHS
-    (``x = xs.pop()``), and return expressions (``return xs.pop()``) all
-    count. ``self.config.update(d)`` returns ``["self"]``. Only method
-    names in :data:`_MUTATOR_METHODS` count — unknown mutator names are
-    missed (heuristic).
-    """
-    names: list[str] = []
-    stack: list[TSNode] = [stmt_ts]
-    while stack:
-        node = stack.pop()
-        if node.type == "call":
-            fn = node.child_by_field_name("function")
-            if fn is not None and fn.type == "attribute":
-                attr = fn.child_by_field_name("attribute")
-                obj = fn.child_by_field_name("object")
-                if attr is not None and obj is not None and _text(attr, source) in _MUTATOR_METHODS:
-                    for base in _base_names(obj, source):
-                        if base not in names:
-                            names.append(base)
-        stack.extend(node.children)
-    return names
-
-
-def _read_target(ts_node: TSNode) -> TSNode | None:
-    if ts_node.type == "expression_statement":
-        for child in ts_node.children:
-            if child.type == "assignment":
-                # For assignments, only the RHS contributes data reads. The
-                # LHS base (in attribute/subscript) is handled via `mutates`.
-                return child.child_by_field_name("right")
-        return ts_node
-    if ts_node.type == "return_statement":
-        for child in ts_node.named_children:
-            return child
-        return None
-    if ts_node.type in {"if_statement", "elif_clause", "while_statement"}:
-        return ts_node.child_by_field_name("condition")
-    if ts_node.type == "for_statement":
-        return ts_node.child_by_field_name("right")
-    return ts_node
-
-
-def _collect_reads(ts_node: TSNode, source: bytes, names: list[str], seen: set[str]) -> None:
-    if ts_node.type == "identifier":
-        name = _text(ts_node, source)
-        if name not in seen:
-            seen.add(name)
-            names.append(name)
-        return
-    if ts_node.type == "attribute":
-        obj = ts_node.child_by_field_name("object")
-        if obj is not None:
-            _collect_reads(obj, source, names, seen)
-        return  # skip the attribute identifier
-    if ts_node.type == "call":
-        fn = ts_node.child_by_field_name("function")
-        if fn is not None and fn.type == "attribute":
-            obj = fn.child_by_field_name("object")
-            if obj is not None:
-                _collect_reads(obj, source, names, seen)
-        # else: a bare-identifier callee is not a data read; skip.
-        args = ts_node.child_by_field_name("arguments")
-        if args is not None:
-            _collect_reads(args, source, names, seen)
-        return
-    for child in ts_node.children:
-        _collect_reads(child, source, names, seen)
-
-
-def _text(ts_node: TSNode, source: bytes) -> str:
-    return source[ts_node.start_byte : ts_node.end_byte].decode("utf-8", errors="replace")
 
 
 def _short_name(ts_node: TSNode, source: bytes) -> str:

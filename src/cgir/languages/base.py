@@ -20,11 +20,97 @@ The surface grows by phase as passes are migrated behind it:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 
 from tree_sitter import Node as TSNode
 
 # (dotted_callee, arg_identifier_names, 1-based_line)
 CallSite = tuple[str, list[str], int]
+
+
+# --- normalized statement descriptors (phase 2: CFG) ---------------------------
+#
+# The CFG *topology* (how branches wire, loop back-edges, try/finally joins)
+# is language-universal and lives in cgir/analyses/cfg.py. The adapter's job
+# is to classify each statement and hand back its parts in one of these
+# shapes; the builder never looks at grammar node types.
+
+
+@dataclass(slots=True)
+class SimpleDesc:
+    reads: list[str] = field(default_factory=list)
+    mutates: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AssignDesc:
+    writes: list[str] = field(default_factory=list)
+    mutates: list[str] = field(default_factory=list)
+    reads: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ReturnDesc:
+    reads: list[str] = field(default_factory=list)
+    mutates: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class BranchDesc:
+    """An if/elif (or `else if`) arm. Chains via ``next_branch``."""
+
+    reads: list[str] = field(default_factory=list)
+    consequence: TSNode | None = None
+    else_block: TSNode | None = None
+    next_branch: TSNode | None = None  # elif_clause / nested `if` — described again
+
+
+@dataclass(slots=True)
+class LoopDesc:
+    reads: list[str] = field(default_factory=list)
+    writes: list[str] = field(default_factory=list)  # for-targets
+    body: TSNode | None = None
+
+
+@dataclass(slots=True)
+class WithDesc:
+    """Resource-acquisition header (with / using / try-with-resources)."""
+
+    writes: list[str] = field(default_factory=list)  # `as` aliases
+    reads: list[str] = field(default_factory=list)
+    body: TSNode | None = None
+
+
+@dataclass(slots=True)
+class HandlerDesc:
+    node: TSNode
+    writes: list[str] = field(default_factory=list)  # `except ... as e`
+    block: TSNode | None = None
+
+
+@dataclass(slots=True)
+class TryDesc:
+    body: TSNode | None = None
+    handlers: list[HandlerDesc] = field(default_factory=list)
+    else_block: TSNode | None = None
+    finally_block: TSNode | None = None
+
+
+@dataclass(slots=True)
+class CaseDesc:
+    node: TSNode
+    reads: list[str] = field(default_factory=list)  # subject + guard
+    consequence: TSNode | None = None
+
+
+@dataclass(slots=True)
+class MatchDesc:
+    cases: list[CaseDesc] = field(default_factory=list)
+
+
+StatementDesc = (
+    SimpleDesc | AssignDesc | ReturnDesc | BranchDesc | LoopDesc | WithDesc | TryDesc | MatchDesc
+)
 
 
 class LanguageAdapter(ABC):
@@ -51,3 +137,17 @@ class LanguageAdapter(ABC):
     @abstractmethod
     def call_sites(self, func_node: TSNode, source: bytes) -> list[CallSite]:
         """Call sites in the body: dotted callee, arg identifier names, line."""
+
+    # --- phase 2: CFG extraction --------------------------------------------
+
+    @abstractmethod
+    def function_body(self, func_node: TSNode) -> TSNode | None:
+        """The function's body block node."""
+
+    @abstractmethod
+    def block_statements(self, block: TSNode) -> list[TSNode]:
+        """Statement nodes of a block, comments filtered."""
+
+    @abstractmethod
+    def describe_statement(self, node: TSNode, source: bytes) -> StatementDesc:
+        """Classify one statement and extract its parts (see descriptors)."""
