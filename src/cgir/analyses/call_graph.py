@@ -15,7 +15,7 @@ from cgir.analyses.symbols import SymbolTable, module_of
 from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import NodeKind
-from cgir.languages import DEFAULT_ADAPTER, LanguageAdapter, SourceCache
+from cgir.languages import LanguageAdapter, SourceCache
 
 
 def build_call_graph(
@@ -24,8 +24,7 @@ def build_call_graph(
     repo_path: Path,
     adapter: LanguageAdapter | None = None,
 ) -> None:
-    adapter = adapter or DEFAULT_ADAPTER
-    cache = SourceCache(adapter, repo_path)
+    cache = SourceCache(repo_path, adapter)
     for func in list(graph.nodes()):
         if func.kind not in {NodeKind.Function, NodeKind.Method}:
             continue
@@ -38,11 +37,11 @@ def build_call_graph(
         parsed = cache.get(func.path)
         if parsed is None:
             continue
-        source, root = parsed
-        func_ts = adapter.locate_function(root, func.name, (func.start_line or 1) - 1)
+        source, root, file_adapter = parsed
+        func_ts = file_adapter.locate_function(root, func.name, (func.start_line or 1) - 1)
         if func_ts is None:
             continue
-        for callee_name, arg_names, line in adapter.call_sites(func_ts, source):
+        for callee_name, arg_names, line in file_adapter.call_sites(func_ts, source):
             target = _resolve_callee(tables, table, callee_name)
             if target is None:
                 continue

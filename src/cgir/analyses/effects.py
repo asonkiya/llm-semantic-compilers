@@ -30,7 +30,7 @@ from cgir.analyses.symbols import module_of
 from cgir.ir.edges import EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
-from cgir.languages import DEFAULT_ADAPTER, LanguageAdapter, SourceCache
+from cgir.languages import LanguageAdapter, SourceCache
 
 DIRECT_EFFECT_TAGS: frozenset[str] = frozenset({"io", "raise", "net", "fs", "nondeterm", "db"})
 IMPURE_EFFECT_TAGS: frozenset[str] = DIRECT_EFFECT_TAGS - {"raise"}
@@ -41,8 +41,7 @@ def classify(
     graph: RepoGraph, repo_path: Path, adapter: LanguageAdapter | None = None
 ) -> dict[str, list[str]]:
     """Return ``{function_id: sorted([effect_tag, ...])}`` for every function/method."""
-    adapter = adapter or DEFAULT_ADAPTER
-    cache = SourceCache(adapter, repo_path)
+    cache = SourceCache(repo_path, adapter)
     func_nodes = [n for n in graph.nodes() if n.kind in {NodeKind.Function, NodeKind.Method}]
     alias_maps = _module_alias_maps(graph)
 
@@ -50,7 +49,7 @@ def classify(
     for func in func_nodes:
         module_id = module_of(graph, func)
         aliases = alias_maps.get(module_id, {}) if module_id else {}
-        effects[func.id] = _direct_effects(cache, adapter, func, aliases)
+        effects[func.id] = _direct_effects(cache, func, aliases)
 
     # Propagate transitively over CALLS edges until fixed point. Only
     # *impure* effects taint callers — raise-only callees don't.
@@ -83,15 +82,13 @@ def _module_alias_maps(graph: RepoGraph) -> dict[str, dict[str, str]]:
     return maps
 
 
-def _direct_effects(
-    cache: SourceCache, adapter: LanguageAdapter, func: Node, aliases: dict[str, str]
-) -> set[str]:
+def _direct_effects(cache: SourceCache, func: Node, aliases: dict[str, str]) -> set[str]:
     if func.path is None or func.start_line is None:
         return set()
     parsed = cache.get(func.path)
     if parsed is None:
         return set()
-    source, root = parsed
+    source, root, adapter = parsed
     func_ts = adapter.locate_function(root, func.name, func.start_line - 1)
     if func_ts is None:
         return set()

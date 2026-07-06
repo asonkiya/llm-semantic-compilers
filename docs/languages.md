@@ -26,10 +26,10 @@ full test suite green.
 | 1 | parse / locate / **effects** / **call sites** | ✅ done |
 | 2 | CFG statement classification + field extraction (normalized `StatementDesc`) | ✅ done |
 | 3 | ingest structural dispatch + attr extraction (normalized `Declaration`s) | ✅ done |
-| 4 | `TypeScriptAdapter` + language selection in the pipeline | pending |
+| 4 | `TypeScriptAdapter` + per-file language dispatch | ✅ done |
 
-**As of phase 3, zero grammar node-type strings remain outside
-`cgir/languages/`.** The CFG builder is pure topology over statement
+**Two languages ship (Python, TypeScript); a mixed repo scans both.**
+Zero grammar node-type strings remain outside `cgir/languages/`. The CFG builder is pure topology over statement
 descriptors; the ingester is pure graph construction over declarations.
 Refactor validated end-to-end: rescanning a 441-component repo pre/post
 refactor and running `cgir diff` reports **no changes**.

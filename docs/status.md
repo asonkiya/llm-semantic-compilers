@@ -70,7 +70,9 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Joern adapter | stub | `src/cgir/sources/joern_source.py` (`P2-joern-bridge`) |
 | CodeQL adapter | stub | `src/cgir/sources/codeql_source.py` (`P2-codeql-bridge`) |
 | Neo4j export | stub | `src/cgir/export/neo4j.py` (`P2-neo4j`) |
-| TypeScript target | deferred | no module yet |
+| TypeScript ingester (classes/methods/arrows, effects, CFG, relative imports) | done | `src/cgir/languages/typescript.py` |
+| LanguageAdapter seam (plug-and-play languages) | done | `src/cgir/languages/` |
+| Multi-language repos (per-file adapter dispatch) | done | `sources/tree_sitter_source.py`, `languages/cache.py` |
 
 ## Test coverage
 

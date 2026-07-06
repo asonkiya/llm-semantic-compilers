@@ -49,7 +49,7 @@ from tree_sitter import Node as TSNode
 from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
-from cgir.languages import DEFAULT_ADAPTER, LanguageAdapter, SourceCache
+from cgir.languages import LanguageAdapter, SourceCache
 from cgir.languages.base import (
     AssignDesc,
     BranchDesc,
@@ -63,8 +63,7 @@ from cgir.languages.base import (
 
 
 def build(graph: RepoGraph, repo_path: Path, adapter: LanguageAdapter | None = None) -> None:
-    adapter = adapter or DEFAULT_ADAPTER
-    cache = SourceCache(adapter, repo_path)
+    cache = SourceCache(repo_path, adapter)
     for func in list(graph.nodes()):
         if func.kind not in {NodeKind.Function, NodeKind.Method}:
             continue
@@ -73,14 +72,14 @@ def build(graph: RepoGraph, repo_path: Path, adapter: LanguageAdapter | None = N
         parsed = cache.get(func.path)
         if parsed is None:
             continue
-        source, root = parsed
-        func_ts = adapter.locate_function(root, func.name, func.start_line - 1)
+        source, root, file_adapter = parsed
+        func_ts = file_adapter.locate_function(root, func.name, func.start_line - 1)
         if func_ts is None:
             continue
-        body = adapter.function_body(func_ts)
+        body = file_adapter.function_body(func_ts)
         if body is None:
             continue
-        builder = _CFGBuilder(graph=graph, owner=func, source=source, adapter=adapter)
+        builder = _CFGBuilder(graph=graph, owner=func, source=source, adapter=file_adapter)
         builder.build_block(body, predecessors=[func.id], controller=None)
 
 

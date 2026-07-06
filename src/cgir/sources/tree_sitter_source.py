@@ -22,7 +22,7 @@ from tree_sitter import Node as TSNode
 from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
-from cgir.languages import DEFAULT_ADAPTER, LanguageAdapter
+from cgir.languages import ADAPTERS, LanguageAdapter, adapter_for_extension
 from cgir.languages.base import ClassDecl, FunctionDecl, ImportDecl, VariableDecl
 from cgir.sources.base import GraphSource
 
@@ -57,8 +57,15 @@ class TreeSitterSource(GraphSource):
         ignore_dirs: Iterable[str] | None = None,
         adapter: LanguageAdapter | None = None,
     ) -> None:
-        self._adapter = adapter or DEFAULT_ADAPTER
+        # adapter=None → dispatch per file extension across all registered
+        # languages; a forced adapter restricts ingest to its extensions.
+        self._forced = adapter
         self._ignore: frozenset[str] = DEFAULT_IGNORE_DIRS | frozenset(ignore_dirs or ())
+
+    def _extensions(self) -> tuple[str, ...]:
+        if self._forced is not None:
+            return self._forced.file_extensions
+        return tuple(ext for a in ADAPTERS.values() for ext in a.file_extensions)
 
     def ingest(self, repo_path: Path) -> RepoGraph:
         repo_path = repo_path.resolve()
@@ -68,12 +75,14 @@ class TreeSitterSource(GraphSource):
             Node(id=repo_id, kind=NodeKind.Repository, name=repo_path.name, path=str(repo_path))
         )
         files: list[Path] = []
-        for ext in self._adapter.file_extensions:
+        for ext in self._extensions():
             files.extend(repo_path.rglob(f"*{ext}"))
-        for source_file in sorted(files):
+        for source_file in sorted(set(files)):
             if self._should_skip(source_file.relative_to(repo_path)):
                 continue
-            self._ingest_file(graph, repo_path, repo_id, source_file)
+            adapter = self._forced or adapter_for_extension(source_file.suffix)
+            if adapter is not None:
+                self._ingest_file(graph, repo_path, repo_id, source_file, adapter)
         return graph
 
     def _should_skip(self, rel: Path) -> bool:
@@ -85,7 +94,12 @@ class TreeSitterSource(GraphSource):
         return False
 
     def _ingest_file(
-        self, graph: RepoGraph, repo_path: Path, repo_id: str, file_path: Path
+        self,
+        graph: RepoGraph,
+        repo_path: Path,
+        repo_id: str,
+        file_path: Path,
+        adapter: LanguageAdapter,
     ) -> None:
         rel = file_path.relative_to(repo_path)
         rel_str = str(rel)
@@ -94,7 +108,7 @@ class TreeSitterSource(GraphSource):
         module_id = f"module:{module_name}"
 
         source = file_path.read_bytes()
-        root = self._adapter.parse(source)
+        root = adapter.parse(source)
 
         graph.add_node(
             Node(
@@ -116,12 +130,12 @@ class TreeSitterSource(GraphSource):
                 path=rel_str,
                 start_line=1,
                 end_line=root.end_point[0] + 1,
-                attrs={"language": self._adapter.name},
+                attrs={"language": adapter.name},
             )
         )
         graph.add_edge(Edge(src=file_id, dst=module_id, kind=EdgeKind.CONTAINS))
 
-        for decl in self._adapter.module_declarations(root, source, module_name):
+        for decl in adapter.module_declarations(root, source, module_name):
             if isinstance(decl, FunctionDecl):
                 self._add_function(graph, module_id, module_name, rel_str, decl, is_method=False)
             elif isinstance(decl, ClassDecl):
