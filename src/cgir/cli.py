@@ -216,6 +216,56 @@ def _span_source(node: Any, repo: Path) -> str | None:
 
 
 @app.command()
+def verify(
+    component_id: Annotated[str, typer.Argument(metavar="ID")],
+    candidate: Annotated[
+        Path, typer.Option("--candidate", help="File with the new implementation.")
+    ],
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+    repo: Annotated[Path, typer.Option("--repo", help="Repo root.")] = Path("."),
+    fail_on: Annotated[
+        list[str] | None,
+        typer.Option("--fail-on", help="Drift rules that fail the check (repeatable)."),
+    ] = None,
+    run_tests: Annotated[
+        bool, typer.Option("--tests", help="Also run the component's linked tests.")
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Contract-check an LLM-written candidate against the indexed component."""
+    from cgir.verify import verify as run_verify
+
+    try:
+        result = run_verify(
+            index_dir,
+            component_id,
+            candidate.read_text(),
+            repo,
+            fail_on=list(fail_on or []),
+            run_tests=run_tests,
+        )
+    except KeyError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    if as_json:
+        typer.echo(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        typer.echo(f"contract: {'ok' if result.contract_ok else 'CHANGED'}")
+        for name, values in result.drift.items():
+            typer.echo(f"  {name}: {values['old']} -> {values['new']}")
+        if result.violations:
+            typer.echo("violations:")
+            for line in result.violations:
+                typer.echo(f"  ! {line}")
+        if result.tests_ok is not None:
+            typer.echo(
+                f"tests ({len(result.tests_ran)} file(s)): {'pass' if result.tests_ok else 'FAIL'}"
+            )
+    if result.violations or result.tests_ok is False:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def mcp(
     index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
 ) -> None:

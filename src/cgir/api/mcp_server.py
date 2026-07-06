@@ -76,6 +76,20 @@ def tool_entrypoints(index_dir: Path) -> str:
     return "\n".join(f"{s.entrypoint}  {s.id}" for s in entries) + "\n"
 
 
+def tool_verify(index_dir: Path, repo: Path, component_id: str, candidate: str) -> str:
+    """Contract-check a candidate implementation before proposing it."""
+    from cgir.verify import verify
+
+    try:
+        result = verify(index_dir, component_id, candidate, repo)
+    except KeyError:
+        return f"unknown component: {component_id}"
+    lines = [f"contract: {'ok' if result.contract_ok else 'CHANGED'}"]
+    for name, values in result.drift.items():
+        lines.append(f"  {name}: {values['old']} -> {values['new']}")
+    return "\n".join(lines) + "\n"
+
+
 def create_server(index_dir: Path) -> Any:
     """Build the FastMCP server (requires the ``cgir[mcp]`` extra)."""
     try:
@@ -116,5 +130,10 @@ def create_server(index_dir: Path) -> Any:
     def entrypoints() -> str:
         """The repo's external surface: HTTP routes, CLI commands, tasks."""
         return tool_entrypoints(index_dir)
+
+    @server.tool()
+    def verify(repo: str, component_id: str, candidate: str) -> str:
+        """Contract-check a candidate implementation of a component before proposing it."""
+        return tool_verify(index_dir, Path(repo), component_id, candidate)
 
     return server
