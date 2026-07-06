@@ -17,14 +17,20 @@ from cgir.languages.base import (
     BranchDesc,
     CallSite,
     CaseDesc,
+    ClassDecl,
+    Declaration,
+    FunctionDecl,
     HandlerDesc,
+    ImportDecl,
     LanguageAdapter,
     LoopDesc,
     MatchDesc,
+    ParamDecl,
     ReturnDesc,
     SimpleDesc,
     StatementDesc,
     TryDesc,
+    VariableDecl,
     WithDesc,
 )
 
@@ -315,6 +321,94 @@ class PythonAdapter(LanguageAdapter):
                     )
                 )
         return MatchDesc(cases=cases)
+
+    # --- phase 3: ingest extraction ------------------------------------------
+
+    def module_declarations(
+        self, root: TSNode, source: bytes, module_name: str
+    ) -> list[Declaration]:
+        decls: list[Declaration] = []
+        for child in root.children:
+            decls.extend(self._top_level_decl(child, source, module_name))
+        return decls
+
+    def _top_level_decl(self, node: TSNode, source: bytes, module_name: str) -> list[Declaration]:
+        t = node.type
+        if t == "function_definition":
+            return [self._function_decl(node, source, [], is_method=False)]
+        if t == "class_definition":
+            return [self._class_decl(node, source)]
+        if t == "decorated_definition":
+            inner = _undecorated(node)
+            if inner is None:
+                return []
+            decorators = _decorator_texts(node, source)
+            if inner.type == "function_definition":
+                return [self._function_decl(inner, source, decorators, is_method=False)]
+            if inner.type == "class_definition":
+                return [self._class_decl(inner, source)]
+            return []
+        if t in {"import_statement", "import_from_statement"}:
+            return [
+                ImportDecl(node=node, target=target, alias=alias)
+                for target, alias in _import_targets(node, source, module_name)
+            ]
+        if t == "expression_statement":
+            assign = next((c for c in node.children if c.type == "assignment"), None)
+            if assign is None:
+                return []
+            left = assign.child_by_field_name("left")
+            if left is None:
+                return []
+            return [
+                VariableDecl(node=node, name=name)
+                for name in _assignment_target_names(left, source)
+            ]
+        return []
+
+    def _class_decl(self, node: TSNode, source: bytes) -> ClassDecl:
+        name = _identifier_text(node.child_by_field_name("name"), source) or "<anonymous>"
+        methods: list[FunctionDecl] = []
+        body = node.child_by_field_name("body")
+        if body is not None:
+            for child in body.children:
+                if child.type == "function_definition":
+                    methods.append(self._function_decl(child, source, [], is_method=True))
+                elif child.type == "decorated_definition":
+                    inner = _undecorated(child)
+                    if inner is not None and inner.type == "function_definition":
+                        methods.append(
+                            self._function_decl(
+                                inner, source, _decorator_texts(child, source), is_method=True
+                            )
+                        )
+        return ClassDecl(node=node, name=name, methods=methods)
+
+    def _function_decl(
+        self, node: TSNode, source: bytes, decorators: list[str], is_method: bool
+    ) -> FunctionDecl:
+        name = _identifier_text(node.child_by_field_name("name"), source) or "<anonymous>"
+        params: list[ParamDecl] = []
+        params_node = node.child_by_field_name("parameters")
+        if params_node is not None:
+            for child in params_node.children:
+                param_name = _param_name(child, source)
+                if param_name is None:
+                    continue
+                if is_method and param_name == "self":
+                    continue
+                params.append(ParamDecl(name=param_name, node=child))
+        return FunctionDecl(
+            node=node,
+            name=name,
+            params=params,
+            signature=_signature_text(node, source),
+            returns=_return_annotation_text(node, source),
+            doc=_docstring_text(node, source),
+            raises=_raised_names(node, source),
+            decorators=list(decorators),
+            free_names=_free_names(node, source),
+        )
 
     def call_sites(self, func_node: TSNode, source: bytes) -> list[CallSite]:
         sites: list[CallSite] = []
@@ -622,3 +716,340 @@ def _collect_reads(ts_node: TSNode, source: bytes, names: list[str], seen: set[s
         return
     for child in ts_node.children:
         _collect_reads(child, source, names, seen)
+
+
+# --- module/ingest extraction (moved from sources/tree_sitter_source.py) -------
+
+_PY_BUILTINS: frozenset[str] = frozenset(
+    {
+        "True",
+        "False",
+        "None",
+        "self",
+        "cls",
+        "print",
+        "len",
+        "range",
+        "enumerate",
+        "zip",
+        "map",
+        "filter",
+        "sorted",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "frozenset",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "type",
+        "isinstance",
+        "issubclass",
+        "hasattr",
+        "getattr",
+        "setattr",
+        "min",
+        "max",
+        "sum",
+        "abs",
+        "round",
+        "any",
+        "all",
+        "next",
+        "iter",
+        "open",
+        "super",
+        "object",
+        "Exception",
+        "ValueError",
+        "TypeError",
+        "KeyError",
+        "RuntimeError",
+        "StopIteration",
+        "repr",
+        "format",
+        "vars",
+        "dir",
+        "id",
+        "input",
+        "reversed",
+        "slice",
+        "property",
+        "staticmethod",
+        "classmethod",
+    }
+)
+
+
+def _undecorated(decorated_ts: TSNode) -> TSNode | None:
+    """Return the function/class wrapped by a ``decorated_definition``."""
+    for child in decorated_ts.named_children:
+        if child.type in {"function_definition", "class_definition"}:
+            return child
+    return None
+
+
+def _decorator_texts(decorated_ts: TSNode, source: bytes) -> list[str]:
+    """Each decorator's call text, without the leading ``@``."""
+    texts: list[str] = []
+    for child in decorated_ts.named_children:
+        if child.type == "decorator":
+            raw = source[child.start_byte : child.end_byte].decode("utf-8", errors="replace")
+            texts.append(raw.lstrip("@").strip())
+    return texts
+
+
+def _identifier_text(node: TSNode | None, source: bytes) -> str | None:
+    if node is None:
+        return None
+    return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
+
+
+def _signature_text(func_node: TSNode, source: bytes) -> str:
+    name = _identifier_text(func_node.child_by_field_name("name"), source) or ""
+    params_node = func_node.child_by_field_name("parameters")
+    params_text = _identifier_text(params_node, source) or "()"
+    return_node = func_node.child_by_field_name("return_type")
+    return_text = _identifier_text(return_node, source)
+    sig = f"{name}{params_text}"
+    if return_text:
+        sig += f" -> {return_text}"
+    return sig
+
+
+def _return_annotation_text(func_node: TSNode, source: bytes) -> str | None:
+    """The declared return type (``-> float`` gives ``"float"``), if any."""
+    return _identifier_text(func_node.child_by_field_name("return_type"), source)
+
+
+def _docstring_text(func_node: TSNode, source: bytes) -> str:
+    """The function's docstring (first string statement in the body), cleaned."""
+    body = func_node.child_by_field_name("body")
+    if body is None:
+        return ""
+    for stmt in body.named_children:
+        if stmt.type == "comment":
+            continue
+        if stmt.type == "expression_statement" and stmt.named_children:
+            inner = stmt.named_children[0]
+            if inner.type == "string":
+                raw = source[inner.start_byte : inner.end_byte].decode("utf-8", errors="replace")
+                return _clean_docstring(raw)
+        return ""  # first real statement isn't a string -> no docstring
+    return ""
+
+
+def _clean_docstring(raw: str) -> str:
+    text = raw.strip()
+    for quote in ('"""', "'''", '"', "'"):
+        if text.startswith(quote):
+            text = text[len(quote) :]
+            if text.endswith(quote):
+                text = text[: -len(quote)]
+            break
+    return text.strip()
+
+
+def _raised_names(func_node: TSNode, source: bytes) -> list[str]:
+    """Exception class names raised in the body."""
+    body = func_node.child_by_field_name("body")
+    if body is None:
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+    stack: list[TSNode] = [body]
+    while stack:
+        node = stack.pop()
+        if node.type == "raise_statement":
+            for child in node.named_children:
+                target = child.child_by_field_name("function") if child.type == "call" else child
+                if target is None:
+                    continue
+                text = _text(target, source)
+                name = text.split(".")[-1].split("(")[0].strip()
+                if name and name[0].isupper() and name not in seen:
+                    seen.add(name)
+                    names.append(name)
+                break
+        stack.extend(node.children)
+    return names
+
+
+def _free_names(func_node: TSNode, source: bytes) -> list[str]:
+    """Names referenced in the body that are not params, locals, or builtins."""
+    body = func_node.child_by_field_name("body")
+    if body is None:
+        return []
+    bound: set[str] = set()
+    params = func_node.child_by_field_name("parameters")
+    if params is not None:
+        for child in params.children:
+            name = _param_name(child, source)
+            if name:
+                bound.add(name)
+    _collect_bound(body, source, bound)
+
+    referenced: list[str] = []
+    seen: set[str] = set()
+    _collect_referenced(body, source, referenced, seen)
+    return [n for n in referenced if n not in bound and n not in _PY_BUILTINS]
+
+
+def _collect_bound(node: TSNode, source: bytes, bound: set[str]) -> None:
+    t = node.type
+    if t in {"assignment", "augmented_assignment"} or t == "for_statement":
+        left = node.child_by_field_name("left")
+        if left is not None:
+            bound.update(_assignment_target_names(left, source))
+    elif t in {"function_definition", "class_definition"}:
+        def_name = _identifier_text(node.child_by_field_name("name"), source)
+        if def_name:
+            bound.add(def_name)
+    elif t == "as_pattern":
+        alias_node = node.child_by_field_name("alias")
+        if alias_node is not None:
+            for ident in _all_identifiers(alias_node, source):
+                bound.add(ident)
+    elif t == "except_clause":
+        for child in node.children:
+            if child.type == "identifier":
+                bound.add(_text(child, source))
+    elif t == "named_expression":
+        name_node = node.child_by_field_name("name")
+        if name_node is not None:
+            bound.add(_text(name_node, source))
+    elif t in {"import_statement", "import_from_statement"}:
+        for target, alias in _import_targets(node, source, ""):
+            bound.add(alias or target.rsplit(".", 1)[-1])
+    for child in node.children:
+        _collect_bound(child, source, bound)
+
+
+def _collect_referenced(node: TSNode, source: bytes, out: list[str], seen: set[str]) -> None:
+    t = node.type
+    if t == "identifier":
+        name = _text(node, source)
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+        return
+    if t == "attribute":
+        obj = node.child_by_field_name("object")
+        if obj is not None:
+            _collect_referenced(obj, source, out, seen)
+        return  # skip the attribute suffix name
+    if t == "keyword_argument":
+        value = node.child_by_field_name("value")
+        if value is not None:
+            _collect_referenced(value, source, out, seen)
+        return  # skip the keyword name
+    if t in {"import_statement", "import_from_statement"}:
+        return
+    for child in node.children:
+        _collect_referenced(child, source, out, seen)
+
+
+def _all_identifiers(node: TSNode, source: bytes) -> list[str]:
+    out: list[str] = []
+    if node.type == "identifier":
+        return [_text(node, source)]
+    for child in node.children:
+        out.extend(_all_identifiers(child, source))
+    return out
+
+
+def _param_name(node: TSNode, source: bytes) -> str | None:
+    if node.type == "identifier":
+        return _identifier_text(node, source)
+    if node.type in {
+        "typed_parameter",
+        "default_parameter",
+        "typed_default_parameter",
+        "list_splat_pattern",
+        "dictionary_splat_pattern",
+    }:
+        # Search children for the identifier that names the parameter.
+        for child in node.children:
+            if child.type == "identifier":
+                return _identifier_text(child, source)
+    return None
+
+
+def _assignment_target_names(left: TSNode, source: bytes) -> list[str]:
+    """Bound names on an assignment LHS: ``x``, ``x, y``; attribute/subscript LHS none."""
+    if left.type == "identifier":
+        text = _identifier_text(left, source)
+        return [text] if text else []
+    if left.type in {"pattern_list", "tuple_pattern", "list_pattern"}:
+        names: list[str] = []
+        for child in left.named_children:
+            names.extend(_assignment_target_names(child, source))
+        return names
+    return []
+
+
+def _import_targets(
+    node: TSNode, source: bytes, current_module: str
+) -> list[tuple[str, str | None]]:
+    """Yield ``(absolute_target, local_alias_or_None)`` per imported name."""
+    targets: list[tuple[str, str | None]] = []
+    if node.type == "import_statement":
+        for child in node.children:
+            if child.type in {"dotted_name", "aliased_import"}:
+                name = _identifier_text(_name_child(child), source)
+                if name:
+                    targets.append((name, _alias_text(child, source)))
+    elif node.type == "import_from_statement":
+        module_node = node.child_by_field_name("module_name")
+        module = _resolve_from_module(module_node, source, current_module) if module_node else ""
+        for child in node.children_by_field_name("name"):
+            name = _identifier_text(_name_child(child), source)
+            if name:
+                target = f"{module}.{name}" if module else name
+                targets.append((target, _alias_text(child, source)))
+    return targets
+
+
+def _alias_text(ts_node: TSNode, source: bytes) -> str | None:
+    """The ``as`` alias of an ``aliased_import``, if any."""
+    if ts_node.type != "aliased_import":
+        return None
+    return _identifier_text(ts_node.child_by_field_name("alias"), source)
+
+
+def _resolve_from_module(module_node: TSNode, source: bytes, current_module: str) -> str:
+    """Absolute dotted name of an ``import_from_statement`` module (incl. relative)."""
+    if module_node.type == "relative_import":
+        dots = 0
+        sub_name = ""
+        for child in module_node.children:
+            if child.type == "import_prefix":
+                # import_prefix's text is one or more "." characters.
+                raw = source[child.start_byte : child.end_byte]
+                dots = raw.count(b".")
+            elif child.type == "dotted_name":
+                sub_name = _identifier_text(child, source) or ""
+        if dots == 0:
+            return sub_name
+        parts = current_module.split(".")
+        # Drop the module itself; each extra dot peels off one more package level.
+        package_parts = parts[:-1]
+        up = dots - 1
+        if up > 0:
+            package_parts = package_parts[:-up] if up <= len(package_parts) else []
+        absolute = list(package_parts)
+        if sub_name:
+            absolute.extend(sub_name.split("."))
+        return ".".join(absolute)
+    return _identifier_text(module_node, source) or ""
+
+
+def _name_child(node: TSNode) -> TSNode:
+    if node.type == "aliased_import":
+        sub = node.child_by_field_name("name")
+        if sub is not None:
+            return sub
+    return node

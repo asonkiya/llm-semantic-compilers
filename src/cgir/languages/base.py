@@ -113,6 +113,56 @@ StatementDesc = (
 )
 
 
+# --- normalized module declarations (phase 3: ingest) ---------------------------
+#
+# The structural spine (Repository → File → Module → members + CONTAINS) and
+# node/edge construction are language-universal and live in
+# sources/tree_sitter_source.py. The adapter walks a module root and yields
+# these; the ingester never looks at grammar node types.
+
+
+@dataclass(slots=True)
+class ParamDecl:
+    name: str
+    node: TSNode
+
+
+@dataclass(slots=True)
+class FunctionDecl:
+    node: TSNode
+    name: str
+    params: list[ParamDecl] = field(default_factory=list)
+    signature: str = ""
+    returns: str | None = None
+    doc: str = ""
+    raises: list[str] = field(default_factory=list)
+    decorators: list[str] = field(default_factory=list)
+    free_names: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ClassDecl:
+    node: TSNode
+    name: str
+    methods: list[FunctionDecl] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ImportDecl:
+    node: TSNode
+    target: str
+    alias: str | None = None
+
+
+@dataclass(slots=True)
+class VariableDecl:
+    node: TSNode
+    name: str
+
+
+Declaration = FunctionDecl | ClassDecl | ImportDecl | VariableDecl
+
+
 class LanguageAdapter(ABC):
     name: str = "base"
     file_extensions: tuple[str, ...] = ()
@@ -151,3 +201,16 @@ class LanguageAdapter(ABC):
     @abstractmethod
     def describe_statement(self, node: TSNode, source: bytes) -> StatementDesc:
         """Classify one statement and extract its parts (see descriptors)."""
+
+    # --- phase 3: ingest extraction ------------------------------------------
+
+    @abstractmethod
+    def module_declarations(
+        self, root: TSNode, source: bytes, module_name: str
+    ) -> list[Declaration]:
+        """Top-level declarations of a module, fully extracted.
+
+        ``module_name`` is the dotted module path — needed for languages
+        with relative imports (``from ..a import x``). Method params exclude
+        implicit receivers (``self``/``this``).
+        """

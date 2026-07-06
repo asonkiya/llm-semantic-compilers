@@ -1,13 +1,15 @@
-"""Tree-sitter ingester for Python.
+"""Generic tree-sitter ingester — language-neutral over a LanguageAdapter.
 
-Walks a repo, parses every ``.py`` file with tree-sitter, and emits the
-``Repository → File → Module → (Class → Method | Function)`` containment
-spine plus ``Parameter`` children and per-module ``Import`` siblings.
+Walks a repo, parses each source file with the active adapter, and emits
+the ``Repository → File → Module → (Class → Method | Function)``
+containment spine plus ``Parameter`` children, per-module ``Import``
+siblings, and module-level ``Variable`` nodes.
 
-This pass only builds the structural skeleton. Symbol resolution and the
-``CALLS`` edges live in :mod:`cgir.analyses.symbols` and
-:mod:`cgir.analyses.call_graph` so that downstream backends (Joern, CodeQL)
-can plug in at the same seam.
+All grammar-specific extraction (what a function/class/import looks like,
+signatures, docstrings, raised names, free names, relative-import
+resolution) comes from :meth:`LanguageAdapter.module_declarations` as
+normalized declarations; this module only builds graph nodes and edges.
+Symbol resolution and ``CALLS`` edges live in :mod:`cgir.analyses`.
 """
 
 from __future__ import annotations
@@ -15,13 +17,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-import tree_sitter_python
-from tree_sitter import Language, Parser
 from tree_sitter import Node as TSNode
 
 from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
+from cgir.languages import DEFAULT_ADAPTER, LanguageAdapter
+from cgir.languages.base import ClassDecl, FunctionDecl, ImportDecl, VariableDecl
 from cgir.sources.base import GraphSource
 
 DEFAULT_IGNORE_DIRS: frozenset[str] = frozenset(
@@ -43,22 +45,19 @@ DEFAULT_IGNORE_DIRS: frozenset[str] = frozenset(
         ".pytest_cache",
         ".mypy_cache",
         ".ruff_cache",
-        # Other ecosystems sometimes vendored into Python repos
+        # Other ecosystems sometimes vendored into repos
         "node_modules",
     }
 )
 
 
-def _python_parser() -> Parser:
-    language = Language(tree_sitter_python.language())
-    parser = Parser()
-    parser.language = language
-    return parser
-
-
 class TreeSitterSource(GraphSource):
-    def __init__(self, ignore_dirs: Iterable[str] | None = None) -> None:
-        self._parser = _python_parser()
+    def __init__(
+        self,
+        ignore_dirs: Iterable[str] | None = None,
+        adapter: LanguageAdapter | None = None,
+    ) -> None:
+        self._adapter = adapter or DEFAULT_ADAPTER
         self._ignore: frozenset[str] = DEFAULT_IGNORE_DIRS | frozenset(ignore_dirs or ())
 
     def ingest(self, repo_path: Path) -> RepoGraph:
@@ -68,10 +67,13 @@ class TreeSitterSource(GraphSource):
         graph.add_node(
             Node(id=repo_id, kind=NodeKind.Repository, name=repo_path.name, path=str(repo_path))
         )
-        for py_file in sorted(repo_path.rglob("*.py")):
-            if self._should_skip(py_file.relative_to(repo_path)):
+        files: list[Path] = []
+        for ext in self._adapter.file_extensions:
+            files.extend(repo_path.rglob(f"*{ext}"))
+        for source_file in sorted(files):
+            if self._should_skip(source_file.relative_to(repo_path)):
                 continue
-            self._ingest_file(graph, repo_path, repo_id, py_file)
+            self._ingest_file(graph, repo_path, repo_id, source_file)
         return graph
 
     def _should_skip(self, rel: Path) -> bool:
@@ -92,8 +94,7 @@ class TreeSitterSource(GraphSource):
         module_id = f"module:{module_name}"
 
         source = file_path.read_bytes()
-        tree = self._parser.parse(source)
-        root = tree.root_node
+        root = self._adapter.parse(source)
 
         graph.add_node(
             Node(
@@ -115,89 +116,20 @@ class TreeSitterSource(GraphSource):
                 path=rel_str,
                 start_line=1,
                 end_line=root.end_point[0] + 1,
-                attrs={"language": "python"},
+                attrs={"language": self._adapter.name},
             )
         )
         graph.add_edge(Edge(src=file_id, dst=module_id, kind=EdgeKind.CONTAINS))
 
-        self._walk_module(graph, module_id, module_name, rel_str, source, root)
-
-    def _walk_module(
-        self,
-        graph: RepoGraph,
-        module_id: str,
-        module_name: str,
-        rel_path: str,
-        source: bytes,
-        root: TSNode,
-    ) -> None:
-        for child in root.children:
-            self._dispatch_top_level(graph, module_id, module_name, rel_path, source, child)
-
-    def _dispatch_top_level(
-        self,
-        graph: RepoGraph,
-        module_id: str,
-        module_name: str,
-        rel_path: str,
-        source: bytes,
-        ts_node: TSNode,
-    ) -> None:
-        if ts_node.type == "function_definition":
-            self._add_function(graph, module_id, module_name, rel_path, source, ts_node)
-        elif ts_node.type == "class_definition":
-            self._add_class(graph, module_id, module_name, rel_path, source, ts_node)
-        elif ts_node.type == "decorated_definition":
-            inner = _undecorated(ts_node)
-            if inner is None:
-                return
-            decorators = _decorator_texts(ts_node, source)
-            if inner.type == "function_definition":
-                self._add_function(
-                    graph, module_id, module_name, rel_path, source, inner, decorators
-                )
-            else:
-                self._dispatch_top_level(graph, module_id, module_name, rel_path, source, inner)
-        elif ts_node.type in {"import_statement", "import_from_statement"}:
-            self._add_imports(graph, module_id, module_name, rel_path, source, ts_node)
-        elif ts_node.type == "expression_statement":
-            self._add_module_variables(graph, module_id, module_name, rel_path, source, ts_node)
-
-    def _add_module_variables(
-        self,
-        graph: RepoGraph,
-        module_id: str,
-        module_name: str,
-        rel_path: str,
-        source: bytes,
-        ts_node: TSNode,
-    ) -> None:
-        """Module-level assignments become ``Variable`` nodes (constants, aliases).
-
-        These carry a source span so :mod:`cgir.report.pack` can include a
-        ``Point: TypeAlias = tuple[float, float]`` line when a component's
-        contract references ``Point``.
-        """
-        assign = next((c for c in ts_node.children if c.type == "assignment"), None)
-        if assign is None:
-            return
-        left = assign.child_by_field_name("left")
-        if left is None:
-            return
-        for name in _assignment_target_names(left, source):
-            var_id = f"var:{module_name}.{name}"
-            graph.add_node(
-                Node(
-                    id=var_id,
-                    kind=NodeKind.Variable,
-                    name=name,
-                    path=rel_path,
-                    start_line=ts_node.start_point[0] + 1,
-                    end_line=ts_node.end_point[0] + 1,
-                    attrs={"qualname": f"{module_name}.{name}"},
-                )
-            )
-            graph.add_edge(Edge(src=module_id, dst=var_id, kind=EdgeKind.CONTAINS))
+        for decl in self._adapter.module_declarations(root, source, module_name):
+            if isinstance(decl, FunctionDecl):
+                self._add_function(graph, module_id, module_name, rel_str, decl, is_method=False)
+            elif isinstance(decl, ClassDecl):
+                self._add_class(graph, module_id, module_name, rel_str, decl)
+            elif isinstance(decl, ImportDecl):
+                self._add_import(graph, module_id, rel_str, decl)
+            elif isinstance(decl, VariableDecl):
+                self._add_variable(graph, module_id, module_name, rel_str, decl)
 
     def _add_function(
         self,
@@ -205,13 +137,10 @@ class TreeSitterSource(GraphSource):
         parent_id: str,
         parent_qual: str,
         rel_path: str,
-        source: bytes,
-        ts_node: TSNode,
-        decorators: list[str] | None = None,
-    ) -> str:
-        name = _identifier_text(ts_node.child_by_field_name("name"), source) or "<anonymous>"
-        is_method = parent_id.startswith("class:")
-        qual = f"{parent_qual}.{name}"
+        decl: FunctionDecl,
+        is_method: bool,
+    ) -> None:
+        qual = f"{parent_qual}.{decl.name}"
         kind = NodeKind.Method if is_method else NodeKind.Function
         prefix = "method" if is_method else "func"
         node_id = f"{prefix}:{qual}"
@@ -219,24 +148,46 @@ class TreeSitterSource(GraphSource):
             Node(
                 id=node_id,
                 kind=kind,
-                name=name,
+                name=decl.name,
                 path=rel_path,
-                start_line=ts_node.start_point[0] + 1,
-                end_line=ts_node.end_point[0] + 1,
+                start_line=decl.node.start_point[0] + 1,
+                end_line=decl.node.end_point[0] + 1,
                 attrs={
                     "qualname": qual,
-                    "signature": _signature_text(ts_node, source),
-                    "returns": _return_annotation_text(ts_node, source),
-                    "decorators": list(decorators or []),
-                    "doc": _docstring_text(ts_node, source),
-                    "raises": _raised_names(ts_node, source),
-                    "free_names": _free_names(ts_node, source),
+                    "signature": decl.signature,
+                    "returns": decl.returns,
+                    "decorators": list(decl.decorators),
+                    "doc": decl.doc,
+                    "raises": list(decl.raises),
+                    "free_names": list(decl.free_names),
                 },
             )
         )
         graph.add_edge(Edge(src=parent_id, dst=node_id, kind=EdgeKind.CONTAINS))
-        self._add_parameters(graph, node_id, qual, rel_path, source, ts_node)
-        return node_id
+        for param in decl.params:
+            self._add_parameter(graph, node_id, qual, rel_path, param.name, param.node)
+
+    def _add_parameter(
+        self,
+        graph: RepoGraph,
+        func_id: str,
+        func_qual: str,
+        rel_path: str,
+        name: str,
+        ts_node: TSNode,
+    ) -> None:
+        param_id = f"param:{func_qual}.{name}"
+        graph.add_node(
+            Node(
+                id=param_id,
+                kind=NodeKind.Parameter,
+                name=name,
+                path=rel_path,
+                start_line=ts_node.start_point[0] + 1,
+                end_line=ts_node.end_point[0] + 1,
+            )
+        )
+        graph.add_edge(Edge(src=func_id, dst=param_id, kind=EdgeKind.CONTAINS))
 
     def _add_class(
         self,
@@ -244,461 +195,61 @@ class TreeSitterSource(GraphSource):
         parent_id: str,
         parent_qual: str,
         rel_path: str,
-        source: bytes,
-        ts_node: TSNode,
+        decl: ClassDecl,
     ) -> None:
-        name = _identifier_text(ts_node.child_by_field_name("name"), source) or "<anonymous>"
-        qual = f"{parent_qual}.{name}"
+        qual = f"{parent_qual}.{decl.name}"
         node_id = f"class:{qual}"
         graph.add_node(
             Node(
                 id=node_id,
                 kind=NodeKind.Class,
-                name=name,
+                name=decl.name,
                 path=rel_path,
-                start_line=ts_node.start_point[0] + 1,
-                end_line=ts_node.end_point[0] + 1,
+                start_line=decl.node.start_point[0] + 1,
+                end_line=decl.node.end_point[0] + 1,
                 attrs={"qualname": qual},
             )
         )
         graph.add_edge(Edge(src=parent_id, dst=node_id, kind=EdgeKind.CONTAINS))
-        body = ts_node.child_by_field_name("body")
-        if body is None:
-            return
-        for child in body.children:
-            self._dispatch_in_class(graph, node_id, qual, rel_path, source, child)
+        for method in decl.methods:
+            self._add_function(graph, node_id, qual, rel_path, method, is_method=True)
 
-    def _dispatch_in_class(
-        self,
-        graph: RepoGraph,
-        class_id: str,
-        class_qual: str,
-        rel_path: str,
-        source: bytes,
-        ts_node: TSNode,
+    def _add_import(
+        self, graph: RepoGraph, module_id: str, rel_path: str, decl: ImportDecl
     ) -> None:
-        if ts_node.type == "function_definition":
-            self._add_function(graph, class_id, class_qual, rel_path, source, ts_node)
-        elif ts_node.type == "decorated_definition":
-            inner = _undecorated(ts_node)
-            if inner is not None and inner.type == "function_definition":
-                self._add_function(
-                    graph,
-                    class_id,
-                    class_qual,
-                    rel_path,
-                    source,
-                    inner,
-                    _decorator_texts(ts_node, source),
-                )
+        import_id = f"import:{module_id}::{decl.target}"
+        graph.add_node(
+            Node(
+                id=import_id,
+                kind=NodeKind.Import,
+                name=decl.target,
+                path=rel_path,
+                start_line=decl.node.start_point[0] + 1,
+                end_line=decl.node.end_point[0] + 1,
+                attrs={"target": decl.target, "alias": decl.alias},
+            )
+        )
+        graph.add_edge(Edge(src=module_id, dst=import_id, kind=EdgeKind.CONTAINS))
+        graph.add_edge(
+            Edge(src=module_id, dst=import_id, kind=EdgeKind.IMPORTS, attrs={"target": decl.target})
+        )
 
-    def _add_parameters(
-        self,
-        graph: RepoGraph,
-        func_id: str,
-        func_qual: str,
-        rel_path: str,
-        source: bytes,
-        ts_node: TSNode,
+    def _add_variable(
+        self, graph: RepoGraph, module_id: str, module_name: str, rel_path: str, decl: VariableDecl
     ) -> None:
-        params = ts_node.child_by_field_name("parameters")
-        if params is None:
-            return
-        for child in params.children:
-            param_name = _param_name(child, source)
-            if param_name is None:
-                continue
-            if param_name == "self" and func_id.startswith("method:"):
-                continue
-            param_id = f"param:{func_qual}.{param_name}"
-            graph.add_node(
-                Node(
-                    id=param_id,
-                    kind=NodeKind.Parameter,
-                    name=param_name,
-                    path=rel_path,
-                    start_line=child.start_point[0] + 1,
-                    end_line=child.end_point[0] + 1,
-                )
+        var_id = f"var:{module_name}.{decl.name}"
+        graph.add_node(
+            Node(
+                id=var_id,
+                kind=NodeKind.Variable,
+                name=decl.name,
+                path=rel_path,
+                start_line=decl.node.start_point[0] + 1,
+                end_line=decl.node.end_point[0] + 1,
+                attrs={"qualname": f"{module_name}.{decl.name}"},
             )
-            graph.add_edge(Edge(src=func_id, dst=param_id, kind=EdgeKind.CONTAINS))
-
-    def _add_imports(
-        self,
-        graph: RepoGraph,
-        module_id: str,
-        current_module: str,
-        rel_path: str,
-        source: bytes,
-        ts_node: TSNode,
-    ) -> None:
-        for target, alias in _import_targets(ts_node, source, current_module):
-            import_id = f"import:{module_id}::{target}"
-            graph.add_node(
-                Node(
-                    id=import_id,
-                    kind=NodeKind.Import,
-                    name=target,
-                    path=rel_path,
-                    start_line=ts_node.start_point[0] + 1,
-                    end_line=ts_node.end_point[0] + 1,
-                    attrs={"target": target, "alias": alias},
-                )
-            )
-            graph.add_edge(Edge(src=module_id, dst=import_id, kind=EdgeKind.CONTAINS))
-            graph.add_edge(
-                Edge(src=module_id, dst=import_id, kind=EdgeKind.IMPORTS, attrs={"target": target})
-            )
-
-
-def _assignment_target_names(left: TSNode, source: bytes) -> list[str]:
-    """Bound names on an assignment LHS: ``x``, ``x, y``; attribute/subscript LHS none."""
-    if left.type == "identifier":
-        text = _identifier_text(left, source)
-        return [text] if text else []
-    if left.type in {"pattern_list", "tuple_pattern", "list_pattern"}:
-        names: list[str] = []
-        for child in left.named_children:
-            names.extend(_assignment_target_names(child, source))
-        return names
-    return []
-
-
-def _undecorated(decorated_ts: TSNode) -> TSNode | None:
-    """Return the function/class wrapped by a ``decorated_definition``."""
-    for child in decorated_ts.named_children:
-        if child.type in {"function_definition", "class_definition"}:
-            return child
-    return None
-
-
-def _decorator_texts(decorated_ts: TSNode, source: bytes) -> list[str]:
-    """Each decorator's call text, without the leading ``@``."""
-    texts: list[str] = []
-    for child in decorated_ts.named_children:
-        if child.type == "decorator":
-            raw = source[child.start_byte : child.end_byte].decode("utf-8", errors="replace")
-            texts.append(raw.lstrip("@").strip())
-    return texts
-
-
-def _identifier_text(node: TSNode | None, source: bytes) -> str | None:
-    if node is None:
-        return None
-    return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
-
-
-def _return_annotation_text(func_node: TSNode, source: bytes) -> str | None:
-    """The declared return type (``-> float`` gives ``"float"``), if any."""
-    return_node = func_node.child_by_field_name("return_type")
-    return _identifier_text(return_node, source)
-
-
-def _docstring_text(func_node: TSNode, source: bytes) -> str:
-    """The function's docstring (first string statement in the body), cleaned."""
-    body = func_node.child_by_field_name("body")
-    if body is None:
-        return ""
-    for stmt in body.named_children:
-        if stmt.type == "comment":
-            continue
-        if stmt.type == "expression_statement" and stmt.named_children:
-            inner = stmt.named_children[0]
-            if inner.type == "string":
-                raw = source[inner.start_byte : inner.end_byte].decode("utf-8", errors="replace")
-                return _clean_docstring(raw)
-        return ""  # first real statement isn't a string → no docstring
-    return ""
-
-
-def _clean_docstring(raw: str) -> str:
-    text = raw.strip()
-    for quote in ('"""', "'''", '"', "'"):
-        if text.startswith(quote):
-            text = text[len(quote) :]
-            if text.endswith(quote):
-                text = text[: -len(quote)]
-            break
-    return text.strip()
-
-
-_PY_BUILTINS: frozenset[str] = frozenset(
-    {
-        "True",
-        "False",
-        "None",
-        "self",
-        "cls",
-        "print",
-        "len",
-        "range",
-        "enumerate",
-        "zip",
-        "map",
-        "filter",
-        "sorted",
-        "list",
-        "dict",
-        "set",
-        "tuple",
-        "frozenset",
-        "str",
-        "int",
-        "float",
-        "bool",
-        "bytes",
-        "type",
-        "isinstance",
-        "issubclass",
-        "hasattr",
-        "getattr",
-        "setattr",
-        "min",
-        "max",
-        "sum",
-        "abs",
-        "round",
-        "any",
-        "all",
-        "next",
-        "iter",
-        "open",
-        "super",
-        "object",
-        "Exception",
-        "ValueError",
-        "TypeError",
-        "KeyError",
-        "RuntimeError",
-        "StopIteration",
-        "repr",
-        "format",
-        "vars",
-        "dir",
-        "id",
-        "input",
-        "reversed",
-        "slice",
-        "property",
-        "staticmethod",
-        "classmethod",
-    }
-)
-
-
-def _free_names(func_node: TSNode, source: bytes) -> list[str]:
-    """Names referenced in the body that are not params, locals, or builtins.
-
-    A superset of the module-level definitions the body depends on — resolved
-    against same-module Variables / helpers by :mod:`cgir.report.pack`. Two
-    passes: collect names *bound* in the body, then names *referenced*, and
-    return referenced minus bound minus builtins.
-    """
-    body = func_node.child_by_field_name("body")
-    if body is None:
-        return []
-    bound: set[str] = set()
-    params = func_node.child_by_field_name("parameters")
-    if params is not None:
-        for child in params.children:
-            name = _param_name(child, source)
-            if name:
-                bound.add(name)
-    _collect_bound(body, source, bound)
-
-    referenced: list[str] = []
-    seen: set[str] = set()
-    _collect_referenced(body, source, referenced, seen)
-    return [n for n in referenced if n not in bound and n not in _PY_BUILTINS]
-
-
-def _collect_bound(node: TSNode, source: bytes, bound: set[str]) -> None:
-    t = node.type
-    if t in {"assignment", "augmented_assignment"} or t == "for_statement":
-        left = node.child_by_field_name("left")
-        if left is not None:
-            bound.update(_assignment_target_names(left, source))
-    elif t in {"function_definition", "class_definition"}:
-        def_name = _identifier_text(node.child_by_field_name("name"), source)
-        if def_name:
-            bound.add(def_name)
-    elif t == "as_pattern":
-        alias_node = node.child_by_field_name("alias")
-        if alias_node is not None:
-            for ident in _all_identifiers(alias_node, source):
-                bound.add(ident)
-    elif t == "except_clause":
-        for child in node.children:
-            if child.type == "identifier":
-                bound.add(_text(child, source))
-    elif t == "named_expression":
-        name_node = node.child_by_field_name("name")
-        if name_node is not None:
-            bound.add(_text(name_node, source))
-    elif t in {"import_statement", "import_from_statement"}:
-        for target, alias in _import_targets(node, source, ""):
-            bound.add(alias or target.rsplit(".", 1)[-1])
-    for child in node.children:
-        _collect_bound(child, source, bound)
-
-
-def _collect_referenced(node: TSNode, source: bytes, out: list[str], seen: set[str]) -> None:
-    t = node.type
-    if t == "identifier":
-        name = _text(node, source)
-        if name not in seen:
-            seen.add(name)
-            out.append(name)
-        return
-    if t == "attribute":
-        obj = node.child_by_field_name("object")
-        if obj is not None:
-            _collect_referenced(obj, source, out, seen)
-        return  # skip the attribute suffix name
-    if t == "keyword_argument":
-        value = node.child_by_field_name("value")
-        if value is not None:
-            _collect_referenced(value, source, out, seen)
-        return  # skip the keyword name
-    if t in {"import_statement", "import_from_statement"}:
-        return
-    for child in node.children:
-        _collect_referenced(child, source, out, seen)
-
-
-def _all_identifiers(node: TSNode, source: bytes) -> list[str]:
-    out: list[str] = []
-    if node.type == "identifier":
-        return [_text(node, source)]
-    for child in node.children:
-        out.extend(_all_identifiers(child, source))
-    return out
-
-
-def _text(node: TSNode, source: bytes) -> str:
-    return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
-
-
-def _raised_names(func_node: TSNode, source: bytes) -> list[str]:
-    """Exception class names raised in the body (``raise ValueError(...)`` → ValueError)."""
-    body = func_node.child_by_field_name("body")
-    if body is None:
-        return []
-    names: list[str] = []
-    seen: set[str] = set()
-    stack: list[TSNode] = [body]
-    while stack:
-        node = stack.pop()
-        if node.type == "raise_statement":
-            for child in node.named_children:
-                target = child.child_by_field_name("function") if child.type == "call" else child
-                if target is None:
-                    continue
-                text = source[target.start_byte : target.end_byte].decode("utf-8", errors="replace")
-                name = text.split(".")[-1].split("(")[0].strip()
-                if name and name[0].isupper() and name not in seen:
-                    seen.add(name)
-                    names.append(name)
-                break
-        stack.extend(node.children)
-    return names
-
-
-def _signature_text(func_node: TSNode, source: bytes) -> str:
-    name = _identifier_text(func_node.child_by_field_name("name"), source) or ""
-    params_node = func_node.child_by_field_name("parameters")
-    params_text = _identifier_text(params_node, source) or "()"
-    return_node = func_node.child_by_field_name("return_type")
-    return_text = _identifier_text(return_node, source)
-    sig = f"{name}{params_text}"
-    if return_text:
-        sig += f" -> {return_text}"
-    return sig
-
-
-def _param_name(node: TSNode, source: bytes) -> str | None:
-    if node.type == "identifier":
-        return _identifier_text(node, source)
-    if node.type in {
-        "typed_parameter",
-        "default_parameter",
-        "typed_default_parameter",
-        "list_splat_pattern",
-        "dictionary_splat_pattern",
-    }:
-        # Search children for the identifier that names the parameter.
-        for child in node.children:
-            if child.type == "identifier":
-                return _identifier_text(child, source)
-    return None
-
-
-def _import_targets(
-    node: TSNode, source: bytes, current_module: str
-) -> list[tuple[str, str | None]]:
-    """Yield ``(absolute_target, local_alias_or_None)`` per imported name."""
-    targets: list[tuple[str, str | None]] = []
-    if node.type == "import_statement":
-        for child in node.children:
-            if child.type in {"dotted_name", "aliased_import"}:
-                name = _identifier_text(_name_child(child), source)
-                if name:
-                    targets.append((name, _alias_text(child, source)))
-    elif node.type == "import_from_statement":
-        module_node = node.child_by_field_name("module_name")
-        module = _resolve_from_module(module_node, source, current_module) if module_node else ""
-        for child in node.children_by_field_name("name"):
-            name = _identifier_text(_name_child(child), source)
-            if name:
-                target = f"{module}.{name}" if module else name
-                targets.append((target, _alias_text(child, source)))
-    return targets
-
-
-def _alias_text(ts_node: TSNode, source: bytes) -> str | None:
-    """The ``as`` alias of an ``aliased_import``, if any."""
-    if ts_node.type != "aliased_import":
-        return None
-    return _identifier_text(ts_node.child_by_field_name("alias"), source)
-
-
-def _resolve_from_module(module_node: TSNode, source: bytes, current_module: str) -> str:
-    """Return the absolute dotted name of an ``import_from_statement`` module.
-
-    Handles both absolute (``from a.b import x``) and relative
-    (``from .a import x``, ``from ..a.b import x``) forms.
-    """
-    if module_node.type == "relative_import":
-        dots = 0
-        sub_name = ""
-        for child in module_node.children:
-            if child.type == "import_prefix":
-                # import_prefix's text is one or more "." characters.
-                raw = source[child.start_byte : child.end_byte]
-                dots = raw.count(b".")
-            elif child.type == "dotted_name":
-                sub_name = _identifier_text(child, source) or ""
-        if dots == 0:
-            return sub_name
-        parts = current_module.split(".")
-        # Drop the module itself; each extra dot peels off one more package level.
-        package_parts = parts[:-1]
-        up = dots - 1
-        if up > 0:
-            package_parts = package_parts[:-up] if up <= len(package_parts) else []
-        absolute = list(package_parts)
-        if sub_name:
-            absolute.extend(sub_name.split("."))
-        return ".".join(absolute)
-    return _identifier_text(module_node, source) or ""
-
-
-def _name_child(node: TSNode) -> TSNode:
-    if node.type == "aliased_import":
-        sub = node.child_by_field_name("name")
-        if sub is not None:
-            return sub
-    return node
+        )
+        graph.add_edge(Edge(src=module_id, dst=var_id, kind=EdgeKind.CONTAINS))
 
 
 __all__ = ["DEFAULT_IGNORE_DIRS", "TreeSitterSource"]

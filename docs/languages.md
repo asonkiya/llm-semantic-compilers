@@ -24,12 +24,15 @@ full test suite green.
 | phase | scope | status |
 |---|---|---|
 | 1 | parse / locate / **effects** / **call sites** | ✅ done |
-| 2 | CFG statement classification + field extraction | pending |
-| 3 | ingest structural dispatch + attr extraction (signature, doc, raises, free-names, imports) | pending |
+| 2 | CFG statement classification + field extraction (normalized `StatementDesc`) | ✅ done |
+| 3 | ingest structural dispatch + attr extraction (normalized `Declaration`s) | ✅ done |
 | 4 | `TypeScriptAdapter` + language selection in the pipeline | pending |
 
-Until phases 2–3 land, `cfg.py` and `tree_sitter_source.py` still hardcode
-Python grammar; a second language is fully plug-and-play only after those.
+**As of phase 3, zero grammar node-type strings remain outside
+`cgir/languages/`.** The CFG builder is pure topology over statement
+descriptors; the ingester is pure graph construction over declarations.
+Refactor validated end-to-end: rescanning a 441-component repo pre/post
+refactor and running `cgir diff` reports **no changes**.
 
 ## Writing an adapter (current surface)
 
@@ -40,11 +43,24 @@ class MyLangAdapter(LanguageAdapter):
     name = "mylang"
     file_extensions = (".ml",)
 
-    def parse(self, source: bytes): ...            # -> tree root node
-    def locate_function(self, root, name, row): ... # find fn by name+row
+    # phase 1 — parsing + effects + calls
+    def parse(self, source): ...                    # -> tree root node
+    def locate_function(self, root, name, row): ...
     def direct_effects(self, fn, source, aliases): ...  # {io,net,fs,db,...}
     def call_sites(self, fn, source): ...           # [(callee, args, line)]
+
+    # phase 2 — CFG extraction (normalized StatementDesc union)
+    def function_body(self, fn): ...
+    def block_statements(self, block): ...
+    def describe_statement(self, node, source): ...  # Branch/Loop/Try/... desc
+
+    # phase 3 — ingest extraction (normalized Declarations)
+    def module_declarations(self, root, source, module_name): ...
 ```
+
+The topology/algorithms you do **not** write per language: CFG wiring,
+reaching definitions, PDG, param-flow, purity, the transitive effect
+closure, symbol-table resolution, slicing, and all seven product surfaces.
 
 Register it in `cgir/languages/__init__.py:ADAPTERS`. The effect *taxonomy*
 (`io`/`net`/`fs`/`db`/`nondeterm`/`raise`) is language-neutral and fixed in
