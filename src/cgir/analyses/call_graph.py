@@ -1,27 +1,31 @@
 """Build CALLS edges from resolved symbol tables.
 
-Walks each function/method body with tree-sitter (files parsed once via
-:class:`~cgir.analyses._python_ast.SourceCache`), finds ``call``
-expressions, and resolves the callee name through the owning module's
-symbol table. Unresolved calls are dropped — third-party effects show
-up via :mod:`cgir.analyses.effects` instead.
+Language-neutral: the active :class:`~cgir.languages.LanguageAdapter`
+supplies each function's call sites (dotted callee, arg names, line); this
+module resolves each callee through the owning module's symbol table and
+emits the edge. Unresolved calls are dropped — third-party effects show up
+via :mod:`cgir.analyses.effects` instead.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from tree_sitter import Node as TSNode
-
-from cgir.analyses._python_ast import SourceCache, locate_function, python_parser
 from cgir.analyses.symbols import SymbolTable, module_of
 from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import NodeKind
+from cgir.languages import DEFAULT_ADAPTER, LanguageAdapter, SourceCache
 
 
-def build_call_graph(graph: RepoGraph, tables: dict[str, SymbolTable], repo_path: Path) -> None:
-    cache = SourceCache(python_parser(), repo_path)
+def build_call_graph(
+    graph: RepoGraph,
+    tables: dict[str, SymbolTable],
+    repo_path: Path,
+    adapter: LanguageAdapter | None = None,
+) -> None:
+    adapter = adapter or DEFAULT_ADAPTER
+    cache = SourceCache(adapter, repo_path)
     for func in list(graph.nodes()):
         if func.kind not in {NodeKind.Function, NodeKind.Method}:
             continue
@@ -35,10 +39,10 @@ def build_call_graph(graph: RepoGraph, tables: dict[str, SymbolTable], repo_path
         if parsed is None:
             continue
         source, root = parsed
-        func_ts = locate_function(root, func.name, (func.start_line or 1) - 1)
+        func_ts = adapter.locate_function(root, func.name, (func.start_line or 1) - 1)
         if func_ts is None:
             continue
-        for callee_name, arg_names, line in _call_sites(func_ts, source):
+        for callee_name, arg_names, line in adapter.call_sites(func_ts, source):
             target = _resolve_callee(tables, table, callee_name)
             if target is None:
                 continue
@@ -72,72 +76,3 @@ def _resolve_callee(tables: dict[str, SymbolTable], table: SymbolTable, dotted: 
             return None
         return sub.bindings.get(rest.split(".", 1)[0])
     return target
-
-
-def _call_sites(func_node: TSNode, source: bytes) -> list[tuple[str, list[str], int]]:
-    """Each call in the body: ``(dotted_callee, arg_identifier_names, line)``."""
-    sites: list[tuple[str, list[str], int]] = []
-    body = func_node.child_by_field_name("body")
-    if body is None:
-        return sites
-    stack: list[TSNode] = [body]
-    while stack:
-        node = stack.pop()
-        if node.type == "call":
-            function_field = node.child_by_field_name("function")
-            if function_field is not None:
-                if function_field.type == "identifier":
-                    text = source[function_field.start_byte : function_field.end_byte]
-                    decoded = text.decode("utf-8", errors="replace")
-                elif function_field.type == "attribute":
-                    text = source[function_field.start_byte : function_field.end_byte]
-                    decoded = text.decode("utf-8", errors="replace")
-                    if "(" in decoded or "[" in decoded or "\n" in decoded:
-                        # Computed receiver: keep just the head identifier.
-                        decoded = decoded.split(".", 1)[0]
-                else:
-                    decoded = None
-                if decoded:
-                    arguments = node.child_by_field_name("arguments")
-                    args = _arg_names(arguments, source) if arguments is not None else []
-                    sites.append((decoded, args, node.start_point[0] + 1))
-        stack.extend(node.children)
-    return sites
-
-
-def _arg_names(args_node: TSNode, source: bytes) -> list[str]:
-    """Data identifiers read inside a call's argument list.
-
-    Attribute names and nested callee names are excluded — only names that
-    carry data count (mirrors the CFG ``reads`` rules).
-    """
-    names: list[str] = []
-    seen: set[str] = set()
-
-    def collect(node: TSNode) -> None:
-        if node.type == "identifier":
-            text = source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
-            if text not in seen:
-                seen.add(text)
-                names.append(text)
-            return
-        if node.type == "attribute":
-            obj = node.child_by_field_name("object")
-            if obj is not None:
-                collect(obj)
-            return
-        if node.type == "call":
-            fn = node.child_by_field_name("function")
-            if fn is not None and fn.type == "attribute":
-                obj = fn.child_by_field_name("object")
-                if obj is not None:
-                    collect(obj)
-            inner = node.child_by_field_name("arguments")
-            if inner is not None:
-                collect(inner)
-            return
-        for child in node.children:
-            collect(child)
-
-    collect(args_node)
-    return names
