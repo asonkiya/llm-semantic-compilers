@@ -12,9 +12,11 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from cgir.analyses.effects import IMPURE_EFFECT_TAGS
 from cgir.ir.component_spec import ComponentSpec
 
 TOP_N = 10
+_IMPURE = set(IMPURE_EFFECT_TAGS)
 
 
 def compute_stats(specs: list[ComponentSpec], top_n: int = TOP_N) -> dict[str, Any]:
@@ -64,6 +66,11 @@ def compute_stats(specs: list[ComponentSpec], top_n: int = TOP_N) -> dict[str, A
             for s in sorted(specs, key=lambda s: (s.entrypoint or "", s.id))
             if s.entrypoint
         ],
+        "untested_effectful": [
+            {"id": s.id, "effects": s.effects}
+            for s in sorted(specs, key=lambda s: s.id)
+            if _IMPURE & set(s.effects) and not s.covered_by
+        ],
     }
 
 
@@ -91,6 +98,11 @@ def render_text(stats: dict[str, Any]) -> str:
         width = max(len(e["entrypoint"]) for e in stats["entrypoints"])
         for entry in stats["entrypoints"]:
             lines.append(f"  {entry['entrypoint']:<{width}}  {entry['id']}")
+
+    if stats["untested_effectful"]:
+        lines.append(f"Untested effectful ({len(stats['untested_effectful'])}):")
+        for entry in stats["untested_effectful"][:TOP_N]:
+            lines.append(f"  [{','.join(entry['effects'])}]  {entry['id']}")
 
     for title, key, count_key in (
         ("Most called", "most_called", "callers"),

@@ -50,7 +50,8 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | GraphML export (`cgir export --format graphml`) | done | `src/cgir/export/graphml.py` |
 | Interactive HTML viz (`cgir viz`) — self-contained, no network | done | `src/cgir/export/html_viz.py` |
 | Mermaid call-graph (`cgir viz --format mermaid`) | done | `src/cgir/export/mermaid.py` |
-| Structure report (`cgir stats`, `--json`) — kinds, purity, effects, hotspots | done | `src/cgir/report/stats.py` |
+| Structure report (`cgir stats`, `--json`) — kinds, purity, effects, hotspots, untested-effectful | done | `src/cgir/report/stats.py` |
+| Test linkage (`covered_by`) + linked-test source in pack | done | `slicer._covering_tests`, `pack` tests section |
 | Flow tracing (`cgir flow <id>`) — annotated caller/callee trees | done | `src/cgir/report/flow.py` |
 | Parameter-flow analysis (param → callee args, may-flow) | done | `src/cgir/analyses/param_flow.py` |
 | Index diff + drift rules (`cgir diff --fail-on`, entrypoint surface, `--markdown`) | done | `src/cgir/report/diff.py` |

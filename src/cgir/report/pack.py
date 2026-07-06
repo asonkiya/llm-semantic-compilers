@@ -24,9 +24,9 @@ from cgir.ir.component_spec import ComponentSpec
 
 DEFAULT_BUDGET = 4000
 
-# Dropped in this order to fit budget: types & the target contract are the
-# last things to go (they're what makes a context-free rewrite possible).
-_SECTION_PRIORITY = ("constructs", "callers", "callees", "types")
+# Dropped in this order to fit budget: types, tests & the target contract
+# are the last to go (they're what makes a context-free rewrite possible).
+_SECTION_PRIORITY = ("constructs", "callers", "callees", "tests", "types")
 
 _BUILTIN_TYPES = frozenset(
     {
@@ -107,6 +107,7 @@ def build_pack(
     source: str | None = None,
     budget: int = DEFAULT_BUDGET,
     types: dict[str, str] | None = None,
+    tests: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     by_id = {s.id: s for s in specs}
     target = by_id[target_id]  # KeyError for unknown targets, by design
@@ -114,6 +115,7 @@ def build_pack(
     callees = [_interface(by_id[callee]) for callee in target.calls if callee in by_id]
     callers = [_interface(s) for s in specs if target_id in s.calls]
     type_defs = [{"name": name, "source": src} for name, src in sorted((types or {}).items())]
+    test_defs = [{"id": tid, "source": src} for tid, src in sorted((tests or {}).items())]
     pack: dict[str, Any] = {
         "target": {
             "id": target.id,
@@ -130,6 +132,7 @@ def build_pack(
             "source": source,
         },
         "types": type_defs,
+        "tests": test_defs,
         "callees": callees,
         "callers": callers,
         "constructs": list(target.constructs),
@@ -193,6 +196,16 @@ def render_pack(pack: dict[str, Any]) -> str:
         for tdef in pack["types"]:
             lines.append("")
             lines.append("```python")
+            lines.append(tdef["source"].rstrip("\n"))
+            lines.append("```")
+
+    if pack.get("tests"):
+        lines.append("")
+        lines.append("## Tests (behavior contract)")
+        lines.append("The implementation must satisfy these.")
+        for tdef in pack["tests"]:
+            lines.append("")
+            lines.append(f"```python  # {tdef['id']}")
             lines.append(tdef["source"].rstrip("\n"))
             lines.append("```")
 

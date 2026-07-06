@@ -124,6 +124,15 @@ def test_pack_renders_types_section() -> None:
     assert "id: int" in text
 
 
+def test_pack_includes_linked_tests() -> None:
+    spec = _spec("m.f")
+    text = render_pack(
+        build_pack([spec], "m.f", tests={"tests.test_m.test_f": "def test_f():\n    assert True"})
+    )
+    assert "## Tests" in text
+    assert "assert True" in text
+
+
 def test_pack_includes_docstring_and_raises() -> None:
     spec = _spec("m.f")
     spec.doc = "Return x plus one."

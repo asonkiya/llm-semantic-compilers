@@ -170,8 +170,30 @@ def pack(
     graph = _load_graph(index_dir) if (index_dir / "repo_graph.json").exists() else None
     source = _component_source(graph, component_id, repo) if repo else None
     types = _type_sources(graph, referenced_type_names(target), repo) if repo else {}
-    bundle = build_pack(specs, component_id, source=source, budget=budget, types=types)
+    tests = _test_sources(graph, target.covered_by, repo) if repo else {}
+    bundle = build_pack(
+        specs, component_id, source=source, budget=budget, types=types, tests=tests
+    )
     typer.echo(render_pack(bundle), nl=False)
+
+
+def _test_sources(
+    graph: RepoGraph | None, test_ids: list[str], repo: Path | None
+) -> dict[str, str]:
+    """Resolve the target's linked test components to their source."""
+    if graph is None or repo is None or not test_ids:
+        return {}
+    wanted = set(test_ids)
+    out: dict[str, str] = {}
+    for node in graph.nodes():
+        if node.kind not in {NodeKind.Function, NodeKind.Method}:
+            continue
+        if node.attrs.get("qualname") not in wanted:
+            continue
+        src = _span_source(node, repo)
+        if src:
+            out[str(node.attrs.get("qualname"))] = src
+    return out
 
 
 def _component_source(graph: RepoGraph | None, component_id: str, repo: Path | None) -> str | None:

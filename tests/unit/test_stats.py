@@ -111,6 +111,16 @@ def test_entrypoints_listed() -> None:
     assert stats["entrypoints"] == [{"id": "n.top", "entrypoint": "HTTP GET /top"}]
 
 
+def test_untested_effectful_listed() -> None:
+    specs = _sample()
+    # n.top is effect_adapter with io; give it no coverage, cover m.leaf.
+    specs[0].covered_by = ["tests.test_leaf"]
+    stats = compute_stats(specs)
+    untested = {e["id"] for e in stats["untested_effectful"]}
+    assert "n.top" in untested
+    assert "m.leaf" not in untested
+
+
 def test_empty_specs() -> None:
     stats = compute_stats([])
     assert stats["total"] == 0

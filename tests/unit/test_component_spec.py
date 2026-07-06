@@ -44,6 +44,18 @@ def test_constructs_field_round_trips() -> None:
     assert restored.constructs == ["models.chapter.Chapter"]
 
 
+def test_covered_by_round_trips() -> None:
+    spec = ComponentSpec(
+        id="m.f",
+        kind=ComponentKind.pure_function,
+        trace=["m.py:1"],
+        covered_by=["tests.test_m.test_f"],
+    )
+    spec.validate()
+    restored = ComponentSpec.from_dict(json.loads(spec.to_json()))
+    assert restored.covered_by == ["tests.test_m.test_f"]
+
+
 def test_doc_and_raises_round_trip() -> None:
     """Sprint 23 schema additions: behavior contract (docstring + raises)."""
     spec = ComponentSpec(

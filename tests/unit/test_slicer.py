@@ -126,6 +126,27 @@ def test_mutating_a_global_is_state_transformation(tmp_path: Path) -> None:
     assert specs["m.remember"].kind == ComponentKind.state_transformer
 
 
+def test_covered_by_links_tests(tmp_path: Path) -> None:
+    """Sprint 25: a component records the test functions that call it."""
+    (tmp_path / "pricing.py").write_text("def add_tax(price, rate):\n    return price\n")
+    (tmp_path / "test_pricing.py").write_text(
+        "from pricing import add_tax\n\ndef test_add_tax():\n    assert add_tax(100, 0.1) == 100\n"
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, tmp_path)
+    build_cfg(graph, tmp_path)
+    effects = classify(graph, tmp_path)
+    purity = score(graph, effects)
+    specs = {s.id: s for s in slice_components(graph, effects=effects, purity_scores=purity)}
+    assert "test_pricing.test_add_tax" in specs["pricing.add_tax"].covered_by
+
+
+def test_untested_component_has_empty_covered_by(tmp_path: Path) -> None:
+    specs = _specs_for(tmp_path, "def f(x):\n    return x\n")
+    assert specs["m.f"].covered_by == []
+
+
 def test_entrypoint_detected_on_route(tmp_path: Path) -> None:
     """Sprint 17: decorated routes carry their entrypoint label on the spec."""
     specs = _specs_for(

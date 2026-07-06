@@ -8,7 +8,7 @@ from cgir.analyses.purity import PLACEHOLDER_SCORE
 from cgir.ir.component_spec import ComponentKind, ComponentSpec
 from cgir.ir.edges import EdgeKind
 from cgir.ir.graph import RepoGraph
-from cgir.ir.nodes import NodeKind
+from cgir.ir.nodes import Node, NodeKind
 
 
 def slice_components(
@@ -43,6 +43,7 @@ def slice_components(
         decorators = attrs.get("decorators")
         doc = attrs.get("doc")
         raises = attrs.get("raises")
+        covered_by = _covering_tests(graph, node.id)
 
         specs.append(
             ComponentSpec(
@@ -61,12 +62,34 @@ def slice_components(
                 ),
                 doc=doc if isinstance(doc, str) and doc else None,
                 raises=list(raises) if isinstance(raises, list) else [],
+                covered_by=covered_by,
                 purity=purity_score,
             )
         )
 
     specs.sort(key=lambda s: s.id)
     return specs
+
+
+def _covering_tests(graph: RepoGraph, func_id: str) -> list[str]:
+    """Test components that call this one (via resolved CALLS edges)."""
+    tests: set[str] = set()
+    for edge in graph.in_edges(func_id, EdgeKind.CALLS):
+        caller = graph.get_node(edge.src)
+        if _is_test_node(caller):
+            tests.add(_callee_label(graph, caller.id))
+    return sorted(tests)
+
+
+def _is_test_node(node: Node) -> bool:
+    """Heuristic: pytest-style test functions in test files."""
+    if node.name.startswith("test_"):
+        return True
+    if node.path:
+        parts = node.path.replace("\\", "/").split("/")
+        stem = parts[-1].removesuffix(".py")
+        return "tests" in parts[:-1] or stem.startswith("test_") or stem.endswith("_test")
+    return False
 
 
 def _split_callees(graph: RepoGraph, func_id: str) -> tuple[list[str], list[str]]:

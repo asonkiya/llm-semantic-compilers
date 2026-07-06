@@ -43,6 +43,12 @@
         "type": "string"
       }
     },
+    "covered_by": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "inputs": {
       "type": "array",
       "items": {
