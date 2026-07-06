@@ -25,6 +25,7 @@ def _spec(
     effects: list[str] | None = None,
     purity: float = 1.0,
     signature: str | None = None,
+    entrypoint: str | None = None,
 ) -> ComponentSpec:
     return ComponentSpec(
         id=spec_id,
@@ -36,6 +37,7 @@ def _spec(
         trace=[f"{spec_id.split('.')[0]}.py:1"],
         language="python",
         signature=signature,
+        entrypoint=entrypoint,
         purity=purity,
     )
 
@@ -95,6 +97,57 @@ def test_violation_kind_change() -> None:
     new = [_spec("m.f", kind=ComponentKind.orchestrator, purity=0.7)]
     assert len(violations(diff := compute_diff(old, new), ["kind-change"])) == 1
     assert violations(diff, []) == []
+
+
+# --- entrypoint surface (Sprint 21) --------------------------------------------
+
+
+def test_added_entrypoint_surfaced() -> None:
+    old = [_spec("routes.list")]
+    new = [
+        _spec("routes.list"),
+        _spec("routes.create", entrypoint="HTTP POST /api/x"),
+    ]
+    diff = compute_diff(old, new)
+    assert diff["entrypoints"]["added"] == [
+        {"id": "routes.create", "entrypoint": "HTTP POST /api/x"}
+    ]
+
+
+def test_removed_entrypoint_surfaced() -> None:
+    old = [_spec("routes.gone", entrypoint="HTTP GET /old")]
+    new: list[ComponentSpec] = []
+    diff = compute_diff(old, new)
+    assert diff["entrypoints"]["removed"] == [{"id": "routes.gone", "entrypoint": "HTTP GET /old"}]
+
+
+def test_changed_entrypoint_surfaced() -> None:
+    old = [_spec("routes.r", entrypoint="HTTP GET /a")]
+    new = [_spec("routes.r", entrypoint="HTTP GET /b")]
+    diff = compute_diff(old, new)
+    assert diff["entrypoints"]["changed"] == [
+        {"id": "routes.r", "old": "HTTP GET /a", "new": "HTTP GET /b"}
+    ]
+
+
+def test_non_entrypoint_add_not_in_surface() -> None:
+    diff = compute_diff([], [_spec("m.helper")])
+    assert diff["entrypoints"]["added"] == []
+
+
+def test_violation_entrypoint_added() -> None:
+    diff = compute_diff([], [_spec("routes.create", entrypoint="HTTP POST /api/x")])
+    found = violations(diff, ["entrypoint-added"])
+    assert len(found) == 1
+    assert "HTTP POST /api/x" in found[0]
+
+
+def test_violation_entrypoint_change() -> None:
+    old = [_spec("routes.r", entrypoint="HTTP GET /a")]
+    new = [_spec("routes.r", entrypoint="HTTP GET /b")]
+    diff = compute_diff(old, new)
+    assert len(violations(diff, ["entrypoint-change"])) == 1
+    assert violations(diff, ["entrypoint-added"]) == []
 
 
 def test_no_violation_on_clean_diff() -> None:

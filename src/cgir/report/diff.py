@@ -35,7 +35,30 @@ def compute_diff(old_specs: list[ComponentSpec], new_specs: list[ComponentSpec])
         "added": sorted(new.keys() - old.keys()),
         "removed": sorted(old.keys() - new.keys()),
         "changed": changed,
+        "entrypoints": _entrypoint_surface(old, new),
     }
+
+
+def _entrypoint_surface(
+    old: dict[str, ComponentSpec], new: dict[str, ComponentSpec]
+) -> dict[str, list[dict[str, Any]]]:
+    """The externally-reachable surface that appeared, vanished, or moved."""
+    added = [
+        {"id": sid, "entrypoint": new[sid].entrypoint}
+        for sid in sorted(new.keys() - old.keys())
+        if new[sid].entrypoint
+    ]
+    removed = [
+        {"id": sid, "entrypoint": old[sid].entrypoint}
+        for sid in sorted(old.keys() - new.keys())
+        if old[sid].entrypoint
+    ]
+    changed = [
+        {"id": sid, "old": old[sid].entrypoint, "new": new[sid].entrypoint}
+        for sid in sorted(old.keys() & new.keys())
+        if old[sid].entrypoint != new[sid].entrypoint
+    ]
+    return {"added": added, "removed": removed, "changed": changed}
 
 
 def _field_changes(old: ComponentSpec, new: ComponentSpec) -> dict[str, dict[str, Any]]:
@@ -72,6 +95,14 @@ def violations(diff: dict[str, Any], rules: list[str]) -> list[str]:
                 kind = fields.get("kind")
                 if kind:
                     found.append(f"{spec_id}: kind changed {kind['old']} -> {kind['new']}")
+    surface = diff.get("entrypoints", {})
+    for rule in rules:
+        if rule == "entrypoint-added":
+            for e in surface.get("added", []):
+                found.append(f"{e['id']}: new entrypoint {e['entrypoint']}")
+        elif rule == "entrypoint-change":
+            for e in surface.get("changed", []):
+                found.append(f"{e['id']}: entrypoint changed {e['old']} -> {e['new']}")
     return found
 
 
@@ -87,9 +118,16 @@ def _as_float(value: Any) -> float:
 
 
 def render_diff(diff: dict[str, Any]) -> str:
-    if not (diff["added"] or diff["removed"] or diff["changed"]):
+    surface = diff.get("entrypoints", {"added": [], "removed": [], "changed": []})
+    has_surface = surface["added"] or surface["removed"] or surface["changed"]
+    if not (diff["added"] or diff["removed"] or diff["changed"] or has_surface):
         return "no changes\n"
     lines: list[str] = []
+    if has_surface:
+        lines.append("entrypoint surface:")
+        lines.extend(f"  + {e['entrypoint']}  ({e['id']})" for e in surface["added"])
+        lines.extend(f"  - {e['entrypoint']}  ({e['id']})" for e in surface["removed"])
+        lines.extend(f"  ~ {e['old']} -> {e['new']}  ({e['id']})" for e in surface["changed"])
     if diff["added"]:
         lines.append(f"added ({len(diff['added'])}):")
         lines.extend(f"  + {spec_id}" for spec_id in diff["added"])
