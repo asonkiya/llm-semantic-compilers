@@ -62,6 +62,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |
 | MCP server (`cgir mcp`, stdio; `cgir[mcp]` extra) — now serves `verify` too | done | `src/cgir/api/mcp_server.py` |
 | Verify loop (`cgir verify`: splice → rescan → contract-diff → tests) | done | `src/cgir/verify.py` |
+| Architecture rules (`cgir lint`: forbid-effect / require-kind / forbid-call) | done | `src/cgir/report/lint.py` |
 | Shared pipeline driver (CLI + API call the same function) | done | `src/cgir/pipeline.py:scan_repo` |
 | HTTP API (`/scan`, `/components`, `/trace`, `/regenerate`, `/stats`) | done | `src/cgir/api/server.py` |
 | `RepoGraph.from_jsonable` (viz/export run off an existing index) | done | `src/cgir/ir/graph.py` |

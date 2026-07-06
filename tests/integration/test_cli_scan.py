@@ -175,6 +175,31 @@ def test_diff_warns_on_schema_mismatch(tmp_path: Path, python_sample_repo: Path)
     assert "schema" in result.output.lower()
 
 
+# --- lint (Sprint 26 — architecture rules) -------------------------------------
+
+
+def test_lint_flags_effect_rule(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _write(repo, "core/math.py", "import requests\n\ndef fetch(u):\n    return requests.get(u)\n")
+    out = tmp_path / "idx"
+    assert CliRunner().invoke(app, ["scan", str(repo), "--out", str(out)]).exit_code == 0
+    config = tmp_path / "cgir.toml"
+    config.write_text('[[rule]]\nname = "pure-core"\nin = "core.*"\nforbid-effect = ["net"]\n')
+    result = CliRunner().invoke(app, ["lint", "--index", str(out), "--config", str(config)])
+    assert result.exit_code == 1
+    assert "net" in result.output
+    assert "core.math.fetch" in result.output
+
+
+def test_lint_clean_passes(tmp_path: Path, python_sample_repo: Path) -> None:
+    out = _scanned_index(tmp_path, python_sample_repo)
+    config = tmp_path / "cgir.toml"
+    config.write_text('[[rule]]\nname = "no-net"\nin = "*"\nforbid-effect = ["net"]\n')
+    result = CliRunner().invoke(app, ["lint", "--index", str(out), "--config", str(config)])
+    assert result.exit_code == 0
+    assert "no architecture-rule violations" in result.output
+
+
 # --- pack (Sprint 18 — context packer) ------------------------------------------
 
 

@@ -171,9 +171,7 @@ def pack(
     source = _component_source(graph, component_id, repo) if repo else None
     types = _type_sources(graph, referenced_type_names(target), repo) if repo else {}
     tests = _test_sources(graph, target.covered_by, repo) if repo else {}
-    bundle = build_pack(
-        specs, component_id, source=source, budget=budget, types=types, tests=tests
-    )
+    bundle = build_pack(specs, component_id, source=source, budget=budget, types=types, tests=tests)
     typer.echo(render_pack(bundle), nl=False)
 
 
@@ -235,6 +233,35 @@ def _span_source(node: Any, repo: Path) -> str | None:
     except OSError:
         return None
     return "\n".join(all_lines[node.start_line - 1 : node.end_line]) + "\n"
+
+
+@app.command()
+def lint(
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+    config: Annotated[Path, typer.Option("--config", help="Rules file.")] = Path("cgir.toml"),
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Check the index against semantic architecture rules (effects, kind, calls)."""
+    from cgir.report.lint import lint as run_lint
+    from cgir.report.lint import load_rules, render_lint
+
+    if not config.exists():
+        raise typer.BadParameter(f"No rules file at {config}")
+    violations = run_lint(_load_specs(index_dir), load_rules(config))
+    if as_json:
+        typer.echo(
+            json.dumps(
+                [
+                    {"rule": v.rule, "component": v.component, "detail": v.detail}
+                    for v in violations
+                ],
+                indent=2,
+            )
+        )
+    else:
+        typer.echo(render_lint(violations), nl=False)
+    if violations:
+        raise typer.Exit(code=1)
 
 
 @app.command()

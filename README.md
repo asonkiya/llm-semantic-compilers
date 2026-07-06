@@ -31,6 +31,8 @@ cgir export --format graphml --out /tmp/cgir-out    # Gephi / yEd
 cgir stats --index /tmp/cgir-out                    # kinds, purity, hotspots
 cgir diff old-idx new-idx --markdown --fail-on effect-gain   # PR contract diff
 cgir pack pricing.add_tax --repo . --budget 4000    # minimal LLM context bundle
+cgir verify m.f --candidate new.py --repo .         # contract-check an LLM edit
+cgir lint --index /tmp/cgir-out --config cgir.toml  # semantic architecture rules
 ```
 
 Gate PRs on architecture drift with the [GitHub Action](./docs/github-action.md):
@@ -41,6 +43,8 @@ build — deterministically, no per-seat LLM cost.
 
 - [`docs/strategy.md`](./docs/strategy.md) — positioning: the deterministic contract layer
 - [`docs/github-action.md`](./docs/github-action.md) — CI contract-diff gate
+- [`docs/architecture-rules.md`](./docs/architecture-rules.md) — `cgir lint` semantic rules
+- [`docs/experiment-log.md`](./docs/experiment-log.md) — rewrite-readiness benchmark
 - [`docs/architecture.md`](./docs/architecture.md) — layered pipeline, data model, extension seams
 - [`docs/status.md`](./docs/status.md) — what runs today, test coverage, recent milestones
 - [`docs/feature-research.md`](./docs/feature-research.md) — full feature catalog + build order
