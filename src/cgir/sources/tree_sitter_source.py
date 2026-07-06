@@ -160,6 +160,44 @@ class TreeSitterSource(GraphSource):
                 self._dispatch_top_level(graph, module_id, module_name, rel_path, source, inner)
         elif ts_node.type in {"import_statement", "import_from_statement"}:
             self._add_imports(graph, module_id, module_name, rel_path, source, ts_node)
+        elif ts_node.type == "expression_statement":
+            self._add_module_variables(graph, module_id, module_name, rel_path, source, ts_node)
+
+    def _add_module_variables(
+        self,
+        graph: RepoGraph,
+        module_id: str,
+        module_name: str,
+        rel_path: str,
+        source: bytes,
+        ts_node: TSNode,
+    ) -> None:
+        """Module-level assignments become ``Variable`` nodes (constants, aliases).
+
+        These carry a source span so :mod:`cgir.report.pack` can include a
+        ``Point: TypeAlias = tuple[float, float]`` line when a component's
+        contract references ``Point``.
+        """
+        assign = next((c for c in ts_node.children if c.type == "assignment"), None)
+        if assign is None:
+            return
+        left = assign.child_by_field_name("left")
+        if left is None:
+            return
+        for name in _assignment_target_names(left, source):
+            var_id = f"var:{module_name}.{name}"
+            graph.add_node(
+                Node(
+                    id=var_id,
+                    kind=NodeKind.Variable,
+                    name=name,
+                    path=rel_path,
+                    start_line=ts_node.start_point[0] + 1,
+                    end_line=ts_node.end_point[0] + 1,
+                    attrs={"qualname": f"{module_name}.{name}"},
+                )
+            )
+            graph.add_edge(Edge(src=module_id, dst=var_id, kind=EdgeKind.CONTAINS))
 
     def _add_function(
         self,
@@ -190,6 +228,8 @@ class TreeSitterSource(GraphSource):
                     "signature": _signature_text(ts_node, source),
                     "returns": _return_annotation_text(ts_node, source),
                     "decorators": list(decorators or []),
+                    "doc": _docstring_text(ts_node, source),
+                    "raises": _raised_names(ts_node, source),
                 },
             )
         )
@@ -310,6 +350,19 @@ class TreeSitterSource(GraphSource):
             )
 
 
+def _assignment_target_names(left: TSNode, source: bytes) -> list[str]:
+    """Bound names on an assignment LHS: ``x``, ``x, y``; attribute/subscript LHS none."""
+    if left.type == "identifier":
+        text = _identifier_text(left, source)
+        return [text] if text else []
+    if left.type in {"pattern_list", "tuple_pattern", "list_pattern"}:
+        names: list[str] = []
+        for child in left.named_children:
+            names.extend(_assignment_target_names(child, source))
+        return names
+    return []
+
+
 def _undecorated(decorated_ts: TSNode) -> TSNode | None:
     """Return the function/class wrapped by a ``decorated_definition``."""
     for child in decorated_ts.named_children:
@@ -338,6 +391,59 @@ def _return_annotation_text(func_node: TSNode, source: bytes) -> str | None:
     """The declared return type (``-> float`` gives ``"float"``), if any."""
     return_node = func_node.child_by_field_name("return_type")
     return _identifier_text(return_node, source)
+
+
+def _docstring_text(func_node: TSNode, source: bytes) -> str:
+    """The function's docstring (first string statement in the body), cleaned."""
+    body = func_node.child_by_field_name("body")
+    if body is None:
+        return ""
+    for stmt in body.named_children:
+        if stmt.type == "comment":
+            continue
+        if stmt.type == "expression_statement" and stmt.named_children:
+            inner = stmt.named_children[0]
+            if inner.type == "string":
+                raw = source[inner.start_byte : inner.end_byte].decode("utf-8", errors="replace")
+                return _clean_docstring(raw)
+        return ""  # first real statement isn't a string → no docstring
+    return ""
+
+
+def _clean_docstring(raw: str) -> str:
+    text = raw.strip()
+    for quote in ('"""', "'''", '"', "'"):
+        if text.startswith(quote):
+            text = text[len(quote) :]
+            if text.endswith(quote):
+                text = text[: -len(quote)]
+            break
+    return text.strip()
+
+
+def _raised_names(func_node: TSNode, source: bytes) -> list[str]:
+    """Exception class names raised in the body (``raise ValueError(...)`` → ValueError)."""
+    body = func_node.child_by_field_name("body")
+    if body is None:
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+    stack: list[TSNode] = [body]
+    while stack:
+        node = stack.pop()
+        if node.type == "raise_statement":
+            for child in node.named_children:
+                target = child.child_by_field_name("function") if child.type == "call" else child
+                if target is None:
+                    continue
+                text = source[target.start_byte : target.end_byte].decode("utf-8", errors="replace")
+                name = text.split(".")[-1].split("(")[0].strip()
+                if name and name[0].isupper() and name not in seen:
+                    seen.add(name)
+                    names.append(name)
+                break
+        stack.extend(node.children)
+    return names
 
 
 def _signature_text(func_node: TSNode, source: bytes) -> str:

@@ -17,13 +17,88 @@ sections are dropped whole to fit, and every drop is recorded under
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from cgir.ir.component_spec import ComponentSpec
 
 DEFAULT_BUDGET = 4000
 
-_SECTION_PRIORITY = ("constructs", "callers", "callees")  # dropped in this order
+# Dropped in this order to fit budget: types & the target contract are the
+# last things to go (they're what makes a context-free rewrite possible).
+_SECTION_PRIORITY = ("constructs", "callers", "callees", "types")
+
+_BUILTIN_TYPES = frozenset(
+    {
+        "int",
+        "float",
+        "str",
+        "bool",
+        "bytes",
+        "None",
+        "Any",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "frozenset",
+        "object",
+        "Optional",
+        "Union",
+        "Iterable",
+        "Iterator",
+        "Sequence",
+        "Mapping",
+        "Callable",
+        "Type",
+        "Awaitable",
+        "Coroutine",
+        "AsyncIterator",
+    }
+)
+_TYPE_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def referenced_type_names(spec: ComponentSpec) -> set[str]:
+    """Non-builtin type identifiers the component's contract names.
+
+    Pulled from the return type, constructed classes, and parameter
+    annotations — the types an implementer must know the shape of.
+    """
+    names: set[str] = set()
+    for output in spec.outputs:
+        names |= _type_tokens(output)
+    for construct in spec.constructs:
+        names.add(construct.rsplit(".", 1)[-1])
+    for _, annotation in _param_items(spec.signature):
+        if annotation:
+            names |= _type_tokens(annotation)
+    return {n for n in names if n not in _BUILTIN_TYPES}
+
+
+def _type_tokens(annotation: str) -> set[str]:
+    return set(_TYPE_TOKEN.findall(annotation))
+
+
+def _param_items(signature: str | None) -> list[tuple[str, str | None]]:
+    if not signature or "(" not in signature or ")" not in signature:
+        return []
+    inner = signature[signature.index("(") + 1 : signature.rindex(")")]
+    items: list[tuple[str, str | None]] = []
+    depth, current = 0, ""
+    for ch in inner + ",":
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            name, _, annotation = current.partition(":")
+            annotation = annotation.split("=", 1)[0].strip()
+            items.append((name.strip().lstrip("*"), annotation or None))
+            current = ""
+        else:
+            current += ch
+    return items
 
 
 def build_pack(
@@ -31,12 +106,14 @@ def build_pack(
     target_id: str,
     source: str | None = None,
     budget: int = DEFAULT_BUDGET,
+    types: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     by_id = {s.id: s for s in specs}
     target = by_id[target_id]  # KeyError for unknown targets, by design
 
     callees = [_interface(by_id[callee]) for callee in target.calls if callee in by_id]
     callers = [_interface(s) for s in specs if target_id in s.calls]
+    type_defs = [{"name": name, "source": src} for name, src in sorted((types or {}).items())]
     pack: dict[str, Any] = {
         "target": {
             "id": target.id,
@@ -47,9 +124,12 @@ def build_pack(
             "effects": target.effects,
             "purity": target.purity,
             "entrypoint": target.entrypoint,
+            "doc": target.doc,
+            "raises": target.raises,
             "trace": target.trace,
             "source": source,
         },
+        "types": type_defs,
         "callees": callees,
         "callers": callers,
         "constructs": list(target.constructs),
@@ -93,13 +173,28 @@ def render_pack(pack: dict[str, Any]) -> str:
         lines.append(f"Effects: {', '.join(target['effects'])}")
     if target["outputs"]:
         lines.append(f"Returns: {', '.join(target['outputs'])}")
+    if target.get("raises"):
+        lines.append(f"Raises: {', '.join(target['raises'])}")
     if target["trace"]:
         lines.append(f"Source location: {target['trace'][0]}")
+    if target.get("doc"):
+        lines.append("")
+        lines.append(f"> {target['doc'].strip().splitlines()[0]}")
     if target["source"]:
         lines.append("")
         lines.append("```python")
         lines.append(target["source"].rstrip("\n"))
         lines.append("```")
+
+    if pack.get("types"):
+        lines.append("")
+        lines.append("## Types")
+        lines.append("Shapes the target's contract references — match these exactly.")
+        for tdef in pack["types"]:
+            lines.append("")
+            lines.append("```python")
+            lines.append(tdef["source"].rstrip("\n"))
+            lines.append("```")
 
     if pack["callees"]:
         lines.append("")

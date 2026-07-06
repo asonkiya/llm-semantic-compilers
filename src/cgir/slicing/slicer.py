@@ -37,9 +37,12 @@ def slice_components(
         if node.path is not None and node.start_line is not None:
             trace.append(f"{node.path}:{node.start_line}")
 
-        signature = node.attrs.get("signature") if node.attrs else None
-        returns = node.attrs.get("returns") if node.attrs else None
-        decorators = node.attrs.get("decorators") if node.attrs else None
+        attrs = node.attrs or {}
+        signature = attrs.get("signature")
+        returns = attrs.get("returns")
+        decorators = attrs.get("decorators")
+        doc = attrs.get("doc")
+        raises = attrs.get("raises")
 
         specs.append(
             ComponentSpec(
@@ -56,6 +59,8 @@ def slice_components(
                 entrypoint=detect_entrypoint(
                     decorators if isinstance(decorators, list) else [], node.name
                 ),
+                doc=doc if isinstance(doc, str) and doc else None,
+                raises=list(raises) if isinstance(raises, list) else [],
                 purity=purity_score,
             )
         )

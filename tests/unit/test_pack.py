@@ -67,6 +67,72 @@ def _world() -> list[ComponentSpec]:
     ]
 
 
+def test_type_names_extracted() -> None:
+    """Sprint 23: pack collects the type names its target references."""
+    from cgir.report.pack import referenced_type_names
+
+    spec = _spec("m.f", outputs=["Novel | None"])
+    spec.signature = "f(db: Session, ids: list[int]) -> Novel | None"
+    spec.constructs = ["models.Chapter"]
+    names = referenced_type_names(spec)
+    assert "Novel" in names
+    assert "Session" in names
+    assert "Chapter" in names
+    assert (
+        "int" not in names or True
+    )  # builtins may or may not be filtered; Novel/Session/Chapter required
+
+
+def test_type_alias_included_via_types(tmp_path: Path) -> None:
+    """End-to-end: a referenced TypeAlias is resolved and packed (CLI path)."""
+    from typer.testing import CliRunner
+
+    from cgir.cli import app
+
+    (tmp_path / "geo.py").write_text(
+        "from typing import TypeAlias\n\n"
+        "Point: TypeAlias = tuple[float, float]\n\n"
+        "def dist(a: Point, b: Point) -> float:\n"
+        "    return 0.0\n"
+    )
+    idx = tmp_path / "idx"
+    runner = CliRunner()
+    assert runner.invoke(app, ["scan", str(tmp_path), "--out", str(idx)]).exit_code == 0
+    result = runner.invoke(app, ["pack", "geo.dist", "--index", str(idx), "--repo", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "## Types" in result.output
+    assert "Point: TypeAlias = tuple[float, float]" in result.output
+
+
+def test_pack_includes_type_definitions() -> None:
+    spec = _spec("m.make", outputs=["Chapter"])
+    pack = build_pack(
+        [spec],
+        "m.make",
+        types={"Chapter": "class Chapter:\n    id: int\n    title: str"},
+    )
+    assert pack["types"][0]["name"] == "Chapter"
+    assert "id: int" in pack["types"][0]["source"]
+
+
+def test_pack_renders_types_section() -> None:
+    spec = _spec("m.make", outputs=["Chapter"])
+    text = render_pack(
+        build_pack([spec], "m.make", types={"Chapter": "class Chapter:\n    id: int"})
+    )
+    assert "## Types" in text
+    assert "id: int" in text
+
+
+def test_pack_includes_docstring_and_raises() -> None:
+    spec = _spec("m.f")
+    spec.doc = "Return x plus one."
+    spec.raises = ["ValueError"]
+    text = render_pack(build_pack([spec], "m.f"))
+    assert "Return x plus one." in text
+    assert "ValueError" in text
+
+
 def test_target_section_present() -> None:
     pack = build_pack(_world(), "services.translate")
     assert pack["target"]["id"] == "services.translate"

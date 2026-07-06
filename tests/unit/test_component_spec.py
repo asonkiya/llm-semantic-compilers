@@ -44,6 +44,21 @@ def test_constructs_field_round_trips() -> None:
     assert restored.constructs == ["models.chapter.Chapter"]
 
 
+def test_doc_and_raises_round_trip() -> None:
+    """Sprint 23 schema additions: behavior contract (docstring + raises)."""
+    spec = ComponentSpec(
+        id="m.f",
+        kind=ComponentKind.pure_function,
+        trace=["m.py:1"],
+        doc="Return x plus one.",
+        raises=["ValueError"],
+    )
+    spec.validate()
+    restored = ComponentSpec.from_dict(json.loads(spec.to_json()))
+    assert restored.doc == "Return x plus one."
+    assert restored.raises == ["ValueError"]
+
+
 def test_entrypoint_field_round_trips() -> None:
     """Sprint 17 schema addition: how the outside world reaches a component."""
     spec = ComponentSpec(

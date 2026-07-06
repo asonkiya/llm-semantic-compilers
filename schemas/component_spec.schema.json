@@ -34,6 +34,15 @@
     "entrypoint": {
       "type": "string"
     },
+    "doc": {
+      "type": "string"
+    },
+    "raises": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "inputs": {
       "type": "array",
       "items": {

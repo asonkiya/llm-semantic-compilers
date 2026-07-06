@@ -30,6 +30,8 @@ COMPONENT_SPEC_SCHEMA: dict[str, Any] = {
         "language": {"type": "string"},
         "signature": {"type": "string"},
         "entrypoint": {"type": "string"},
+        "doc": {"type": "string"},
+        "raises": {"type": "array", "items": {"type": "string"}},
         "inputs": {"type": "array", "items": {"type": "string"}},
         "outputs": {"type": "array", "items": {"type": "string"}},
         "effects": {"type": "array", "items": {"type": "string"}},
@@ -66,6 +68,8 @@ class ComponentSpec:
     language: str | None = None
     signature: str | None = None
     entrypoint: str | None = None
+    doc: str | None = None
+    raises: list[str] = field(default_factory=list)
     reads: list[str] = field(default_factory=list)
     writes: list[str] = field(default_factory=list)
     purity: float | None = None

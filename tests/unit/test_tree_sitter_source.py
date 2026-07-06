@@ -79,6 +79,77 @@ def test_custom_ignore_does_not_replace_default(tmp_path: Path) -> None:
 # --- Decorated function / class definitions --------------------------------
 
 
+def test_module_level_assignments_become_variables(tmp_path: Path) -> None:
+    """Sprint 23: module-level assignments (constants, type aliases) are captured.
+
+    Needed for pack type closure — `Point: TypeAlias = tuple[float, float]`
+    is what an implementer must see to unpack correctly.
+    """
+    _write(
+        tmp_path,
+        "m.py",
+        """
+        from typing import TypeAlias
+
+        Point: TypeAlias = tuple[float, float]
+        MAX_RETRIES = 3
+
+        def f():
+            return MAX_RETRIES
+        """,
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    variables = {n.name: n for n in graph.nodes(NodeKind.Variable)}
+    assert "Point" in variables
+    assert "MAX_RETRIES" in variables
+    # spans are captured so pack can read the source line
+    assert variables["Point"].start_line is not None
+
+
+def test_docstring_recorded(tmp_path: Path) -> None:
+    """Sprint 23: the function's docstring is captured (behavior contract)."""
+    _write(
+        tmp_path,
+        "m.py",
+        '''
+        def f(x):
+            """Return x plus one.
+
+            Extra detail.
+            """
+            return x + 1
+        ''',
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    [func] = graph.nodes(NodeKind.Function)
+    assert func.attrs.get("doc", "").startswith("Return x plus one.")
+
+
+def test_no_docstring_is_empty(tmp_path: Path) -> None:
+    _write(tmp_path, "m.py", "def f(x):\n    return x\n")
+    graph = TreeSitterSource().ingest(tmp_path)
+    [func] = graph.nodes(NodeKind.Function)
+    assert func.attrs.get("doc") in (None, "")
+
+
+def test_raised_exceptions_recorded(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "m.py",
+        """
+        def f(x):
+            if x < 0:
+                raise ValueError("neg")
+            if x == 0:
+                raise pkg.CustomError()
+            return x
+        """,
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    [func] = graph.nodes(NodeKind.Function)
+    assert set(func.attrs.get("raises") or []) == {"ValueError", "CustomError"}
+
+
 def test_decorator_texts_recorded(tmp_path: Path) -> None:
     """Sprint 17: decorated functions keep their decorator texts (sans @)."""
     _write(

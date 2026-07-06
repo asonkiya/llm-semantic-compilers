@@ -57,7 +57,8 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Index manifest + versioning (`manifest.json`, `cgir --version`) | done | `src/cgir/manifest.py` |
 | GitHub Action (contract-diff gate + PR comment) | done | `action.yml`, `docs/github-action.md` |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
-| Context packer (`cgir pack`, budget-aware) | done | `src/cgir/report/pack.py` |
+| Context packer (`cgir pack`, budget-aware, type closure + docstrings + raises) | done | `src/cgir/report/pack.py` |
+| Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |
 | MCP server (`cgir mcp`, stdio; `cgir[mcp]` extra) | done | `src/cgir/api/mcp_server.py` |
 | Shared pipeline driver (CLI + API call the same function) | done | `src/cgir/pipeline.py:scan_repo` |
 | HTTP API (`/scan`, `/components`, `/trace`, `/regenerate`, `/stats`) | done | `src/cgir/api/server.py` |

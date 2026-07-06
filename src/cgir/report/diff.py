@@ -169,9 +169,7 @@ def render_diff_markdown(
         out += ["### Entrypoint surface", ""]
         out += [f"- 🟢 `{e['entrypoint']}` — new (`{e['id']}`)" for e in surface["added"]]
         out += [f"- 🔴 `{e['entrypoint']}` — removed (`{e['id']}`)" for e in surface["removed"]]
-        out += [
-            f"- 🟡 `{e['old']}` → `{e['new']}` (`{e['id']}`)" for e in surface["changed"]
-        ]
+        out += [f"- 🟡 `{e['old']}` → `{e['new']}` (`{e['id']}`)" for e in surface["changed"]]
         out.append("")
 
     if diff["changed"]:

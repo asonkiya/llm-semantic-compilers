@@ -195,5 +195,7 @@ def test_markdown_includes_violations_block() -> None:
 
 
 def test_markdown_surfaces_schema_warning() -> None:
-    md = render_diff_markdown(compute_diff([_spec("m.f")], [_spec("m.f")]), warning="schema mismatch")
+    md = render_diff_markdown(
+        compute_diff([_spec("m.f")], [_spec("m.f")]), warning="schema mismatch"
+    )
     assert "schema mismatch" in md

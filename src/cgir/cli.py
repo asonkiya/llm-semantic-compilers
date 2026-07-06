@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -160,33 +160,59 @@ def pack(
     budget: Annotated[int, typer.Option("--budget", help="Approximate token budget.")] = 4000,
 ) -> None:
     """Emit the minimal context bundle for working on one component."""
+    from cgir.report.pack import referenced_type_names
+
     specs = _load_specs(index_dir)
-    source = _component_source(index_dir, component_id, repo)
-    try:
-        bundle = build_pack(specs, component_id, source=source, budget=budget)
-    except KeyError as exc:
-        raise typer.BadParameter(f"Unknown component: {component_id}") from exc
+    target = next((s for s in specs if s.id == component_id), None)
+    if target is None:
+        raise typer.BadParameter(f"Unknown component: {component_id}")
+
+    graph = _load_graph(index_dir) if (index_dir / "repo_graph.json").exists() else None
+    source = _component_source(graph, component_id, repo) if repo else None
+    types = _type_sources(graph, referenced_type_names(target), repo) if repo else {}
+    bundle = build_pack(specs, component_id, source=source, budget=budget, types=types)
     typer.echo(render_pack(bundle), nl=False)
 
 
-def _component_source(index_dir: Path, component_id: str, repo: Path | None) -> str | None:
+def _component_source(graph: RepoGraph | None, component_id: str, repo: Path | None) -> str | None:
     """The target's source lines, via the graph's span (best-effort)."""
-    if repo is None or not (index_dir / "repo_graph.json").exists():
+    if graph is None or repo is None:
         return None
-    graph = _load_graph(index_dir)
     for node in graph.nodes():
         if node.kind not in {NodeKind.Function, NodeKind.Method}:
             continue
         if node.attrs.get("qualname") != component_id:
             continue
-        if node.path is None or node.start_line is None or node.end_line is None:
-            return None
-        try:
-            all_lines = (repo / node.path).read_text().splitlines()
-        except OSError:
-            return None
-        return "\n".join(all_lines[node.start_line - 1 : node.end_line]) + "\n"
+        return _span_source(node, repo)
     return None
+
+
+def _type_sources(
+    graph: RepoGraph | None, type_names: set[str], repo: Path | None
+) -> dict[str, str]:
+    """Resolve referenced type names to their in-repo Class definitions."""
+    if graph is None or repo is None or not type_names:
+        return {}
+    out: dict[str, str] = {}
+    for node in graph.nodes():
+        if node.kind not in {NodeKind.Class, NodeKind.Variable}:
+            continue
+        if node.name not in type_names or node.name in out:
+            continue  # first match wins; ambiguous names take one
+        src = _span_source(node, repo)
+        if src:
+            out[node.name] = src
+    return out
+
+
+def _span_source(node: Any, repo: Path) -> str | None:
+    if node.path is None or node.start_line is None or node.end_line is None:
+        return None
+    try:
+        all_lines = (repo / node.path).read_text().splitlines()
+    except OSError:
+        return None
+    return "\n".join(all_lines[node.start_line - 1 : node.end_line]) + "\n"
 
 
 @app.command()
