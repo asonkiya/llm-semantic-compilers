@@ -79,6 +79,31 @@ def test_custom_ignore_does_not_replace_default(tmp_path: Path) -> None:
 # --- Decorated function / class definitions --------------------------------
 
 
+def test_free_names_capture_module_references(tmp_path: Path) -> None:
+    """Sprint 27: body references to module-level names (not params/locals)."""
+    _write(
+        tmp_path,
+        "m.py",
+        """
+        OAUTH_SCOPES = "a,b"
+
+        def _cfg():
+            return {"x": 1}
+
+        def build(org):
+            c = _cfg()
+            return c, OAUTH_SCOPES, org
+        """,
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    build_node = next(n for n in graph.nodes(NodeKind.Function) if n.name == "build")
+    free = set(build_node.attrs.get("free_names") or [])
+    assert "OAUTH_SCOPES" in free
+    assert "_cfg" in free
+    assert "org" not in free  # a parameter — bound
+    assert "c" not in free  # a local — bound
+
+
 def test_module_level_assignments_become_variables(tmp_path: Path) -> None:
     """Sprint 23: module-level assignments (constants, type aliases) are captured.
 

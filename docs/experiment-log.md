@@ -68,12 +68,39 @@ Remaining 4 pack failures:
   constants / config-dict keys referenced in the *body*, not the signature.
   This is the one scoped, un-built enrichment left.
 
+## Round 4 (Sprint 27 pack — + body free-name closure)
+
+| condition | pass | avg context |
+|---|---|---|
+| pack | **9/12** | ~820 tok |
+| file | 8/12 | ~3,360 tok |
+
+Same-module constants and small helpers the *body* references are now
+included (e.g. `_cfg()`'s body reveals the config-dict keys that
+`authorize_url` reads). `authorize_url` flipped to pass. **Pack now
+*exceeds* the full-file baseline at ~4x less context.**
+
+Final progression: **4 → 6 → 8 → 9 / 12**.
+
+Residual 3:
+- `validate` — fails under file too; genuinely hard in a single-function
+  splice (interdependent validation of a graph structure).
+- `default_pipeline` — the test pins an exact template structure the model
+  can't reproduce without seeing the template itself (a data fixture, not
+  code the contract names).
+- `get_daily_rollup` — the linked test asserts on a snapshot's exact
+  field shape produced elsewhere; needs cross-component fixture context.
+
+All three are "the answer is a specific data structure defined elsewhere,"
+not a contract-comprehension gap.
+
 ## Takeaway
 
-The compression thesis is confirmed with a monotonic evidence trail
-(4→6→8): **an enriched contract bundle matches full-file context at ~7x
-less, and exceeds it where tests pin behavior.** The only residual gap is
-body free-name closure — a known, small, scheduled follow-up. This is the
-evidence base for the pack → verify → gate loop.
+Monotonic evidence (4→6→8→9): **an enriched contract bundle beats full-file
+context at ~4x less** — matching or exceeding it by including exactly the
+semantic pieces CGIR identifies (types, linked tests, module context)
+rather than dumping the file. The remaining failures are exact-data-fixture
+cases, not comprehension gaps. This is the evidence base for the
+pack → verify → gate loop.
 
-Cost: round 1 ~$0.25, round 2 ~$0.10, round 3 ~$0.10 (Sonnet 4.6).
+Cost: rounds 1–4 ~$0.55 total (Sonnet 4.6).

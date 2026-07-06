@@ -14,6 +14,8 @@ Contract:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from cgir.ir.component_spec import ComponentKind, ComponentSpec
@@ -78,9 +80,30 @@ def test_type_names_extracted() -> None:
     assert "Novel" in names
     assert "Session" in names
     assert "Chapter" in names
-    assert (
-        "int" not in names or True
-    )  # builtins may or may not be filtered; Novel/Session/Chapter required
+
+
+def test_pack_includes_referenced_module_definitions(tmp_path: Path) -> None:
+    """Sprint 27: body free-name closure — the helper _cfg's source is packed."""
+    from typer.testing import CliRunner
+
+    from cgir.cli import app
+
+    (tmp_path / "square.py").write_text(
+        'OAUTH_SCOPES = "read,write"\n\n'
+        'def _cfg():\n    return {"app_id": "x", "base": "y"}\n\n'
+        "def authorize_url(org):\n"
+        "    c = _cfg()\n"
+        '    return c["app_id"] + OAUTH_SCOPES + org\n'
+    )
+    idx = tmp_path / "idx"
+    runner = CliRunner()
+    assert runner.invoke(app, ["scan", str(tmp_path), "--out", str(idx)]).exit_code == 0
+    result = runner.invoke(
+        app, ["pack", "square.authorize_url", "--index", str(idx), "--repo", str(tmp_path)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "def _cfg" in result.output  # helper body reveals the config keys
+    assert "OAUTH_SCOPES" in result.output
 
 
 def test_type_alias_included_via_types(tmp_path: Path) -> None:

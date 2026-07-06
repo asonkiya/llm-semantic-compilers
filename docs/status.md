@@ -60,6 +60,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware, type closure + docstrings + raises) | done | `src/cgir/report/pack.py` |
 | Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |
+| Body free-name closure (module constants + helpers into pack) | done | `tree_sitter_source._free_names`, `cli._module_context` |
 | MCP server (`cgir mcp`, stdio; `cgir[mcp]` extra) — now serves `verify` too | done | `src/cgir/api/mcp_server.py` |
 | Verify loop (`cgir verify`: splice → rescan → contract-diff → tests) | done | `src/cgir/verify.py` |
 | Architecture rules (`cgir lint`: forbid-effect / require-kind / forbid-call) | done | `src/cgir/report/lint.py` |

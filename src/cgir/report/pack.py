@@ -26,7 +26,7 @@ DEFAULT_BUDGET = 4000
 
 # Dropped in this order to fit budget: types, tests & the target contract
 # are the last to go (they're what makes a context-free rewrite possible).
-_SECTION_PRIORITY = ("constructs", "callers", "callees", "tests", "types")
+_SECTION_PRIORITY = ("constructs", "callers", "callees", "context", "tests", "types")
 
 _BUILTIN_TYPES = frozenset(
     {
@@ -108,6 +108,7 @@ def build_pack(
     budget: int = DEFAULT_BUDGET,
     types: dict[str, str] | None = None,
     tests: dict[str, str] | None = None,
+    context: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     by_id = {s.id: s for s in specs}
     target = by_id[target_id]  # KeyError for unknown targets, by design
@@ -116,6 +117,7 @@ def build_pack(
     callers = [_interface(s) for s in specs if target_id in s.calls]
     type_defs = [{"name": name, "source": src} for name, src in sorted((types or {}).items())]
     test_defs = [{"id": tid, "source": src} for tid, src in sorted((tests or {}).items())]
+    context_defs = [{"name": n, "source": src} for n, src in sorted((context or {}).items())]
     pack: dict[str, Any] = {
         "target": {
             "id": target.id,
@@ -132,6 +134,7 @@ def build_pack(
             "source": source,
         },
         "types": type_defs,
+        "context": context_defs,
         "tests": test_defs,
         "callees": callees,
         "callers": callers,
@@ -197,6 +200,16 @@ def render_pack(pack: dict[str, Any]) -> str:
             lines.append("")
             lines.append("```python")
             lines.append(tdef["source"].rstrip("\n"))
+            lines.append("```")
+
+    if pack.get("context"):
+        lines.append("")
+        lines.append("## Referenced module definitions")
+        lines.append("Constants and helpers the body uses — use them, don't redefine.")
+        for cdef in pack["context"]:
+            lines.append("")
+            lines.append("```python")
+            lines.append(cdef["source"].rstrip("\n"))
             lines.append("```")
 
     if pack.get("tests"):

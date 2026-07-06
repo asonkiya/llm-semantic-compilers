@@ -230,6 +230,7 @@ class TreeSitterSource(GraphSource):
                     "decorators": list(decorators or []),
                     "doc": _docstring_text(ts_node, source),
                     "raises": _raised_names(ts_node, source),
+                    "free_names": _free_names(ts_node, source),
                 },
             )
         )
@@ -419,6 +420,163 @@ def _clean_docstring(raw: str) -> str:
                 text = text[: -len(quote)]
             break
     return text.strip()
+
+
+_PY_BUILTINS: frozenset[str] = frozenset(
+    {
+        "True",
+        "False",
+        "None",
+        "self",
+        "cls",
+        "print",
+        "len",
+        "range",
+        "enumerate",
+        "zip",
+        "map",
+        "filter",
+        "sorted",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "frozenset",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "type",
+        "isinstance",
+        "issubclass",
+        "hasattr",
+        "getattr",
+        "setattr",
+        "min",
+        "max",
+        "sum",
+        "abs",
+        "round",
+        "any",
+        "all",
+        "next",
+        "iter",
+        "open",
+        "super",
+        "object",
+        "Exception",
+        "ValueError",
+        "TypeError",
+        "KeyError",
+        "RuntimeError",
+        "StopIteration",
+        "repr",
+        "format",
+        "vars",
+        "dir",
+        "id",
+        "input",
+        "reversed",
+        "slice",
+        "property",
+        "staticmethod",
+        "classmethod",
+    }
+)
+
+
+def _free_names(func_node: TSNode, source: bytes) -> list[str]:
+    """Names referenced in the body that are not params, locals, or builtins.
+
+    A superset of the module-level definitions the body depends on — resolved
+    against same-module Variables / helpers by :mod:`cgir.report.pack`. Two
+    passes: collect names *bound* in the body, then names *referenced*, and
+    return referenced minus bound minus builtins.
+    """
+    body = func_node.child_by_field_name("body")
+    if body is None:
+        return []
+    bound: set[str] = set()
+    params = func_node.child_by_field_name("parameters")
+    if params is not None:
+        for child in params.children:
+            name = _param_name(child, source)
+            if name:
+                bound.add(name)
+    _collect_bound(body, source, bound)
+
+    referenced: list[str] = []
+    seen: set[str] = set()
+    _collect_referenced(body, source, referenced, seen)
+    return [n for n in referenced if n not in bound and n not in _PY_BUILTINS]
+
+
+def _collect_bound(node: TSNode, source: bytes, bound: set[str]) -> None:
+    t = node.type
+    if t in {"assignment", "augmented_assignment"} or t == "for_statement":
+        left = node.child_by_field_name("left")
+        if left is not None:
+            bound.update(_assignment_target_names(left, source))
+    elif t in {"function_definition", "class_definition"}:
+        def_name = _identifier_text(node.child_by_field_name("name"), source)
+        if def_name:
+            bound.add(def_name)
+    elif t == "as_pattern":
+        alias_node = node.child_by_field_name("alias")
+        if alias_node is not None:
+            for ident in _all_identifiers(alias_node, source):
+                bound.add(ident)
+    elif t == "except_clause":
+        for child in node.children:
+            if child.type == "identifier":
+                bound.add(_text(child, source))
+    elif t == "named_expression":
+        name_node = node.child_by_field_name("name")
+        if name_node is not None:
+            bound.add(_text(name_node, source))
+    elif t in {"import_statement", "import_from_statement"}:
+        for target, alias in _import_targets(node, source, ""):
+            bound.add(alias or target.rsplit(".", 1)[-1])
+    for child in node.children:
+        _collect_bound(child, source, bound)
+
+
+def _collect_referenced(node: TSNode, source: bytes, out: list[str], seen: set[str]) -> None:
+    t = node.type
+    if t == "identifier":
+        name = _text(node, source)
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+        return
+    if t == "attribute":
+        obj = node.child_by_field_name("object")
+        if obj is not None:
+            _collect_referenced(obj, source, out, seen)
+        return  # skip the attribute suffix name
+    if t == "keyword_argument":
+        value = node.child_by_field_name("value")
+        if value is not None:
+            _collect_referenced(value, source, out, seen)
+        return  # skip the keyword name
+    if t in {"import_statement", "import_from_statement"}:
+        return
+    for child in node.children:
+        _collect_referenced(child, source, out, seen)
+
+
+def _all_identifiers(node: TSNode, source: bytes) -> list[str]:
+    out: list[str] = []
+    if node.type == "identifier":
+        return [_text(node, source)]
+    for child in node.children:
+        out.extend(_all_identifiers(child, source))
+    return out
+
+
+def _text(node: TSNode, source: bytes) -> str:
+    return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
 
 
 def _raised_names(func_node: TSNode, source: bytes) -> list[str]:

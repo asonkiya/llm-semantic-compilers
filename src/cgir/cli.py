@@ -171,8 +171,59 @@ def pack(
     source = _component_source(graph, component_id, repo) if repo else None
     types = _type_sources(graph, referenced_type_names(target), repo) if repo else {}
     tests = _test_sources(graph, target.covered_by, repo) if repo else {}
-    bundle = build_pack(specs, component_id, source=source, budget=budget, types=types, tests=tests)
+    context = _module_context(graph, component_id, repo) if repo else {}
+    bundle = build_pack(
+        specs,
+        component_id,
+        source=source,
+        budget=budget,
+        types=types,
+        tests=tests,
+        context=context,
+    )
     typer.echo(render_pack(bundle), nl=False)
+
+
+_HELPER_MAX_LINES = 25
+
+
+def _module_context(
+    graph: RepoGraph | None, component_id: str, repo: Path | None
+) -> dict[str, str]:
+    """Same-module constants and small helpers the target's body references."""
+    if graph is None or repo is None:
+        return {}
+    target = next(
+        (
+            n
+            for n in graph.nodes()
+            if n.kind in {NodeKind.Function, NodeKind.Method}
+            and n.attrs.get("qualname") == component_id
+        ),
+        None,
+    )
+    if target is None:
+        return {}
+    free = target.attrs.get("free_names")
+    if not isinstance(free, list) or not free:
+        return {}
+    module = component_id.rsplit(".", 1)[0]
+    wanted = {f"{module}.{name}" for name in free}
+    out: dict[str, str] = {}
+    for node in graph.nodes():
+        qual = node.attrs.get("qualname")
+        if not isinstance(qual, str) or qual not in wanted or qual == component_id:
+            continue
+        if node.kind == NodeKind.Variable:
+            src = _span_source(node, repo)
+        elif node.kind in {NodeKind.Function, NodeKind.Method}:
+            span = (node.end_line or 0) - (node.start_line or 0)
+            src = _span_source(node, repo) if span <= _HELPER_MAX_LINES else None
+        else:
+            continue
+        if src:
+            out[qual.rsplit(".", 1)[-1]] = src
+    return out
 
 
 def _test_sources(
