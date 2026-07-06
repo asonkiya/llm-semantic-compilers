@@ -29,15 +29,21 @@ cgir viz --index /tmp/cgir-out                      # self-contained viz.html
 cgir viz --index /tmp/cgir-out --format mermaid     # Markdown-embeddable flowchart
 cgir export --format graphml --out /tmp/cgir-out    # Gephi / yEd
 cgir stats --index /tmp/cgir-out                    # kinds, purity, hotspots
-cgir diff old-idx new-idx --fail-on effect-gain     # architecture drift, CI-ready
+cgir diff old-idx new-idx --markdown --fail-on effect-gain   # PR contract diff
 cgir pack pricing.add_tax --repo . --budget 4000    # minimal LLM context bundle
 ```
 
+Gate PRs on architecture drift with the [GitHub Action](./docs/github-action.md):
+a pure function that gains a `net` call, or a new `POST /admin` route, fails the
+build — deterministically, no per-seat LLM cost.
+
 ## Docs
 
+- [`docs/strategy.md`](./docs/strategy.md) — positioning: the deterministic contract layer
+- [`docs/github-action.md`](./docs/github-action.md) — CI contract-diff gate
 - [`docs/architecture.md`](./docs/architecture.md) — layered pipeline, data model, extension seams
 - [`docs/status.md`](./docs/status.md) — what runs today, test coverage, recent milestones
-- [`docs/roadmap.md`](./docs/roadmap.md) — P1 / P2 / future sequencing
+- [`docs/feature-research.md`](./docs/feature-research.md) — full feature catalog + build order
 - [`docs/development.md`](./docs/development.md) — install, commands, red-green TDD workflow
 
 ## License

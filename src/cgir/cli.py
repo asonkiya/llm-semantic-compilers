@@ -24,7 +24,7 @@ from cgir.ir.nodes import NodeKind
 from cgir.manifest import compatibility_warning, read_manifest
 from cgir.pipeline import scan_repo
 from cgir.regenerate import regenerate as run_regenerate
-from cgir.report.diff import compute_diff, render_diff, violations
+from cgir.report.diff import compute_diff, render_diff, render_diff_markdown, violations
 from cgir.report.flow import render_flow
 from cgir.report.pack import build_pack, render_pack
 from cgir.report.stats import compute_stats, render_text
@@ -208,32 +208,40 @@ def diff(
     old_index: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
     new_index: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
     as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON.")] = False,
+    markdown: Annotated[
+        bool, typer.Option("--markdown", help="Emit a PR-comment-ready markdown report.")
+    ] = False,
     fail_on: Annotated[
         list[str] | None,
         typer.Option(
             "--fail-on",
-            help="Exit 1 on drift: effect-gain[:tag] | purity-drop | kind-change (repeatable).",
+            help="Exit 1 on drift: effect-gain[:tag] | purity-drop | kind-change | "
+            "entrypoint-added | entrypoint-change (repeatable).",
         ),
     ] = None,
 ) -> None:
     """Compare two scan indexes: added/removed components and contract drift."""
     warning = compatibility_warning(read_manifest(old_index), read_manifest(new_index))
     result = compute_diff(_load_specs(old_index), _load_specs(new_index))
+    found = violations(result, list(fail_on or []))
     if as_json:
         payload = dict(result)
         if warning:
             payload["warning"] = warning
+        payload["violations"] = found
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    elif markdown:
+        typer.echo(render_diff_markdown(result, violations=found, warning=warning), nl=False)
     else:
         if warning:
             typer.echo(warning)
         typer.echo(render_diff(result), nl=False)
-    found = violations(result, list(fail_on or []))
+        if found:
+            typer.echo("")
+            typer.echo(f"drift violations ({len(found)}):")
+            for line in found:
+                typer.echo(f"  ! {line}")
     if found:
-        typer.echo("")
-        typer.echo(f"drift violations ({len(found)}):")
-        for line in found:
-            typer.echo(f"  ! {line}")
         raise typer.Exit(code=1)
 
 

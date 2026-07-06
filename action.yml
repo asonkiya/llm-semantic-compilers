@@ -1,0 +1,99 @@
+name: "CGIR contract diff"
+description: "Detect architecture drift (effects, purity, kind, entrypoints) between a PR and its base, and fail the build on policy violations."
+branding:
+  icon: "git-pull-request"
+  color: "purple"
+
+inputs:
+  paths:
+    description: "Space-separated repo subpaths to scan (default: repo root)."
+    required: false
+    default: "."
+  exclude:
+    description: "Space-separated directory names to skip during ingest."
+    required: false
+    default: ""
+  fail-on:
+    description: >-
+      Space-separated drift rules that fail the build:
+      effect-gain[:tag] | purity-drop | kind-change | entrypoint-added | entrypoint-change.
+      Empty = report only, never fail.
+    required: false
+    default: ""
+  comment:
+    description: "Post the diff as a PR comment (requires pull-requests: write)."
+    required: false
+    default: "true"
+  cgir-version:
+    description: "cgir version/spec to install (default: the published release)."
+    required: false
+    default: "cgir"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install cgir
+      shell: bash
+      run: pip install "${{ inputs.cgir-version }}"
+
+    - name: Scan base ref
+      shell: bash
+      run: |
+        set -euo pipefail
+        base="${{ github.event.pull_request.base.sha }}"
+        [ -n "$base" ] || base="$(git rev-parse HEAD~1)"
+        git worktree add --detach /tmp/cgir-base "$base"
+        excl=""
+        for d in ${{ inputs.exclude }}; do excl="$excl --exclude $d"; done
+        for p in ${{ inputs.paths }}; do
+          cgir scan "/tmp/cgir-base/$p" --out "/tmp/cgir-base-idx/$p" $excl
+        done
+
+    - name: Scan head
+      shell: bash
+      run: |
+        set -euo pipefail
+        excl=""
+        for d in ${{ inputs.exclude }}; do excl="$excl --exclude $d"; done
+        for p in ${{ inputs.paths }}; do
+          cgir scan "$p" --out "/tmp/cgir-head-idx/$p" $excl
+        done
+
+    - name: Diff and (optionally) fail
+      id: diff
+      shell: bash
+      run: |
+        set -uo pipefail
+        rc=0
+        : > /tmp/cgir-comment.md
+        fail=""
+        for r in ${{ inputs.fail-on }}; do fail="$fail --fail-on $r"; done
+        for p in ${{ inputs.paths }}; do
+          cgir diff "/tmp/cgir-base-idx/$p" "/tmp/cgir-head-idx/$p" \
+            --markdown $fail >> /tmp/cgir-comment.md || rc=1
+        done
+        echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+        cat /tmp/cgir-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Comment on PR
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh pr comment "${{ github.event.pull_request.number }}" \
+          --body-file /tmp/cgir-comment.md || \
+          echo "::warning::could not post PR comment (needs pull-requests: write)"
+
+    - name: Enforce gate
+      shell: bash
+      run: |
+        if [ "${{ steps.diff.outputs.exit_code }}" = "1" ]; then
+          echo "::error::CGIR contract drift violations — see the PR comment / job summary."
+          exit 1
+        fi

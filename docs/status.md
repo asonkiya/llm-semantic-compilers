@@ -53,7 +53,9 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Structure report (`cgir stats`, `--json`) — kinds, purity, effects, hotspots | done | `src/cgir/report/stats.py` |
 | Flow tracing (`cgir flow <id>`) — annotated caller/callee trees | done | `src/cgir/report/flow.py` |
 | Parameter-flow analysis (param → callee args, may-flow) | done | `src/cgir/analyses/param_flow.py` |
-| Index diff + drift rules (`cgir diff --fail-on`) | done | `src/cgir/report/diff.py` |
+| Index diff + drift rules (`cgir diff --fail-on`, entrypoint surface, `--markdown`) | done | `src/cgir/report/diff.py` |
+| Index manifest + versioning (`manifest.json`, `cgir --version`) | done | `src/cgir/manifest.py` |
+| GitHub Action (contract-diff gate + PR comment) | done | `action.yml`, `docs/github-action.md` |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware) | done | `src/cgir/report/pack.py` |
 | MCP server (`cgir mcp`, stdio; `cgir[mcp]` extra) | done | `src/cgir/api/mcp_server.py` |

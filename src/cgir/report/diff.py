@@ -141,3 +141,64 @@ def render_diff(diff: dict[str, Any]) -> str:
             for name, values in change["fields"].items():
                 lines.append(f"      {name}: {values['old']} -> {values['new']}")
     return "\n".join(lines) + "\n"
+
+
+def render_diff_markdown(
+    diff: dict[str, Any],
+    violations: list[str] | None = None,
+    warning: str | None = None,
+) -> str:
+    """A PR-comment-ready markdown report of an index diff."""
+    surface = diff.get("entrypoints", {"added": [], "removed": [], "changed": []})
+    has_surface = bool(surface["added"] or surface["removed"] or surface["changed"])
+    has_any = bool(diff["added"] or diff["removed"] or diff["changed"] or has_surface)
+
+    out: list[str] = ["## 🔍 CGIR contract diff", ""]
+    if warning:
+        out += [f"> ⚠️ {warning}", ""]
+    if not has_any:
+        out.append("✅ No contract changes.")
+        return "\n".join(out) + "\n"
+
+    if violations:
+        out.append(f"> ❌ **{len(violations)} drift violation(s)** — gate failed:")
+        out += [f"> - {line}" for line in violations]
+        out.append("")
+
+    if has_surface:
+        out += ["### Entrypoint surface", ""]
+        out += [f"- 🟢 `{e['entrypoint']}` — new (`{e['id']}`)" for e in surface["added"]]
+        out += [f"- 🔴 `{e['entrypoint']}` — removed (`{e['id']}`)" for e in surface["removed"]]
+        out += [
+            f"- 🟡 `{e['old']}` → `{e['new']}` (`{e['id']}`)" for e in surface["changed"]
+        ]
+        out.append("")
+
+    if diff["changed"]:
+        out += [f"### Contract drift ({len(diff['changed'])})", ""]
+        for change in diff["changed"]:
+            out.append(f"<details><summary><code>{change['id']}</code></summary>")
+            out += ["", "| field | before | after |", "|---|---|---|"]
+            for name, values in change["fields"].items():
+                old_v = _md_cell(values["old"])
+                new_v = _md_cell(values["new"])
+                out.append(f"| {name} | {old_v} | {new_v} |")
+            out += ["", "</details>", ""]
+
+    counts = []
+    if diff["added"]:
+        counts.append(f"**{len(diff['added'])}** added")
+    if diff["removed"]:
+        counts.append(f"**{len(diff['removed'])}** removed")
+    if counts:
+        out.append(" · ".join(counts))
+
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _md_cell(value: Any) -> str:
+    if value is None or value == [] or value == "":
+        return "—"
+    if isinstance(value, list):
+        return ", ".join(f"`{v}`" for v in value)
+    return f"`{value}`"

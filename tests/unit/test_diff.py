@@ -16,7 +16,7 @@ Contract:
 from __future__ import annotations
 
 from cgir.ir.component_spec import ComponentKind, ComponentSpec
-from cgir.report.diff import compute_diff, violations
+from cgir.report.diff import compute_diff, render_diff_markdown, violations
 
 
 def _spec(
@@ -159,3 +159,41 @@ def test_new_components_do_not_trip_gain_rules() -> None:
     """Only *existing* components drifting counts; new effectful code is fine."""
     diff = compute_diff([], [_spec("m.f", effects=["net"], purity=0.0)])
     assert violations(diff, ["effect-gain", "purity-drop"]) == []
+
+
+# --- PR-comment markdown (Sprint 22) -------------------------------------------
+
+
+def test_markdown_no_changes() -> None:
+    md = render_diff_markdown(compute_diff([_spec("m.f")], [_spec("m.f")]))
+    assert "CGIR" in md
+    assert "no contract changes" in md.lower()
+
+
+def test_markdown_reports_drift_as_table() -> None:
+    old = [_spec("m.f")]
+    new = [_spec("m.f", kind=ComponentKind.effect_adapter, effects=["net"], purity=0.0)]
+    md = render_diff_markdown(compute_diff(old, new))
+    assert "m.f" in md
+    assert "| field |" in md.lower() or "| field " in md.lower()
+    assert "net" in md
+    assert "|" in md  # a markdown table
+
+
+def test_markdown_surfaces_entrypoints() -> None:
+    new = [_spec("routes.create", entrypoint="HTTP POST /api/x")]
+    md = render_diff_markdown(compute_diff([], new))
+    assert "HTTP POST /api/x" in md
+
+
+def test_markdown_includes_violations_block() -> None:
+    old = [_spec("m.f")]
+    new = [_spec("m.f", kind=ComponentKind.effect_adapter, effects=["net"], purity=0.0)]
+    diff = compute_diff(old, new)
+    md = render_diff_markdown(diff, violations=violations(diff, ["effect-gain"]))
+    assert "gained effect" in md.lower()
+
+
+def test_markdown_surfaces_schema_warning() -> None:
+    md = render_diff_markdown(compute_diff([_spec("m.f")], [_spec("m.f")]), warning="schema mismatch")
+    assert "schema mismatch" in md
