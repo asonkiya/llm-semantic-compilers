@@ -144,6 +144,37 @@ def test_flow_unknown_component_fails(tmp_path: Path, python_sample_repo: Path) 
     assert result.exit_code != 0
 
 
+# --- version + manifest (Sprint 20) --------------------------------------------
+
+
+def test_version_flag() -> None:
+    result = CliRunner().invoke(app, ["--version"])
+    assert result.exit_code == 0
+    from cgir import __version__
+
+    assert __version__ in result.output
+
+
+def test_diff_warns_on_schema_mismatch(tmp_path: Path, python_sample_repo: Path) -> None:
+    import shutil
+
+    old_idx = tmp_path / "old"
+    new_idx = tmp_path / "new"
+    runner = CliRunner()
+    assert (
+        runner.invoke(app, ["scan", str(python_sample_repo), "--out", str(old_idx)]).exit_code == 0
+    )
+    shutil.copytree(old_idx, new_idx)
+    # Simulate the new index being produced by an incompatible schema.
+    manifest = json.loads((new_idx / "manifest.json").read_text())
+    manifest["schema_version"] = "99.0"
+    (new_idx / "manifest.json").write_text(json.dumps(manifest))
+
+    result = runner.invoke(app, ["diff", str(old_idx), str(new_idx)])
+    assert result.exit_code == 0, result.output
+    assert "schema" in result.output.lower()
+
+
 # --- pack (Sprint 18 — context packer) ------------------------------------------
 
 

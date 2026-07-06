@@ -21,6 +21,7 @@ from cgir.export.mermaid import render_call_graph
 from cgir.ir.component_spec import ComponentSpec
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import NodeKind
+from cgir.manifest import compatibility_warning, read_manifest
 from cgir.pipeline import scan_repo
 from cgir.regenerate import regenerate as run_regenerate
 from cgir.report.diff import compute_diff, render_diff, violations
@@ -33,6 +34,24 @@ app = typer.Typer(
     add_completion=False,
     help="CodeGraph IR - semantic IR for repo-scale LLM rewriting.",
 )
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        from cgir import __version__
+
+        typer.echo(f"cgir {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: Annotated[
+        bool,
+        typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version."),
+    ] = False,
+) -> None:
+    """CodeGraph IR — semantic IR for repo-scale LLM rewriting."""
 
 
 @app.command()
@@ -198,10 +217,16 @@ def diff(
     ] = None,
 ) -> None:
     """Compare two scan indexes: added/removed components and contract drift."""
+    warning = compatibility_warning(read_manifest(old_index), read_manifest(new_index))
     result = compute_diff(_load_specs(old_index), _load_specs(new_index))
     if as_json:
-        typer.echo(json.dumps(result, indent=2, sort_keys=True))
+        payload = dict(result)
+        if warning:
+            payload["warning"] = warning
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
     else:
+        if warning:
+            typer.echo(warning)
         typer.echo(render_diff(result), nl=False)
     found = violations(result, list(fail_on or []))
     if found:

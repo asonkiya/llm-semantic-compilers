@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cgir.ir.component_spec import ComponentSpec
 from cgir.ir.graph import RepoGraph
+from cgir.manifest import write_manifest
 
 
 def read_specs(index_dir: Path) -> list[ComponentSpec]:
@@ -32,3 +33,5 @@ def write_index(out_dir: Path, graph: RepoGraph, specs: list[ComponentSpec]) -> 
 
     index = [{"id": spec.id, "kind": spec.kind.value, "trace": spec.trace} for spec in specs]
     (out_dir / "components_index.json").write_text(json.dumps(index, indent=2, sort_keys=True))
+
+    write_manifest(out_dir, component_count=len(specs))
