@@ -94,7 +94,7 @@ Residual 3:
 All three are "the answer is a specific data structure defined elsewhere,"
 not a contract-comprehension gap.
 
-## Takeaway
+## Takeaway (Python, behavioral oracle)
 
 Monotonic evidence (4→6→8→9): **an enriched contract bundle beats full-file
 context at ~4x less** — matching or exceeding it by including exactly the
@@ -104,3 +104,43 @@ cases, not comprehension gaps. This is the evidence base for the
 pack → verify → gate loop.
 
 Cost: rounds 1–4 ~$0.55 total (Sonnet 4.6).
+
+---
+
+# TypeScript — contract-preservation benchmark
+
+The Angular frontend's specs are Angular-CLI stubs (`expect(x).toBeTruthy()`)
+— a blind behavioral oracle. So instead of "tests pass," the oracle here is
+**cgir verify's contract check**: splice candidate → rescan → contract-diff;
+pass = effects *and* kind unchanged. Deterministic, no test runner.
+Harness: `scratchpad/contract_bench.py`. 12 components (thin HTTP-service
+wrappers → 31-line orchestration methods), pack vs stubbed-file, Sonnet 4.6.
+
+| condition | contract-preserved | avg context |
+|---|---|---|
+| pack | **10/12** | ~57 tok |
+| file | 9/12 | ~381 tok |
+
+**Pack matches-or-beats the full-file baseline at ~7x less context** — the
+same shape as the Python result, replicated on TypeScript with a different
+(contract) oracle. The trivial service wrappers preserve trivially under
+both; pack *won* on `ReaderComponent.load` (15L).
+
+The 2 failures (`ReaderComponent.translate`, `onFormat`) fail under **both**
+conditions — so not a pack deficiency — and they're instructive about *TS
+precision*, not the LLM:
+
+- `translate`: original classified `pure_function []` because CGIR's TS
+  cross-service DI resolution is weak (`this.chaptersService.translate(...)`
+  doesn't resolve to an effectful callee), so the original contract
+  under-counted effects. The rewrite added a `console.log` → `io`, flagged
+  as drift. The "contract change" is partly CGIR's own under-detection.
+- `onFormat`: original `effect_adapter [io]` → rewrite dropped the logging
+  → `pure_function []`. A genuine (if minor) contract change, and `io`
+  being sensitive to a single `console.log` makes it brittle.
+
+**Honest read:** on TS the contract oracle measures a *mix* of LLM fidelity
+and CGIR's TS effect precision. The headline (pack ≈ file at 7x less) holds;
+the failures point at the next TS improvement — DI-aware cross-service call
+resolution so orchestration methods carry their true `calls_effectful`
+contract. Cost: ~$0.13 (Sonnet 4.6).
