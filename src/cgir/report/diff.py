@@ -4,9 +4,10 @@
 :mod:`cgir.report.stats`): which components appeared, disappeared, or
 changed on the *contract* fields — kind, purity, effects, signature,
 outputs. ``violations`` evaluates CI fail rules against a diff, so
-"this PR made a pure function effectful" can fail a build:
+"this PR made a pure function effectful" — or silently dropped a network
+call — can fail a build:
 
-    cgir diff old-index new-index --fail-on effect-gain:net --fail-on purity-drop
+    cgir diff old-index new-index --fail-on effect-gain:net --fail-on effect-loss:net
 
 Rules only fire for components present in *both* scans — new effectful
 code is a choice, drift in existing code is a regression.
@@ -87,6 +88,13 @@ def violations(diff: dict[str, Any], rules: list[str]) -> list[str]:
                     gained = [t for t in gained if t == wanted]
                 if gained:
                     found.append(f"{spec_id}: gained effect(s) {', '.join(gained)}")
+            elif rule.startswith("effect-loss"):
+                _, _, wanted = rule.partition(":")
+                lost = _lost_effects(fields)
+                if wanted:
+                    lost = [t for t in lost if t == wanted]
+                if lost:
+                    found.append(f"{spec_id}: lost effect(s) {', '.join(lost)}")
             elif rule == "purity-drop":
                 purity = fields.get("purity")
                 if purity and _as_float(purity["new"]) < _as_float(purity["old"]):
@@ -111,6 +119,13 @@ def _gained_effects(fields: dict[str, dict[str, Any]]) -> list[str]:
     if not effects:
         return []
     return sorted(set(effects["new"]) - set(effects["old"]))
+
+
+def _lost_effects(fields: dict[str, dict[str, Any]]) -> list[str]:
+    effects = fields.get("effects")
+    if not effects:
+        return []
+    return sorted(set(effects["old"]) - set(effects["new"]))
 
 
 def _as_float(value: Any) -> float:

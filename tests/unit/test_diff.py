@@ -87,6 +87,21 @@ def test_violation_effect_gain_specific_tag() -> None:
     assert len(violations(diff, ["effect-gain:fs"])) == 1
 
 
+def test_violation_effect_loss_any() -> None:
+    # A component that silently stops doing I/O — e.g. a `create` that no
+    # longer POSTs — is as dangerous as one that gains an effect.
+    diff = compute_diff([_spec("m.f", effects=["net"])], [_spec("m.f", effects=[])])
+    found = violations(diff, ["effect-loss"])
+    assert len(found) == 1
+    assert "m.f" in found[0] and "net" in found[0]
+
+
+def test_violation_effect_loss_specific_tag() -> None:
+    diff = compute_diff([_spec("m.f", effects=["net"])], [_spec("m.f", effects=["nondeterm"])])
+    assert violations(diff, ["effect-loss:db"]) == []
+    assert len(violations(diff, ["effect-loss:net"])) == 1
+
+
 def test_violation_purity_drop() -> None:
     diff = compute_diff([_spec("m.f", purity=1.0)], [_spec("m.f", purity=0.7)])
     assert len(violations(diff, ["purity-drop"])) == 1

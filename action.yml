@@ -16,7 +16,7 @@ inputs:
   fail-on:
     description: >-
       Space-separated drift rules that fail the build:
-      effect-gain[:tag] | purity-drop | kind-change | entrypoint-added | entrypoint-change.
+      effect-gain[:tag] | effect-loss[:tag] | purity-drop | kind-change | entrypoint-added | entrypoint-change.
       Empty = report only, never fail.
     required: false
     default: ""

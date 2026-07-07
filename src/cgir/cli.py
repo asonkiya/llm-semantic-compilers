@@ -429,8 +429,8 @@ def diff(
         list[str] | None,
         typer.Option(
             "--fail-on",
-            help="Exit 1 on drift: effect-gain[:tag] | purity-drop | kind-change | "
-            "entrypoint-added | entrypoint-change (repeatable).",
+            help="Exit 1 on drift: effect-gain[:tag] | effect-loss[:tag] | purity-drop | "
+            "kind-change | entrypoint-added | entrypoint-change (repeatable).",
         ),
     ] = None,
 ) -> None:
