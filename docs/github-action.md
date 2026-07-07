@@ -25,7 +25,8 @@ jobs:
           fetch-depth: 0    # base ref must be reachable
       - uses: your-org/cgir@v0     # or: local ./ during dogfooding
         with:
-          fail-on: "effect-gain:net purity-drop entrypoint-added"
+          # evidence-based low-noise default — see docs/gate-noise.md
+          fail-on: "effect-gain:net effect-gain:fs effect-gain:db effect-loss:net effect-loss:fs effect-loss:db"
 ```
 
 ## What it does
@@ -51,6 +52,7 @@ jobs:
 |---|---|
 | `effect-gain` | an existing component gains any effect tag |
 | `effect-gain:<tag>` | …gains a specific tag (`net`, `fs`, `db`, `io`, `nondeterm`, `raise`) |
+| `effect-loss` / `effect-loss:<tag>` | …*loses* an effect tag (e.g. a `create` that stops POSTing) |
 | `purity-drop` | purity score decreases |
 | `kind-change` | component kind changes (e.g. `pure_function` → `effect_adapter`) |
 | `entrypoint-added` | a new HTTP route / CLI command / task appears |
@@ -60,17 +62,28 @@ Rules that inspect existing components fire only when the component is
 present in **both** base and head — new effectful code is a deliberate
 choice, drift in existing code is a regression.
 
-## Example policies
+## Choosing a policy
+
+We replayed real commit history through the gate to measure false-alarm
+rate per rule ([`docs/gate-noise.md`](./gate-noise.md)). Summary:
+
+- **Low-noise (recommended default):** `effect-gain`/`effect-loss` on
+  `net`/`fs`/`db`. ~0–10% of real commits fire, and each is a genuine
+  change in a component's I/O surface. Treat a hit as *review-required*.
+- **Report-only (noisy — surface, don't fail):** `entrypoint-added`
+  (fires on every new endpoint — 25% of commits), `kind-change` /
+  `purity-drop` (import-sensitive, co-fire), and the `io` / `nondeterm`
+  tags (a `print`/timestamp shouldn't fail CI).
 
 ```yaml
-# "the pure core stays pure, and nothing new reaches the network"
-fail-on: "purity-drop effect-gain:net"
+# recommended: nothing new reaches — or silently stops reaching — the outside world
+fail-on: "effect-gain:net effect-gain:fs effect-gain:db effect-loss:net effect-loss:fs effect-loss:db"
 
-# "no undocumented new endpoints"
-fail-on: "entrypoint-added"
+# minimal: the pure core stays pure, nothing new hits the network
+fail-on: "effect-gain:net effect-loss:net"
 
-# strict: any contract movement is reviewed
-fail-on: "effect-gain purity-drop kind-change entrypoint-added entrypoint-change"
+# strict (expect noise — see gate-noise.md): any contract movement is reviewed
+fail-on: "effect-gain effect-loss purity-drop kind-change entrypoint-added entrypoint-change"
 ```
 
 ## Notes
