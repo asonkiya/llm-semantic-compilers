@@ -172,6 +172,7 @@ def pack(
     types = _type_sources(graph, referenced_type_names(target), repo) if repo else {}
     tests = _test_sources(graph, target.covered_by, repo) if repo else {}
     context = _module_context(graph, component_id, repo) if repo else {}
+    receivers = _call_receivers(graph, target)
     bundle = build_pack(
         specs,
         component_id,
@@ -180,6 +181,7 @@ def pack(
         types=types,
         tests=tests,
         context=context,
+        receivers=receivers,
     )
     typer.echo(render_pack(bundle), nl=False)
 
@@ -223,6 +225,42 @@ def _module_context(
             continue
         if src:
             out[qual.rsplit(".", 1)[-1]] = src
+    return out
+
+
+def _call_receivers(graph: RepoGraph | None, target: ComponentSpec) -> dict[str, str]:
+    """Map each DI callee to the field it is reached through (`this.<field>`).
+
+    The target's owning class records injected/declared fields as
+    ``{field: TypeName}``. A callee whose class matches one of those field
+    types is called via that field; surfacing it lets a rewriter reproduce
+    the call — and preserve the effect contract — instead of guessing the
+    field name. Empty for classes without fields (e.g. Python today), so the
+    pack is unchanged there.
+    """
+    if graph is None:
+        return {}
+    class_qual = target.id.rsplit(".", 1)[0]
+    cls = next(
+        (
+            n
+            for n in graph.nodes()
+            if n.kind == NodeKind.Class and n.attrs.get("qualname") == class_qual
+        ),
+        None,
+    )
+    fields = cls.attrs.get("fields") if cls is not None else None
+    if not isinstance(fields, dict) or not fields:
+        return {}
+    type_to_field: dict[str, str] = {}
+    for field, type_name in fields.items():
+        type_to_field.setdefault(type_name, field)
+    out: dict[str, str] = {}
+    for callee in target.calls:
+        callee_class = callee.rsplit(".", 1)[0].rsplit(".", 1)[-1]
+        field = type_to_field.get(callee_class)
+        if field:
+            out[callee] = f"this.{field}"
     return out
 
 

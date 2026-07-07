@@ -109,11 +109,22 @@ def build_pack(
     types: dict[str, str] | None = None,
     tests: dict[str, str] | None = None,
     context: dict[str, str] | None = None,
+    receivers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     by_id = {s.id: s for s in specs}
     target = by_id[target_id]  # KeyError for unknown targets, by design
 
-    callees = [_interface(by_id[callee]) for callee in target.calls if callee in by_id]
+    callees = []
+    for callee in target.calls:
+        if callee not in by_id:
+            continue
+        entry = _interface(by_id[callee])
+        # A DI callee is reached through an injected field; naming it lets a
+        # rewriter reproduce the call (and thus the effect contract) instead
+        # of guessing the field name.
+        if receivers and callee in receivers:
+            entry["receiver"] = receivers[callee]
+        callees.append(entry)
     callers = [_interface(s) for s in specs if target_id in s.calls]
     type_defs = [{"name": name, "source": src} for name, src in sorted((types or {}).items())]
     test_defs = [{"id": tid, "source": src} for tid, src in sorted((tests or {}).items())]
@@ -247,7 +258,9 @@ def render_pack(pack: dict[str, Any]) -> str:
 
 
 def _interface_line(entry: dict[str, Any]) -> str:
-    parts = [f"- `{entry['signature']}`", f"({entry['id']}, {entry['kind']}"]
+    receiver = entry.get("receiver")
+    call = f"{receiver}.{entry['signature']}" if receiver else entry["signature"]
+    parts = [f"- `{call}`", f"({entry['id']}, {entry['kind']}"]
     if entry["effects"]:
         parts[-1] += f", effects: {','.join(entry['effects'])}"
     parts[-1] += ")"

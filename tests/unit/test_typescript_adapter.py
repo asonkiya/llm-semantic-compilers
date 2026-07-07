@@ -147,6 +147,44 @@ def test_di_call_makes_caller_effectful(tmp_path: Path) -> None:
     assert "calls_effectful" in effects["method:reader.component.ReaderComponent.run"]
 
 
+def test_pack_names_di_receiver_field(tmp_path: Path) -> None:
+    """The pack renders a DI callee as `this.<field>.method(...)`, not bare.
+
+    Without the receiver field name a rewriting model hallucinates it
+    (`this.chaptersService` vs the real `this.svc`), the call fails to
+    resolve, and the effect contract silently drops.
+    """
+    from cgir.cli import _call_receivers
+    from cgir.report.pack import build_pack, render_pack
+
+    (tmp_path / "chapters.service.ts").write_text(
+        "export class ChaptersService {\n"
+        "  constructor(private http: HttpClient) {}\n"
+        "  translate(id: number) { return this.http.post(`/x/${id}`, {}); }\n"
+        "}\n"
+    )
+    (tmp_path / "reader.component.ts").write_text(
+        "import { ChaptersService } from './chapters.service';\n"
+        "export class ReaderComponent {\n"
+        "  constructor(private svc: ChaptersService) {}\n"
+        "  run() { return this.svc.translate(1); }\n"
+        "}\n"
+    )
+    graph = TreeSitterSource().ingest(tmp_path)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, tmp_path)
+    effects = classify(graph, tmp_path)
+    purity = score(graph, effects)
+    specs = list(slice_components(graph, effects=effects, purity_scores=purity))
+    target = next(s for s in specs if s.id.endswith("ReaderComponent.run"))
+
+    receivers = _call_receivers(graph, target)
+    assert any(v == "this.svc" for v in receivers.values())
+
+    rendered = render_pack(build_pack(specs, target.id, receivers=receivers))
+    assert "this.svc.translate" in rendered
+
+
 def test_adapter_direct_effects_unit() -> None:
     a = TypeScriptAdapter()
     root = a.parse(b"function f(db){ return db.query('x'); }")

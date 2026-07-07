@@ -26,7 +26,7 @@ def test_default_adapter_is_python() -> None:
 
 def test_locate_function_finds_by_name_and_row() -> None:
     a = PythonAdapter()
-    root, src = _fn(a, "def a():\n    pass\n\ndef b(x):\n    return x\n")
+    root, _src = _fn(a, "def a():\n    pass\n\ndef b(x):\n    return x\n")
     node = a.locate_function(root, "b", 3)
     assert node is not None
     assert node.child_by_field_name("name").text.decode() == "b"

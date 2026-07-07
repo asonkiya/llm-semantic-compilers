@@ -150,3 +150,55 @@ orchestration methods (`translate`, `onFormat`, `load`) went from
 `pure_function []` to `orchestrator ['calls_effectful']` — their true
 contract. The distribution shifted 9-pure/8-adapter → 14-pure/5-orchestrator/
 8-adapter. This removes the CGIR-precision confound the benchmark exposed.
+
+## Round 2 (DI-corrected contracts, pack unchanged)
+
+Re-run against the DI-corrected index. The headline numbers *dropped* —
+pack **6/12**, file **8/12** — and that is the honest, informative result:
+
+| condition | contract-preserved | avg context |
+|---|---|---|
+| pack | 6/12 | ~106 tok |
+| file | 8/12 | ~381 tok |
+
+The pre-DI 10/12 was **inflated by under-detection**: those orchestration
+methods were mis-read as `pure_function []`, so *any* rewrite trivially
+preserved a hollow contract. With precise contracts (`orchestrator
+[calls_effectful]`), preservation now requires the rewrite to actually wire
+the service call through the injected field. Every new pack failure had the
+*same* signature: the model called `this.chaptersService.translate(...)`
+while the real field is `this.chaptersApi` — a **hallucinated DI field
+name**, so the call didn't resolve and the effect silently dropped. The
+file condition passed exactly when the visible constructor let the model
+copy the right name. Diagnosis → the pack names the *callee*
+(`ChaptersService.translate`) but not the *receiver field*.
+
+## Round 3 (+ DI receiver bindings in the pack)
+
+The pack now renders each DI callee as `this.<field>.method(...)` — the
+field resolved from the target class's `{field: type}` map (the TS analog of
+Python's body free-name closure). One scoped enrichment
+(`pack._interface_line` + `cli._call_receivers`):
+
+| condition | contract-preserved | avg context |
+|---|---|---|
+| pack | **11/12** | ~109 tok |
+| file | 8/12 | ~381 tok |
+
+Five components flipped back to pass — the model now reproduces the exact
+service wiring. **Pack beats the full-file baseline at ~3.5x less context**,
+the same shape as Python, now on genuinely-precise contracts rather than
+hollow ones.
+
+The lone residual (`onFormat`) fails under **file too**: the original logs
+in its RxJS error callback (`console.error` → `io`), and the rewrite
+reproduced the service call but dropped the incidental logging. That's the
+known `io`-from-`console` brittleness (a debug log is a first-class effect),
+not a pack gap. Cost: rounds 2–3 ~$0.25 (Sonnet 4.6).
+
+**Takeaway:** the DI fix converted an *inflated* benchmark into an *honest*
+one, which immediately surfaced the next concrete enrichment (receiver
+bindings) — and landing it restored pack's lead. This is the same
+monotonic loop the Python rounds followed, and it demonstrates the
+contract-preservation oracle catching a real precision regression the moment
+it appeared.
