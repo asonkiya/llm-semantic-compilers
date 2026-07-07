@@ -23,6 +23,7 @@ from cgir.api.mcp_server import (
     tool_component,
     tool_entrypoints,
     tool_flow,
+    tool_impact,
     tool_pack,
     tool_search,
     tool_stats,
@@ -63,6 +64,17 @@ def test_tool_pack(index: Path) -> None:
     text = tool_pack(index, "orchestrator.quote", budget=4000)
     assert text.startswith("# orchestrator.quote")
     assert "pricing.add_tax" in text
+
+
+def test_tool_impact(index: Path) -> None:
+    # pricing.add_tax is called by orchestrator.quote — changing it affects the caller.
+    text = tool_impact(index, "pricing.add_tax")
+    assert "orchestrator.quote" in text
+    assert "affected" in text.lower()
+
+
+def test_tool_impact_unknown(index: Path) -> None:
+    assert "unknown component" in tool_impact(index, "nope.x").lower()
 
 
 def test_tool_search(index: Path) -> None:

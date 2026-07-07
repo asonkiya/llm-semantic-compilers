@@ -17,6 +17,7 @@ from typing import Any
 
 from cgir.export.json_export import read_specs
 from cgir.report.flow import render_flow
+from cgir.report.impact import render_impact
 from cgir.report.pack import build_pack, render_pack
 from cgir.report.stats import compute_stats, render_text
 
@@ -38,6 +39,14 @@ def tool_flow(index_dir: Path, component_id: str, depth: int = 3) -> str:
     """Upstream callers and downstream callees, annotated."""
     try:
         return render_flow(read_specs(index_dir), component_id, depth)
+    except KeyError:
+        return f"unknown component: {component_id}"
+
+
+def tool_impact(index_dir: Path, component_id: str) -> str:
+    """Blast radius of changing a component: affected callers, entrypoints, tests."""
+    try:
+        return render_impact(read_specs(index_dir), component_id)
     except KeyError:
         return f"unknown component: {component_id}"
 
@@ -115,6 +124,12 @@ def create_server(index_dir: Path) -> Any:
     def flow(component_id: str, depth: int = 3) -> str:
         """Trace a component: upstream callers and downstream callees."""
         return tool_flow(index_dir, component_id, depth)
+
+    @server.tool()
+    def impact(component_id: str) -> str:
+        """Before editing a component, see its blast radius: which callers are affected,
+        which entrypoints are at risk, and exactly which tests to run."""
+        return tool_impact(index_dir, component_id)
 
     @server.tool()
     def pack(component_id: str, budget: int = 4000) -> str:

@@ -26,6 +26,7 @@ from cgir.pipeline import scan_repo
 from cgir.regenerate import regenerate as run_regenerate
 from cgir.report.diff import compute_diff, render_diff, render_diff_markdown, violations
 from cgir.report.flow import render_flow
+from cgir.report.impact import compute_impact, render_impact
 from cgir.report.pack import build_pack, render_pack
 from cgir.report.stats import compute_stats, render_text
 from cgir.trace import TraceMap
@@ -145,6 +146,23 @@ def flow(
     specs = _load_specs(index_dir)
     try:
         typer.echo(render_flow(specs, component_id, depth), nl=False)
+    except KeyError as exc:
+        raise typer.BadParameter(f"Unknown component: {component_id}") from exc
+
+
+@app.command()
+def impact(
+    component_id: Annotated[str, typer.Argument(metavar="ID")],
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+    as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON.")] = False,
+) -> None:
+    """Blast radius of changing a component: affected callers, entrypoints at risk, tests to run."""
+    specs = _load_specs(index_dir)
+    try:
+        if as_json:
+            typer.echo(json.dumps(compute_impact(specs, component_id), indent=2, sort_keys=True))
+        else:
+            typer.echo(render_impact(specs, component_id), nl=False)
     except KeyError as exc:
         raise typer.BadParameter(f"Unknown component: {component_id}") from exc
 
