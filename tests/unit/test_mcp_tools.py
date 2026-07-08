@@ -24,6 +24,7 @@ from cgir.api.mcp_server import (
     tool_entrypoints,
     tool_flow,
     tool_impact,
+    tool_impact_of_change,
     tool_pack,
     tool_search,
     tool_stats,
@@ -75,6 +76,25 @@ def test_tool_impact(index: Path) -> None:
 
 def test_tool_impact_unknown(index: Path) -> None:
     assert "unknown component" in tool_impact(index, "nope.x").lower()
+
+
+def test_tool_impact_of_change_narrows(tmp_path: Path) -> None:
+    # add_tax is called by orchestrator.quote. A body-only rewrite that keeps
+    # the contract identical should report reach "none" — no downstream impact.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pricing.py").write_text("def add_tax(price, rate):\n    return price * (1 + rate)\n")
+    (repo / "orchestrator.py").write_text(
+        "from pricing import add_tax\n\ndef quote(price, rate):\n    return add_tax(price, rate)\n"
+    )
+    out = tmp_path / "idx"
+    assert CliRunner().invoke(app, ["scan", str(repo), "--out", str(out)]).exit_code == 0
+    same_contract = (
+        "def add_tax(price, rate):\n    total = price + price * rate\n    return total\n"
+    )
+    text = tool_impact_of_change(out, repo, "pricing.add_tax", same_contract)
+    assert "reach: none" in text
+    assert "orchestrator.quote" not in text  # not contract-affected
 
 
 def test_tool_search(index: Path) -> None:

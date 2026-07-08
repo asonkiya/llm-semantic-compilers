@@ -17,7 +17,7 @@ from typing import Any
 
 from cgir.export.json_export import read_specs
 from cgir.report.flow import render_flow
-from cgir.report.impact import render_impact
+from cgir.report.impact import render_impact, render_typed_impact
 from cgir.report.pack import build_pack, render_pack
 from cgir.report.stats import compute_stats, render_text
 
@@ -49,6 +49,18 @@ def tool_impact(index_dir: Path, component_id: str) -> str:
         return render_impact(read_specs(index_dir), component_id)
     except KeyError:
         return f"unknown component: {component_id}"
+
+
+def tool_impact_of_change(index_dir: Path, repo: Path, component_id: str, candidate: str) -> str:
+    """Blast radius of a *specific* proposed edit — narrowed by its real contract delta."""
+    from cgir.verify import verify
+
+    try:
+        result = verify(index_dir, component_id, candidate, repo)
+    except KeyError:
+        return f"unknown component: {component_id}"
+    delta = list(result.drift.keys())
+    return render_typed_impact(read_specs(index_dir), component_id, delta)
 
 
 def tool_pack(index_dir: Path, component_id: str, budget: int = 4000) -> str:
@@ -130,6 +142,12 @@ def create_server(index_dir: Path) -> Any:
         """Before editing a component, see its blast radius: which callers are affected,
         which entrypoints are at risk, and exactly which tests to run."""
         return tool_impact(index_dir, component_id)
+
+    @server.tool()
+    def impact_of_change(repo: str, component_id: str, candidate: str) -> str:
+        """After drafting an edit, see its *narrowed* blast radius: the contract delta
+        your candidate causes and only the callers/entrypoints/tests that delta reaches."""
+        return tool_impact_of_change(index_dir, Path(repo), component_id, candidate)
 
     @server.tool()
     def pack(component_id: str, budget: int = 4000) -> str:

@@ -26,7 +26,12 @@ from cgir.pipeline import scan_repo
 from cgir.regenerate import regenerate as run_regenerate
 from cgir.report.diff import compute_diff, render_diff, render_diff_markdown, violations
 from cgir.report.flow import render_flow
-from cgir.report.impact import compute_impact, render_impact
+from cgir.report.impact import (
+    compute_impact,
+    compute_typed_impact,
+    render_impact,
+    render_typed_impact,
+)
 from cgir.report.pack import build_pack, render_pack
 from cgir.report.stats import compute_stats, render_text
 from cgir.trace import TraceMap
@@ -155,14 +160,52 @@ def impact(
     component_id: Annotated[str, typer.Argument(metavar="ID")],
     index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
     as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON.")] = False,
+    changed: Annotated[
+        str | None,
+        typer.Option(
+            "--changed",
+            help="Comma-separated contract fields that changed "
+            "(effects,purity,kind,signature,outputs) — narrows the radius.",
+        ),
+    ] = None,
+    candidate: Annotated[
+        Path | None,
+        typer.Option(
+            "--candidate",
+            exists=True,
+            help="A proposed new implementation; its contract delta (via verify) "
+            "narrows the radius. Requires --repo.",
+        ),
+    ] = None,
+    repo: Annotated[
+        Path | None, typer.Option("--repo", help="Repo root (with --candidate).")
+    ] = None,
 ) -> None:
-    """Blast radius of changing a component: affected callers, entrypoints at risk, tests to run."""
+    """Blast radius of changing a component: affected callers, entrypoints at risk, tests to run.
+
+    Worst-case by default; narrowed by --changed or by a --candidate's actual contract delta.
+    """
     specs = _load_specs(index_dir)
     try:
-        if as_json:
-            typer.echo(json.dumps(compute_impact(specs, component_id), indent=2, sort_keys=True))
+        if candidate is not None:
+            if repo is None:
+                raise typer.BadParameter("--candidate requires --repo")
+            from cgir.verify import verify
+
+            result = verify(index_dir, component_id, candidate.read_text(), repo)
+            delta = list(result.drift.keys())
+            data = compute_typed_impact(specs, component_id, delta)
+            renderer = render_typed_impact(specs, component_id, delta)
+        elif changed is not None:
+            delta = [f.strip() for f in changed.split(",") if f.strip()]
+            data = compute_typed_impact(specs, component_id, delta)
+            renderer = render_typed_impact(specs, component_id, delta)
         else:
-            typer.echo(render_impact(specs, component_id), nl=False)
+            data = compute_impact(specs, component_id)
+            renderer = render_impact(specs, component_id)
+        typer.echo(
+            json.dumps(data, indent=2, sort_keys=True) if as_json else renderer, nl=not as_json
+        )
     except KeyError as exc:
         raise typer.BadParameter(f"Unknown component: {component_id}") from exc
 

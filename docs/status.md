@@ -54,6 +54,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Test linkage (`covered_by`) + linked-test source in pack | done | `slicer._covering_tests`, `pack` tests section |
 | Flow tracing (`cgir flow <id>`) — annotated caller/callee trees | done | `src/cgir/report/flow.py` |
 | Change-impact / blast radius (`cgir impact <id>`, `--json`) — transitive callers, entrypoints at risk, tests to run | done | `src/cgir/report/impact.py` |
+| Typed impact — radius narrowed by contract delta (`--changed`, or `--candidate/--repo` via verify): body-only→none, signature→direct, effects/purity/kind→transitive | done | `src/cgir/report/impact.py:compute_typed_impact` |
 | Parameter-flow analysis (param → callee args, may-flow) | done | `src/cgir/analyses/param_flow.py` |
 | Index diff + drift rules (`cgir diff --fail-on`, entrypoint surface, `--markdown`) | done | `src/cgir/report/diff.py` |
 | Index manifest + versioning (`manifest.json`, `cgir --version`) | done | `src/cgir/manifest.py` |

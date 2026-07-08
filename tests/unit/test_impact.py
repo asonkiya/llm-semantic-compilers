@@ -17,7 +17,7 @@ Contract:
 from __future__ import annotations
 
 from cgir.ir.component_spec import ComponentKind, ComponentSpec
-from cgir.report.impact import compute_impact, render_impact
+from cgir.report.impact import compute_impact, compute_typed_impact, render_impact
 
 
 def _spec(
@@ -97,6 +97,62 @@ def test_unknown_target_raises() -> None:
     except KeyError:
         return
     raise AssertionError("expected KeyError for unknown target")
+
+
+# --- typed impact: blast radius narrowed by *what* changed --------------------
+
+
+def _chain() -> list[ComponentSpec]:
+    # a -> b -> c, a is an entrypoint, each has its own test
+    return [
+        _spec("m.a", calls=["m.b"], covered_by=["t.a"], entrypoint="HTTP GET /a"),
+        _spec("m.b", calls=["m.c"], covered_by=["t.b"]),
+        _spec("m.c", covered_by=["t.c"]),
+    ]
+
+
+def test_body_only_change_has_no_downstream_impact() -> None:
+    # nothing in the contract changed — callers are contract-safe.
+    imp = compute_typed_impact(_chain(), "m.c", [])
+    assert imp["reach"] == "none"
+    assert imp["affected"] == []
+    assert imp["entrypoints"] == []
+    assert imp["tests"] == ["t.c"]  # only the target's own tests
+
+
+def test_effect_change_propagates_transitively() -> None:
+    # effects/purity taint flows up the whole call chain.
+    imp = compute_typed_impact(_chain(), "m.c", ["effects"])
+    assert imp["reach"] == "transitive"
+    assert imp["affected"] == ["m.a", "m.b"]
+    assert imp["entrypoints"] == [{"id": "m.a", "entrypoint": "HTTP GET /a"}]
+    assert imp["tests"] == ["t.a", "t.b", "t.c"]
+
+
+def test_signature_change_stops_at_direct_callers() -> None:
+    # an interface break forces the *direct* call sites to adapt, but does
+    # not inherently ripple past them.
+    imp = compute_typed_impact(_chain(), "m.c", ["signature"])
+    assert imp["reach"] == "direct"
+    assert imp["affected"] == ["m.b"]  # not m.a
+    assert imp["tests"] == ["t.b", "t.c"]
+
+
+def test_widest_reach_wins_when_multiple_fields_change() -> None:
+    imp = compute_typed_impact(_chain(), "m.c", ["signature", "effects"])
+    assert imp["reach"] == "transitive"
+    assert imp["affected"] == ["m.a", "m.b"]
+
+
+def test_purity_and_kind_also_propagate_transitively() -> None:
+    assert compute_typed_impact(_chain(), "m.c", ["purity"])["reach"] == "transitive"
+    assert compute_typed_impact(_chain(), "m.c", ["kind"])["reach"] == "transitive"
+
+
+def test_typed_reports_changed_fields_and_direct_callers() -> None:
+    imp = compute_typed_impact(_chain(), "m.c", ["signature"])
+    assert imp["changed_fields"] == ["signature"]
+    assert imp["direct_callers"] == ["m.b"]  # graph reality, informational
 
 
 def test_render_impact_is_human_summary() -> None:
