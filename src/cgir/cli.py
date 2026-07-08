@@ -189,6 +189,24 @@ def stats(
 
 
 @app.command()
+def watch(
+    repo: Annotated[Path, typer.Argument(exists=True, file_okay=False)] = Path("."),
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+    interval: Annotated[float, typer.Option("--interval", help="Poll interval (s).")] = 0.5,
+    once: Annotated[bool, typer.Option("--once", help="Run a single tick and exit.")] = False,
+) -> None:
+    """Keep the index live: on each save, re-scan and print contract drift."""
+    from cgir.watch import run_watch
+
+    if not once:
+        typer.echo(f"watching {repo.resolve()} → {index_dir} (Ctrl-C to stop)")
+    try:
+        run_watch(repo, index_dir, interval=interval, once=once, emit=typer.echo)
+    except KeyboardInterrupt:
+        typer.echo("\nstopped.")
+
+
+@app.command()
 def flow(
     component_id: Annotated[str, typer.Argument(metavar="ID")],
     index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),

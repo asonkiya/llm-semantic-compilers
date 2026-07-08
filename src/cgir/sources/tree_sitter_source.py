@@ -23,6 +23,7 @@ from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
 from cgir.languages import ADAPTERS, LanguageAdapter, adapter_for_extension
+from cgir.languages.cache import parse_cached
 from cgir.languages.base import ClassDecl, FunctionDecl, ImportDecl, VariableDecl
 from cgir.sources.base import GraphSource
 
@@ -108,7 +109,7 @@ class TreeSitterSource(GraphSource):
         module_id = f"module:{module_name}"
 
         source = file_path.read_bytes()
-        root = adapter.parse(source)
+        root = parse_cached(adapter, source)
 
         graph.add_node(
             Node(

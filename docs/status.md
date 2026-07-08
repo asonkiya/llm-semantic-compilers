@@ -45,6 +45,8 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | `state_transformer` classification (attribute/subscript assignment) | done | `src/cgir/slicing/slicer.py:_has_mutations` |
 | Shared tree-sitter helper (first opportunistic step on grammar-agnostic refactor) | done | `src/cgir/analyses/_python_ast.py` |
 | Parse-once `SourceCache` in call_graph / cfg / effects (4x scan speedup) | done | `src/cgir/analyses/_python_ast.py:SourceCache` |
+| Content-hash parse cache (`parse_cached`) shared across passes + scans — unchanged files parse once ever | done | `src/cgir/languages/cache.py` |
+| Watch mode (`cgir watch [--once]`) — content-hash change detection, live re-scan, live contract-drift report | done | `src/cgir/watch.py` |
 | Extended effects taxonomy (`net`, `fs`, `nondeterm`, lexical matching) | done | `src/cgir/analyses/effects.py` (`_classify_dotted_call`) |
 | Regeneration with injectable generator seam + Anthropic backend (`--live`) | done | `src/cgir/regenerate/regenerator.py` (`anthropic_generator`, prompt caching on) |
 | GraphML export (`cgir export --format graphml`) | done | `src/cgir/export/graphml.py` |
