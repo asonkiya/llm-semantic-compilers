@@ -59,6 +59,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Index diff + drift rules (`cgir diff --fail-on`, entrypoint surface, `--markdown`) | done | `src/cgir/report/diff.py` |
 | Index manifest + versioning (`manifest.json`, `cgir --version`) | done | `src/cgir/manifest.py` |
 | GitHub Action (contract-diff gate + PR comment) | done | `action.yml`, `docs/github-action.md` |
+| Git pre-commit seatbelt (`cgir hook install/run/uninstall`) — scans staged tree vs HEAD, blocks on drift, suggests tests; fail-open on error | done | `src/cgir/hooks.py` |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware, type closure + docstrings + raises) | done | `src/cgir/report/pack.py` |
 | Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |

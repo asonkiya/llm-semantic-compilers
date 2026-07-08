@@ -41,6 +41,53 @@ app = typer.Typer(
     help="CodeGraph IR - semantic IR for repo-scale LLM rewriting.",
 )
 
+hook_app = typer.Typer(help="Git pre-commit seatbelt: contract-check staged changes.")
+app.add_typer(hook_app, name="hook")
+
+
+@hook_app.command("run")
+def hook_run(
+    fail_on: Annotated[
+        list[str] | None,
+        typer.Option("--fail-on", help="Drift rules that block the commit (repeatable)."),
+    ] = None,
+) -> None:
+    """Contract-check the staged tree against HEAD (invoked by the installed hook)."""
+    from cgir.hooks import render_hook, run_check
+
+    result = run_check(Path.cwd(), fail_on)
+    typer.echo(render_hook(result), nl=False)
+    if result.violations:
+        raise typer.Exit(code=1)
+
+
+@hook_app.command("install")
+def hook_install(
+    fail_on: Annotated[
+        list[str] | None,
+        typer.Option("--fail-on", help="Drift rules to bake into the hook (repeatable)."),
+    ] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite an existing pre-commit hook.")
+    ] = False,
+) -> None:
+    """Install the pre-commit seatbelt into this repo's .git/hooks."""
+    from cgir.hooks import install
+
+    try:
+        path = install(Path.cwd(), fail_on, force)
+    except FileExistsError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Installed contract seatbelt at {path}")
+
+
+@hook_app.command("uninstall")
+def hook_uninstall() -> None:
+    """Remove the pre-commit seatbelt (only if CGIR installed it)."""
+    from cgir.hooks import uninstall
+
+    typer.echo("Removed contract seatbelt." if uninstall(Path.cwd()) else "No CGIR hook to remove.")
+
 
 def _version_callback(value: bool) -> None:
     if value:
