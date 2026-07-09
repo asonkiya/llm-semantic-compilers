@@ -23,8 +23,8 @@ from cgir.ir.edges import Edge, EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
 from cgir.languages import ADAPTERS, LanguageAdapter, adapter_for_extension
-from cgir.languages.cache import parse_cached
 from cgir.languages.base import ClassDecl, FunctionDecl, ImportDecl, VariableDecl
+from cgir.languages.cache import parse_cached
 from cgir.sources.base import GraphSource
 
 DEFAULT_IGNORE_DIRS: frozenset[str] = frozenset(

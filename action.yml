@@ -25,9 +25,9 @@ inputs:
     required: false
     default: "true"
   cgir-version:
-    description: "cgir version/spec to install (default: the published release)."
+    description: "pip spec for the CGIR package to install (default: the published release)."
     required: false
-    default: "cgir"
+    default: "codegraph-ir"
 
 runs:
   using: "composite"

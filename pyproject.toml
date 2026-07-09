@@ -3,13 +3,39 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cgir"
-version = "0.0.1"
-description = "CodeGraph IR — a semantic IR layer over repo graphs for LLM-driven rewriting"
+# Distribution name (the import package and CLI command are both `cgir`;
+# the PyPI project name `cgir` was already taken, so we ship as codegraph-ir).
+name = "codegraph-ir"
+version = "0.1.0"
+description = "The deterministic contract layer for AI-modified codebases — effects, purity, contracts, and blast radius, with zero LLM calls."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [{ name = "Aryaman Sonkiya" }]
+keywords = [
+  "static-analysis",
+  "code-graph",
+  "contracts",
+  "effects",
+  "purity",
+  "ai-agents",
+  "llm",
+  "code-review",
+  "tree-sitter",
+  "mcp",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
 dependencies = [
   "typer>=0.12",
   "pydantic>=2.6",
@@ -33,6 +59,11 @@ dev = [
   "httpx>=0.27",
   "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/asonkiya/llm-semantic-compilers"
+Repository = "https://github.com/asonkiya/llm-semantic-compilers"
+Issues = "https://github.com/asonkiya/llm-semantic-compilers/issues"
 
 [project.scripts]
 cgir = "cgir.cli:app"

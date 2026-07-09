@@ -1,54 +1,76 @@
-# llm-semantic-compilers
+# CodeGraph IR (CGIR)
 
-**CodeGraph IR (CGIR)** — a semantic IR layer over repo graphs (Tree-sitter today, Joern/CodeQL planned). The goal is to turn a repository into small, traceable, language-agnostic `ComponentSpec` units that an LLM can rewrite, reassemble, and audit without holding the whole repo in context.
+**The deterministic contract layer for AI-modified codebases.** Agents write
+more of the code than you can review. CGIR reads a repo and — with **zero LLM
+calls** — tells you what each component *is* (effects, purity, contract,
+entrypoints, call surface) and whether a change *altered* it. Think **ruff,
+but for architecture instead of style**: fast, static, hallucination-free.
 
-See [`Code-IR.md`](./Code-IR.md) for the full product specification and [`docs/`](./docs/) for working docs.
+Distributed as **`codegraph-ir`**; the command and import package are both
+`cgir`.
 
-## Status
-
-The Python-target pipeline runs end-to-end:
-
-- Tree-sitter ingest → `Repository / File / Module / Function / Method / Class / Parameter / Import` nodes
-- Symbol resolution + call-graph (`CONTAINS`, `IMPORTS`, `CALLS` edges)
-- Effects classifier (`io`, `raise`, transitive `calls_effectful`) + purity scorer
-- Component slicer with `kind` classification + JSON export
-- `path:line → component_id` trace map
-- Prompt-pack rendering (LLM call still stubbed)
-
-The Python pipeline (ingest → symbols → call graph → CFG → reaching-defs → PDG → effects → purity → slice → export) runs end-to-end, with GraphML/HTML/Mermaid visualization. Joern/CodeQL adapters, Neo4j export, real LLM regeneration, and the FastAPI surface are stubbed with `milestone:` tags. Run `grep -rn "milestone:\|STUB:" src/` for the prioritized backlog, or see [`docs/roadmap.md`](./docs/roadmap.md).
-
-## Quickstart
+## Install
 
 ```bash
-uv pip install -e ".[dev]"
-pytest -q
-cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
-cgir component pricing.add_tax --index /tmp/cgir-out
-cgir trace pricing.py:1 --index /tmp/cgir-out
-cgir viz --index /tmp/cgir-out                      # self-contained viz.html
-cgir viz --index /tmp/cgir-out --format mermaid     # Markdown-embeddable flowchart
-cgir export --format graphml --out /tmp/cgir-out    # Gephi / yEd
-cgir stats --index /tmp/cgir-out                    # kinds, purity, hotspots
-cgir diff old-idx new-idx --markdown --fail-on effect-gain   # PR contract diff
-cgir pack pricing.add_tax --repo . --budget 4000    # minimal LLM context bundle
-cgir verify m.f --candidate new.py --repo .         # contract-check an LLM edit
-cgir lint --index /tmp/cgir-out --config cgir.toml  # semantic architecture rules
+uv tool install codegraph-ir      # isolated CLI (recommended); or: pipx install codegraph-ir
+cgir --version
 ```
 
-Gate PRs on architecture drift with the [GitHub Action](./docs/github-action.md):
-a pure function that gains a `net` call, or a new `POST /admin` route, fails the
-build — deterministically, no per-seat LLM cost.
+For library/agent use in a project: `uv pip install codegraph-ir`
+(extras: `[mcp]` for the agent server, `[api]` for the HTTP surface,
+`[llm]` for regeneration).
+
+## The local loop
+
+```bash
+cgir scan .                          # build the .cgir index (Python + TypeScript)
+cgir watch .                         # keep it live: re-scan + show contract drift on save
+cgir pack app.service.charge --repo .   # minimal context bundle for one component
+cgir impact app.service.charge          # blast radius: affected callers, entrypoints, tests
+cgir impact app.service.charge --candidate new.py --repo .   # radius narrowed by the real delta
+cgir verify app.service.charge --candidate new.py --repo .   # contract-check an edit
+cgir hook install                    # pre-commit seatbelt: block contract-breaking commits
+```
+
+`pack` → edit → `impact` → `verify` → `hook`, with `watch` keeping the index
+fresh underneath — an always-on membrane you and your agent both consult.
+
+## Gate CI on contract drift
+
+The [GitHub Action](./docs/github-action.md) scans a PR's base and head and
+fails the build on drift — a pure function that starts hitting the network, a
+service that *stops* persisting, a new `POST /admin` route — deterministically,
+with no per-seat LLM cost:
+
+```yaml
+- uses: asonkiya/llm-semantic-compilers@v0
+  with:
+    fail-on: "effect-gain:net effect-gain:fs effect-gain:db effect-loss:net effect-loss:fs effect-loss:db"
+```
+
+The default rule set is [evidence-based](./docs/gate-noise.md): replaying real
+commit history, the I/O effect rules fire on ~0–10% of commits, each a genuine
+change in a component's I/O surface.
+
+## Agents as first-class users
+
+`cgir mcp --index .cgir` serves the index over MCP. Instead of grepping, an
+agent calls `search` / `pack` to load minimal context, `impact` to see what a
+change touches, and `verify` / `impact_of_change` to contract-check its own
+edit before proposing it. See [`examples/`](./examples) for a worked
+agent-PR case study.
 
 ## Docs
 
 - [`docs/strategy.md`](./docs/strategy.md) — positioning: the deterministic contract layer
+- [`docs/status.md`](./docs/status.md) — what runs today, test coverage, milestones
+- [`docs/gate-noise.md`](./docs/gate-noise.md) — false-alarm measurement on real history
 - [`docs/github-action.md`](./docs/github-action.md) — CI contract-diff gate
-- [`docs/architecture-rules.md`](./docs/architecture-rules.md) — `cgir lint` semantic rules
-- [`docs/experiment-log.md`](./docs/experiment-log.md) — rewrite-readiness benchmark
+- [`docs/experiment-log.md`](./docs/experiment-log.md) — rewrite-readiness / contract-preservation benchmarks
 - [`docs/architecture.md`](./docs/architecture.md) — layered pipeline, data model, extension seams
-- [`docs/status.md`](./docs/status.md) — what runs today, test coverage, recent milestones
-- [`docs/feature-research.md`](./docs/feature-research.md) — full feature catalog + build order
-- [`docs/development.md`](./docs/development.md) — install, commands, red-green TDD workflow
+- [`docs/languages.md`](./docs/languages.md) — adding a language (the `LanguageAdapter` seam)
+- [`Code-IR.md`](./Code-IR.md) — full product specification
+- [`RELEASING.md`](./RELEASING.md) — how to cut a release
 
 ## License
 

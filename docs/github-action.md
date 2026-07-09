@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0    # base ref must be reachable
-      - uses: your-org/cgir@v0     # or: local ./ during dogfooding
+      - uses: asonkiya/llm-semantic-compilers@v0   # or: local ./ during dogfooding
         with:
           # evidence-based low-noise default — see docs/gate-noise.md
           fail-on: "effect-gain:net effect-gain:fs effect-gain:db effect-loss:net effect-loss:fs effect-loss:db"
@@ -44,7 +44,7 @@ jobs:
 | `exclude` | – | Directory names to skip. |
 | `fail-on` | – (report only) | Space-separated drift rules; any match fails the build. |
 | `comment` | `true` | Post a PR comment (needs `pull-requests: write`). |
-| `cgir-version` | `cgir` | pip spec to install. |
+| `cgir-version` | `codegraph-ir` | pip spec to install. |
 
 ## Fail rules
 
