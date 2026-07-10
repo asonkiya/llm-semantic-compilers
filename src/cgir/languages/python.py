@@ -384,7 +384,8 @@ class PythonAdapter(LanguageAdapter):
                                 inner, source, _decorator_texts(child, source), is_method=True
                             )
                         )
-        return ClassDecl(node=node, name=name, methods=methods)
+        fields = _class_fields(body, source) if body is not None else {}
+        return ClassDecl(node=node, name=name, methods=methods, fields=fields)
 
     def _function_decl(
         self, node: TSNode, source: bytes, decorators: list[str], is_method: bool
@@ -784,6 +785,93 @@ _PY_BUILTINS: frozenset[str] = frozenset(
         "classmethod",
     }
 )
+
+
+def _type_base(type_node: TSNode | None, source: bytes) -> str | None:
+    """Base class name of an annotation: ``Svc`` from ``Svc``/``Svc[T]``.
+
+    Dotted annotations (``mod.Svc``) are skipped — they resolve through a
+    module binding, not a plain name, and guessing the tail risks false
+    positives in field-call resolution.
+    """
+    if type_node is None:
+        return None
+    node = type_node
+    if node.type == "type" and node.named_child_count:
+        node = node.named_children[0]
+    if node.type == "identifier":
+        return _text(node, source)
+    if node.type == "generic_type" or node.type == "subscript":
+        first = node.named_children[0] if node.named_child_count else None
+        if first is not None and first.type == "identifier":
+            return _text(first, source)
+    return None
+
+
+def _class_fields(body: TSNode, source: bytes) -> dict[str, str]:
+    """Field name -> declared type, from the DI-relevant idioms.
+
+    Class-level annotations (``svc: Svc``), ``__init__`` params stored on
+    ``self`` (``self.svc = svc`` where ``svc`` is annotated), and direct
+    construction (``self.svc = Svc()``). Feeds ``self.<field>.<method>()``
+    call resolution — the Python analog of TS constructor DI.
+    """
+    fields: dict[str, str] = {}
+    for child in body.children:
+        if child.type == "expression_statement" and child.child_count:
+            assign = child.children[0]
+            if assign.type != "assignment":
+                continue
+            left = assign.child_by_field_name("left")
+            base = _type_base(assign.child_by_field_name("type"), source)
+            if left is not None and left.type == "identifier" and base:
+                fields[_text(left, source)] = base
+            continue
+        init = child if child.type == "function_definition" else _undecorated(child)
+        if (
+            init is not None
+            and init.type == "function_definition"
+            and _identifier_text(init.child_by_field_name("name"), source) == "__init__"
+        ):
+            fields.update(_init_fields(init, source))
+    return fields
+
+
+def _init_fields(init: TSNode, source: bytes) -> dict[str, str]:
+    param_types: dict[str, str] = {}
+    params = init.child_by_field_name("parameters")
+    for param in params.children if params is not None else []:
+        if param.type in ("typed_parameter", "typed_default_parameter"):
+            name_node = next((c for c in param.children if c.type == "identifier"), None)
+            base = _type_base(param.child_by_field_name("type"), source)
+            if name_node is not None and base:
+                param_types[_text(name_node, source)] = base
+
+    fields: dict[str, str] = {}
+    stack = [init.child_by_field_name("body")]
+    while stack:
+        node = stack.pop()
+        if node is None:
+            continue
+        if node.type == "assignment":
+            left = node.child_by_field_name("left")
+            right = node.child_by_field_name("right")
+            if (
+                left is not None
+                and left.type == "attribute"
+                and right is not None
+                and _identifier_text(left.child_by_field_name("object"), source) == "self"
+            ):
+                attr = _identifier_text(left.child_by_field_name("attribute"), source)
+                if attr:
+                    if right.type == "identifier" and _text(right, source) in param_types:
+                        fields[attr] = param_types[_text(right, source)]
+                    elif right.type == "call":
+                        callee = right.child_by_field_name("function")
+                        if callee is not None and callee.type == "identifier":
+                            fields[attr] = _text(callee, source)
+        stack.extend(node.children)
+    return fields
 
 
 def _undecorated(decorated_ts: TSNode) -> TSNode | None:
