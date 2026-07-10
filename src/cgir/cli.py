@@ -355,17 +355,19 @@ def _module_context(
 
 
 def _call_receivers(graph: RepoGraph | None, target: ComponentSpec) -> dict[str, str]:
-    """Map each DI callee to the field it is reached through (`this.<field>`).
+    """Map each DI callee to the field it is reached through.
 
     The target's owning class records injected/declared fields as
     ``{field: TypeName}``. A callee whose class matches one of those field
     types is called via that field; surfacing it lets a rewriter reproduce
     the call — and preserve the effect contract — instead of guessing the
-    field name. Empty for classes without fields (e.g. Python today), so the
-    pack is unchanged there.
+    field name. The receiver keyword is language-aware: ``self.<field>`` in
+    Python, ``this.<field>`` in TypeScript. Empty for classes without
+    fields, so the pack is unchanged there.
     """
     if graph is None:
         return {}
+    self_kw = "self" if target.language == "python" else "this"
     class_qual = target.id.rsplit(".", 1)[0]
     cls = next(
         (
@@ -386,7 +388,7 @@ def _call_receivers(graph: RepoGraph | None, target: ComponentSpec) -> dict[str,
         callee_class = callee.rsplit(".", 1)[0].rsplit(".", 1)[-1]
         field = type_to_field.get(callee_class)
         if field:
-            out[callee] = f"this.{field}"
+            out[callee] = f"{self_kw}.{field}"
     return out
 
 

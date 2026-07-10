@@ -40,6 +40,13 @@ def test_typescript_registered_for_ts_extension() -> None:
     assert adapter_for_extension(".tsx").name == "typescript"
 
 
+def test_specs_carry_typescript_language() -> None:
+    """spec.language reflects the file's adapter, not a hardcoded default."""
+    specs = _specs()
+    assert specs["api.service.NovelService.get"].language == "typescript"
+    assert specs["util.format"].language == "typescript"
+
+
 def test_methods_and_functions_ingested() -> None:
     specs = _specs()
     assert "api.service.NovelService.get" in specs

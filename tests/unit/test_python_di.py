@@ -92,3 +92,23 @@ def test_self_field_call_makes_caller_effectful(tmp_path: Path) -> None:
     build_call_graph(graph, tables, repo)
     effects = classify(graph, repo)
     assert "calls_effectful" in effects["method:reader.Reader.run"]
+
+
+def test_pack_receiver_uses_self_for_python(tmp_path: Path) -> None:
+    """The DI receiver keyword is language-aware: `self.` here, `this.` in TS."""
+    from cgir.analyses.purity import score
+    from cgir.cli import _call_receivers
+    from cgir.report.pack import build_pack, render_pack
+    from cgir.slicing import slice_components
+
+    repo = _di_repo(tmp_path)
+    graph = TreeSitterSource().ingest(repo)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, repo)
+    effects = classify(graph, repo)
+    purity = score(graph, effects)
+    specs = list(slice_components(graph, effects=effects, purity_scores=purity))
+    target = next(s for s in specs if s.id.endswith("Reader.run"))
+    rendered = render_pack(build_pack(specs, target.id, receivers=_call_receivers(graph, target)))
+    assert "self.svc.translate" in rendered
+    assert "this.svc" not in rendered

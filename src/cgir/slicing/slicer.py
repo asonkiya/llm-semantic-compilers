@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from cgir.analyses.effects import IMPURE_EFFECT_TAGS, TRANSITIVE_TAG
 from cgir.analyses.entrypoints import detect as detect_entrypoint
 from cgir.analyses.purity import PLACEHOLDER_SCORE
@@ -9,6 +11,16 @@ from cgir.ir.component_spec import ComponentKind, ComponentSpec
 from cgir.ir.edges import EdgeKind
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
+from cgir.languages import adapter_for_extension
+
+
+def _node_language(node: Node, fallback: str) -> str:
+    """The component's language, from its file's adapter (multi-language repos)."""
+    if node.path:
+        adapter = adapter_for_extension(Path(node.path).suffix)
+        if adapter is not None:
+            return adapter.name
+    return fallback
 
 
 def slice_components(
@@ -55,7 +67,7 @@ def slice_components(
                 calls=calls,
                 constructs=constructs,
                 trace=trace,
-                language=language,
+                language=_node_language(node, language),
                 signature=signature if isinstance(signature, str) else None,
                 entrypoint=detect_entrypoint(
                     decorators if isinstance(decorators, list) else [], node.name
