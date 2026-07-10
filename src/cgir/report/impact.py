@@ -65,18 +65,37 @@ def _upstream_closure(callers: dict[str, set[str]], target_id: str) -> set[str]:
     return affected
 
 
+def _is_test_spec(spec: ComponentSpec) -> bool:
+    """Mirror of ``slicer._is_test_node`` at the spec level."""
+    if spec.id.rsplit(".", 1)[-1].startswith("test_"):
+        return True
+    if spec.trace:
+        path = spec.trace[0].rsplit(":", 1)[0].replace("\\", "/")
+        parts = path.split("/")
+        stem = parts[-1].rsplit(".", 1)[0]
+        return "tests" in parts[:-1] or stem.startswith("test_") or stem.endswith("_test")
+    return False
+
+
 def _surface(
     by_id: dict[str, ComponentSpec], target_id: str, affected: set[str]
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Entrypoints at risk and tests to run over {target} + affected."""
-    scope = sorted(affected | {target_id})
+) -> tuple[list[str], list[dict[str, Any]], list[str]]:
+    """Partition + derive: (affected code, entrypoints at risk, tests to run).
+
+    Test components in the caller closure are not "affected code" — they are
+    literally tests to run, so they move into the tests list (this also
+    catches transitive test callers never linked via ``covered_by``).
+    """
+    code = {sid for sid in affected if not _is_test_spec(by_id[sid])}
+    scope = sorted(code | {target_id})
     entrypoints = [
         {"id": sid, "entrypoint": by_id[sid].entrypoint} for sid in scope if by_id[sid].entrypoint
     ]
     tests: set[str] = set(by_id[target_id].covered_by)
-    for sid in affected:
+    tests |= affected - code
+    for sid in code:
         tests |= set(by_id[sid].covered_by)
-    return entrypoints, sorted(tests)
+    return sorted(code), entrypoints, sorted(tests)
 
 
 def compute_impact(specs: list[ComponentSpec], target_id: str) -> dict[str, Any]:
@@ -86,11 +105,11 @@ def compute_impact(specs: list[ComponentSpec], target_id: str) -> dict[str, Any]
         raise KeyError(target_id)
     callers = _callers_map(specs, by_id)
     affected = _upstream_closure(callers, target_id)
-    entrypoints, tests = _surface(by_id, target_id, affected)
+    code, entrypoints, tests = _surface(by_id, target_id, affected)
     return {
         "target": target_id,
         "direct_callers": sorted(callers.get(target_id, set())),
-        "affected": sorted(affected),
+        "affected": code,
         "entrypoints": entrypoints,
         "tests": tests,
     }
@@ -128,13 +147,13 @@ def compute_typed_impact(
     else:
         affected = set()
 
-    entrypoints, tests = _surface(by_id, target_id, affected)
+    code, entrypoints, tests = _surface(by_id, target_id, affected)
     return {
         "target": target_id,
         "changed_fields": sorted(delta),
         "reach": reach,
         "direct_callers": direct,
-        "affected": sorted(affected),
+        "affected": code,
         "entrypoints": entrypoints,
         "tests": tests,
     }

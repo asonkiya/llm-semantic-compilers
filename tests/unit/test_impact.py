@@ -99,6 +99,30 @@ def test_unknown_target_raises() -> None:
     raise AssertionError("expected KeyError for unknown target")
 
 
+def test_test_callers_partition_into_tests_not_affected() -> None:
+    # A test function that calls the target is a *test to run*, not affected
+    # production code — even when it reaches the target transitively and was
+    # never linked via covered_by.
+    specs = [
+        _spec("m.helper"),
+        _spec("m.api", calls=["m.helper"]),
+        _spec("tests.test_api.test_roundtrip", calls=["m.api"]),
+    ]
+    imp = compute_impact(specs, "m.helper")
+    assert imp["affected"] == ["m.api"]
+    assert "tests.test_api.test_roundtrip" in imp["tests"]
+
+
+def test_render_separates_tests_from_affected() -> None:
+    specs = [
+        _spec("m.f"),
+        _spec("tests.test_m.test_f", calls=["m.f"]),
+    ]
+    out = render_impact(specs, "m.f")
+    assert "0 component(s) affected" in out
+    assert "tests.test_m.test_f" in out
+
+
 # --- typed impact: blast radius narrowed by *what* changed --------------------
 
 
