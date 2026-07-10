@@ -61,7 +61,11 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Index diff + drift rules (`cgir diff --fail-on`, entrypoint surface, `--markdown`) | done | `src/cgir/report/diff.py` |
 | Index manifest + versioning (`manifest.json`, `cgir --version`) | done | `src/cgir/manifest.py` |
 | GitHub Action (contract-diff gate + PR comment) | done | `action.yml`, `docs/github-action.md` |
-| Git pre-commit seatbelt (`cgir hook install/run/uninstall`) — scans staged tree vs HEAD, blocks on drift, suggests tests; fail-open on error | done | `src/cgir/hooks.py` |
+| Git pre-commit seatbelt (`cgir hook install/run/uninstall`) — scans staged tree vs HEAD, blocks on drift, suggests tests; fail-open on error (~2.8s on this repo) | done | `src/cgir/hooks.py` |
+| `effect-loss[:tag]` drift rule, indirection-aware (suppressed when `calls_effectful` is gained) | done | `src/cgir/report/diff.py` |
+| Python DI field types (`__init__` annotations, class-level annotations, direct construction) → `self.<field>.<method>()` resolution + `self.`/`this.` receiver in packs | done | `src/cgir/languages/python.py:_class_fields`, `cli._call_receivers` |
+| Per-component `language` on specs (multi-language repos) | done | `src/cgir/slicing/slicer.py:_node_language` |
+| Packaging: distribution `codegraph-ir` (import + CLI stay `cgir`), py.typed, tag-triggered PyPI release via trusted publishing | done | `pyproject.toml`, `.github/workflows/release.yml`, `RELEASING.md` |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware, type closure + docstrings + raises) | done | `src/cgir/report/pack.py` |
 | Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |
@@ -81,7 +85,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 273 tests, all green:
+`pytest -q` runs 391 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
 
 | File | Covers |
 |---|---|
