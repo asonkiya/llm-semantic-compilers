@@ -81,11 +81,13 @@ the `io` / `nondeterm` effect tags (a `print`/timestamp shouldn't fail CI).
 
 ## Follow-ups this surfaced
 
-1. **Indirection-aware `effect-loss`** — suppress (or downgrade) an
-   `effect-loss:<tag>` when the component simultaneously gains
-   `calls_effectful`; the effect likely moved behind a call rather than
-   disappearing. Trade-off: could mask a true removal that coincides with a
-   new unrelated effectful call.
+1. **Indirection-aware `effect-loss`** *(landed)* — an `effect-loss:<tag>`
+   is suppressed when the component simultaneously gains `calls_effectful`:
+   the effect moved behind a call and is still transitively reachable, it
+   didn't disappear. The `1373e643` false alarm above no longer fires.
+   Trade-off (documented in `diff.violations`): a true removal paired with a
+   new unrelated effectful call is masked — the loss stays visible in the
+   diff report, it just doesn't fail the build.
 2. **Import-resolution stability** — kind/purity flipping on stub-vs-real
    imports is the dominant `kind-change`/`purity-drop` noise source. A
    scan run compares two checkouts in one environment (CI does this), so it

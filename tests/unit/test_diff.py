@@ -102,6 +102,27 @@ def test_violation_effect_loss_specific_tag() -> None:
     assert len(violations(diff, ["effect-loss:net"])) == 1
 
 
+def test_effect_loss_suppressed_when_indirected() -> None:
+    # ['fs','io'] -> ['calls_effectful','io']: the fs read moved *behind a
+    # call* (still transitively reachable), it didn't disappear. This was the
+    # one false-alarm class in the real-history noise replay — don't fail on it.
+    diff = compute_diff(
+        [_spec("m.f", effects=["fs", "io"])],
+        [_spec("m.f", effects=["calls_effectful", "io"])],
+    )
+    assert violations(diff, ["effect-loss:fs"]) == []
+    assert violations(diff, ["effect-loss"]) == []
+
+
+def test_effect_loss_still_fires_without_indirection() -> None:
+    # calls_effectful already present before: the loss is a real removal.
+    diff = compute_diff(
+        [_spec("m.f", effects=["calls_effectful", "net"])],
+        [_spec("m.f", effects=["calls_effectful"])],
+    )
+    assert len(violations(diff, ["effect-loss:net"])) == 1
+
+
 def test_violation_purity_drop() -> None:
     diff = compute_diff([_spec("m.f", purity=1.0)], [_spec("m.f", purity=0.7)])
     assert len(violations(diff, ["purity-drop"])) == 1

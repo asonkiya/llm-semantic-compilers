@@ -93,6 +93,15 @@ def violations(diff: dict[str, Any], rules: list[str]) -> list[str]:
                 lost = _lost_effects(fields)
                 if wanted:
                     lost = [t for t in lost if t == wanted]
+                # Indirection, not removal: if the component *simultaneously*
+                # gained calls_effectful, the effect most likely moved behind a
+                # call and is still transitively reachable (the one false-alarm
+                # class in the real-history noise replay — see gate-noise.md).
+                # Trade-off: a true removal paired with a new unrelated
+                # effectful call is masked; the loss stays visible in the diff
+                # report, it just doesn't fail the build.
+                if lost and "calls_effectful" in _gained_effects(fields):
+                    lost = []
                 if lost:
                     found.append(f"{spec_id}: lost effect(s) {', '.join(lost)}")
             elif rule == "purity-drop":
