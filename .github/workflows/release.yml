@@ -7,7 +7,9 @@ name: release
 
 on:
   push:
-    tags: ["v*"]
+    # Version tags only — the floating `v0` Action-convenience tag must not
+    # trigger a release (its stripped form never matches __version__).
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
 
 jobs:
   build:
