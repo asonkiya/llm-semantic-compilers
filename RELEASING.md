@@ -5,15 +5,30 @@ command are both `cgir` — only the distribution (PyPI project) name differs,
 because `cgir` was already taken on PyPI. Nothing about the user-facing
 `cgir` command changes.
 
-## One-time setup
+## Preferred: tag-triggered release (no token handling)
 
-1. Create the PyPI project by uploading the first release (below); the name
-   `codegraph-ir` is currently unclaimed.
-2. Configure a PyPI API token (`~/.pypirc` or `UV_PUBLISH_TOKEN` /
-   `TWINE_PASSWORD`). Prefer a **project-scoped** token after the first
-   upload; a trusted-publisher GitHub Action is the eventual goal.
+`.github/workflows/release.yml` publishes on any `v*` tag via **PyPI
+trusted publishing** (OIDC — no secret stored anywhere). It gates on
+tests/lint/types, refuses a tag that doesn't match `cgir.__version__`,
+smoke-tests the wheel in a clean env, then uploads.
 
-## Cut a release
+One-time setup on PyPI (works for the *first* release too, via a
+"pending publisher"):
+
+1. PyPI → your account → Publishing → **Add a pending publisher**:
+   project `codegraph-ir`, owner `asonkiya`, repo `llm-semantic-compilers`,
+   workflow `release.yml`, environment `pypi`.
+2. GitHub repo → Settings → Environments → create `pypi` (optionally with
+   required reviewers, making every release a manual approval).
+
+Then a release is:
+
+```bash
+# bump version in pyproject.toml AND src/cgir/__init__.py, commit, then:
+git tag -a v0.1.0 -m "release" && git push origin v0.1.0
+```
+
+## Fallback: manual release
 
 ```bash
 # 1. bump the version in BOTH places (they must match):

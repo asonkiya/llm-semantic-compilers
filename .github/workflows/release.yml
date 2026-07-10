@@ -1,0 +1,62 @@
+name: release
+
+# Publish codegraph-ir to PyPI on a version tag, via trusted publishing
+# (OIDC — no token stored in the repo). One-time setup on PyPI:
+# project "codegraph-ir" -> Publishing -> add GitHub publisher for
+# asonkiya/llm-semantic-compilers, workflow release.yml, environment pypi.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Gate (tests + lint + types)
+        run: |
+          uv pip install --system -e ".[dev,api]"
+          ruff check . && ruff format --check . && mypy src && pytest -q
+
+      - name: Tag matches package version
+        run: |
+          PKG=$(python -c 'import cgir; print(cgir.__version__)')
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "::error::tag v$TAG != cgir.__version__ $PKG"; exit 1
+          fi
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Smoke-test the wheel in a clean env
+        run: |
+          uv venv /tmp/rel
+          uv pip install --python /tmp/rel/bin/python dist/*.whl
+          /tmp/rel/bin/cgir --version
+          mkdir -p /tmp/proj && printf 'def f(x):\n    return x\n' > /tmp/proj/m.py
+          cd /tmp/proj && /tmp/rel/bin/cgir scan . --out .cgir && /tmp/rel/bin/cgir impact m.f --index .cgir
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # trusted publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
