@@ -154,6 +154,7 @@ Real codebases will hit these — flag rather than guess:
 - **Mutator-method detection is a fixed name table.** `_MUTATOR_METHODS` covers the common list/dict/set/deque/queue/file mutators; RHS and return-expression calls now count. Unknown mutator names are still missed.
 - **`case` patterns don't bind.** `case Point(x=a):` binds `a`, but pattern captures aren't extracted as writes — only the subject read and guard reads are recorded.
 - **`break` / `continue` jump targets** aren't modelled; loop `else` clauses and exception flow *within* a try body (a raise mid-block skipping the rest) are approximated.
+- **Module-global rebinding escapes the mutation gate.** `global x; x = ...` inside a function scans as `pure_function` (found dogfooding: a lazy-init service accessor with 34 callers classified pure). Attribute/subscript mutation and mutator calls are caught; bare-name global rebinding is not.
 - **Local-mutation gate is name-based.** A local name rebound to a parameter (`alias = xs; alias.append(x)`) is treated as local and stays pure — no alias analysis.
 
 ## Outstanding tags

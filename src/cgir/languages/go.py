@@ -295,8 +295,11 @@ class GoAdapter(LanguageAdapter):
         first_decl = next(
             (c for c in root.named_children if c.type not in {"comment", "package_clause"}), None
         )
+        pinnable = {"function_declaration", "method_declaration", "type_declaration"}
         module_pins = pin_index.module_pins(
-            first_decl.start_point[0] if first_decl is not None else None
+            first_decl.start_point[0]
+            if first_decl is not None and first_decl.type in pinnable
+            else None
         )
         if module_pins:
             for decl in decls:

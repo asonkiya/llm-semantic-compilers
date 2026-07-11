@@ -391,8 +391,20 @@ class TypeScriptAdapter(LanguageAdapter):
         for child in root.children:
             decls.extend(self._top_level(child, source, rel_path, pin_index))
         first_decl = next((c for c in root.children if c.type != "comment"), None)
+        # Only a pinnable definition claims an adjacent header block; an
+        # import keeps the pins module-level.
+        pinnable = {
+            "function_declaration",
+            "class_declaration",
+            "abstract_class_declaration",
+            "export_statement",
+            "lexical_declaration",
+            "variable_declaration",
+        }
         module_pins = pin_index.module_pins(
-            first_decl.start_point[0] if first_decl is not None else None
+            first_decl.start_point[0]
+            if first_decl is not None and first_decl.type in pinnable
+            else None
         )
         if module_pins:
             for decl in decls:

@@ -205,3 +205,27 @@ def test_pack_renders_pins() -> None:
     specs = [_spec("m.f", pins=["pure", "no-net"])]
     out = render_pack(build_pack(specs, "m.f"))
     assert "Pinned: no-net, pure" in out or "Pinned: pure, no-net" in out
+
+
+def test_module_pin_adjacent_to_imports_still_applies(tmp_path: Path) -> None:
+    """Real-world layout: the header pin sits directly above the imports.
+
+    Adjacency only disqualifies a header block when it touches a *pinnable
+    definition* — touching an import (or any plain statement) keeps it
+    module-level. Found dogfooding on camera-tracking.
+    """
+    (tmp_path / "m.py").write_text(
+        "# cgir: no-net\nfrom typing import Iterable\n\n\ndef f(x):\n    return x\n"
+    )
+    [spec] = _scan(tmp_path)
+    assert "no-net" in spec.pins
+
+
+def test_module_pin_adjacent_to_def_still_belongs_to_def(tmp_path: Path) -> None:
+    # No imports: header touching the first def is that def's pin, not module-wide.
+    (tmp_path / "m.py").write_text(
+        "# cgir: pure\ndef f(x):\n    return x\n\n\ndef g(x):\n    return x\n"
+    )
+    specs = {s.id: s for s in _scan(tmp_path)}
+    assert specs["m.f"].pins == ["pure"]
+    assert specs["m.g"].pins == []
