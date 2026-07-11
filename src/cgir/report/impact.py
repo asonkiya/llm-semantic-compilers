@@ -159,6 +159,38 @@ def compute_typed_impact(
     }
 
 
+def runnable_selectors(
+    specs: list[ComponentSpec], test_ids: list[str]
+) -> tuple[list[str], list[str]]:
+    """Map impact test ids to pytest node-ids: ``(selectors, skipped_ids)``.
+
+    A test id maps to ``path::Class::name`` derived from its trace path and
+    the qualname suffix after the module. Skipped (returned, not silently
+    dropped): non-Python tests (vitest/jest execution is a follow-up) and
+    non-collectable names — ``covered_by`` can include fixture helpers in
+    test files, which pytest would reject.
+    """
+    by_id = {s.id: s for s in specs}
+    selectors: list[str] = []
+    skipped: list[str] = []
+    for test_id in test_ids:
+        spec = by_id.get(test_id)
+        if spec is None or not spec.trace or (spec.language or "python") != "python":
+            skipped.append(test_id)
+            continue
+        if not test_id.rsplit(".", 1)[-1].startswith("test_"):
+            skipped.append(test_id)
+            continue
+        path = spec.trace[0].rsplit(":", 1)[0]
+        module_dotted = path.removesuffix(".py").replace("/", ".").replace("\\", ".")
+        if not test_id.startswith(module_dotted + "."):
+            skipped.append(test_id)
+            continue
+        suffix = test_id[len(module_dotted) + 1 :]
+        selectors.append(f"{path}::{suffix.replace('.', '::')}")
+    return selectors, skipped
+
+
 _REACH_NOTE = {
     "none": "body-only change — no contract drift, callers are unaffected",
     "direct": "interface change — direct call sites must adapt",
@@ -231,4 +263,5 @@ __all__ = [
     "compute_typed_impact",
     "render_impact",
     "render_typed_impact",
+    "runnable_selectors",
 ]

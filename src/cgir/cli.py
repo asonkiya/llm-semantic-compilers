@@ -188,6 +188,75 @@ def stats(
         typer.echo(render_text(result), nl=False)
 
 
+_STARTER_CONFIG = """\
+# CGIR architecture rules — see docs/architecture-rules.md.
+# Pins (`# cgir: pure`, `no-net`, `stable-signature`, `frozen`) need no config;
+# they are enforced by `cgir lint`, the pre-commit hook, and `cgir diff`.
+#
+# [[rule]]
+# name = "core stays pure"
+# in = "app.core.*"
+# forbid-effect = ["net", "db"]
+"""
+
+_NEXT_STEPS = """\
+Next steps:
+  cgir watch {repo}                 # live index + contract drift on save
+  cgir hook install                 # pre-commit seatbelt (or: cgir init --hook)
+  cgir mcp --index {index}          # serve the index to your agent over MCP
+  CI gate: see docs/github-action.md
+"""
+
+
+@app.command()
+def init(
+    repo: Annotated[Path, typer.Argument(exists=True, file_okay=False)] = Path("."),
+    hook: Annotated[
+        bool, typer.Option("--hook", help="Also install the pre-commit seatbelt.")
+    ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite an existing cgir.toml.")
+    ] = False,
+) -> None:
+    """One-command onboarding: scan, starter config, .gitignore, next steps."""
+    result = scan_repo(repo, repo / ".cgir")
+    typer.echo(f"Indexed {len(result.specs)} components:")
+    _print_kind_histogram(result.specs)
+    entrypoints = [s for s in result.specs if s.entrypoint]
+    if entrypoints:
+        typer.echo(f"  entrypoints: {len(entrypoints)}")
+    untested = [s for s in result.specs if s.effects and not s.covered_by]
+    if untested:
+        typer.echo(f"  effectful without linked tests: {len(untested)}")
+
+    config = repo / "cgir.toml"
+    if config.exists() and not force:
+        typer.echo(f"kept existing {config.name}")
+    else:
+        config.write_text(_STARTER_CONFIG)
+        typer.echo(f"wrote {config.name} (report-only starter)")
+
+    gitignore = repo / ".gitignore"
+    existing = gitignore.read_text() if gitignore.exists() else ""
+    if ".cgir/" not in existing:
+        gitignore.write_text(
+            existing + ("" if existing.endswith("\n") or not existing else "\n") + ".cgir/\n"
+        )
+        typer.echo("added .cgir/ to .gitignore")
+
+    if hook:
+        from cgir.hooks import install as install_hook
+
+        try:
+            path = install_hook(repo)
+            typer.echo(f"installed contract seatbelt at {path}")
+        except FileExistsError:
+            typer.echo("pre-commit hook already exists — skipped (cgir hook install --force)")
+
+    typer.echo("")
+    typer.echo(_NEXT_STEPS.format(repo=repo, index=repo / ".cgir"), nl=False)
+
+
 @app.command()
 def watch(
     repo: Annotated[Path, typer.Argument(exists=True, file_okay=False)] = Path("."),
@@ -243,12 +312,20 @@ def impact(
         ),
     ] = None,
     repo: Annotated[
-        Path | None, typer.Option("--repo", help="Repo root (with --candidate).")
+        Path | None,
+        typer.Option("--repo", help="Repo root (with --candidate or --run)."),
     ] = None,
+    run: Annotated[
+        bool,
+        typer.Option(
+            "--run", help="Execute the selected tests (pytest) and exit with their status."
+        ),
+    ] = False,
 ) -> None:
     """Blast radius of changing a component: affected callers, entrypoints at risk, tests to run.
 
     Worst-case by default; narrowed by --changed or by a --candidate's actual contract delta.
+    --run executes exactly the tests the radius names.
     """
     specs = _load_specs(index_dir)
     try:
@@ -273,6 +350,35 @@ def impact(
         )
     except KeyError as exc:
         raise typer.BadParameter(f"Unknown component: {component_id}") from exc
+    if run:
+        _run_impact_tests(specs, list(data["tests"]), repo or Path.cwd())
+
+
+def _run_impact_tests(specs: list[ComponentSpec], test_ids: list[str], repo: Path) -> None:
+    """Execute the impact-selected tests with pytest; exit with their status."""
+    import subprocess
+    import sys
+
+    from cgir.report.impact import runnable_selectors
+
+    selectors, skipped = runnable_selectors(specs, test_ids)
+    for test_id in skipped:
+        typer.echo(f"  (skipped, not pytest-runnable: {test_id})")
+    if not selectors:
+        typer.echo("no runnable tests selected.")
+        return
+    typer.echo(f"running {len(selectors)} test(s):")
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", *selectors],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    typer.echo(proc.stdout, nl=False)
+    if proc.stderr:
+        typer.echo(proc.stderr, nl=False)
+    if proc.returncode != 0:
+        raise typer.Exit(code=proc.returncode)
 
 
 @app.command()
