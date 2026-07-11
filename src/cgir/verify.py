@@ -85,6 +85,13 @@ def verify(
             },
         }
         viol = violations(target_diff, fail_on or [])
+        # Pin invariants on the candidate are always enforced.
+        from cgir.report.pins import change_violations, state_violations
+
+        old_target = [s for s in old_specs if s.id == component_id]
+        new_target = [s for s in new_specs if s.id == component_id]
+        viol += change_violations(old_target, new_target)
+        viol += [v for v in state_violations(new_specs) if v.startswith(component_id)]
 
         tests_ran: list[str] = []
         tests_ok: bool | None = None

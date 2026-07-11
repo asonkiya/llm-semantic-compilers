@@ -26,6 +26,7 @@ from cgir.languages.base import (
     LoopDesc,
     MatchDesc,
     ParamDecl,
+    PinIndex,
     ReturnDesc,
     SimpleDesc,
     StatementDesc,
@@ -329,26 +330,45 @@ class PythonAdapter(LanguageAdapter):
     ) -> list[Declaration]:
         # Python resolves relative imports against the dotted module name;
         # rel_path is unused.
+        pin_index = PinIndex(root, source)
         decls: list[Declaration] = []
         for child in root.children:
-            decls.extend(self._top_level_decl(child, source, module_name))
+            decls.extend(self._top_level_decl(child, source, module_name, pin_index))
+        first_decl = next((c for c in root.children if c.type != "comment"), None)
+        module_pins = pin_index.module_pins(
+            first_decl.start_point[0] if first_decl is not None else None
+        )
+        if module_pins:
+            for decl in decls:
+                if isinstance(decl, FunctionDecl):
+                    decl.pins = sorted(set(decl.pins) | set(module_pins))
+                elif isinstance(decl, ClassDecl):
+                    for method in decl.methods:
+                        method.pins = sorted(set(method.pins) | set(module_pins))
         return decls
 
-    def _top_level_decl(self, node: TSNode, source: bytes, module_name: str) -> list[Declaration]:
+    def _top_level_decl(
+        self, node: TSNode, source: bytes, module_name: str, pin_index: PinIndex
+    ) -> list[Declaration]:
         t = node.type
         if t == "function_definition":
-            return [self._function_decl(node, source, [], is_method=False)]
+            return [
+                self._function_decl(
+                    node, source, [], is_method=False, pins=pin_index.for_definition(node)
+                )
+            ]
         if t == "class_definition":
-            return [self._class_decl(node, source)]
+            return [self._class_decl(node, source, pin_index)]
         if t == "decorated_definition":
             inner = _undecorated(node)
             if inner is None:
                 return []
             decorators = _decorator_texts(node, source)
+            pins = pin_index.for_definition(node)  # outermost: pin above the decorator
             if inner.type == "function_definition":
-                return [self._function_decl(inner, source, decorators, is_method=False)]
+                return [self._function_decl(inner, source, decorators, is_method=False, pins=pins)]
             if inner.type == "class_definition":
-                return [self._class_decl(inner, source)]
+                return [self._class_decl(inner, source, pin_index)]
             return []
         if t in {"import_statement", "import_from_statement"}:
             return [
@@ -368,27 +388,44 @@ class PythonAdapter(LanguageAdapter):
             ]
         return []
 
-    def _class_decl(self, node: TSNode, source: bytes) -> ClassDecl:
+    def _class_decl(self, node: TSNode, source: bytes, pin_index: PinIndex) -> ClassDecl:
         name = _identifier_text(node.child_by_field_name("name"), source) or "<anonymous>"
         methods: list[FunctionDecl] = []
         body = node.child_by_field_name("body")
         if body is not None:
             for child in body.children:
                 if child.type == "function_definition":
-                    methods.append(self._function_decl(child, source, [], is_method=True))
+                    methods.append(
+                        self._function_decl(
+                            child,
+                            source,
+                            [],
+                            is_method=True,
+                            pins=pin_index.for_definition(child),
+                        )
+                    )
                 elif child.type == "decorated_definition":
                     inner = _undecorated(child)
                     if inner is not None and inner.type == "function_definition":
                         methods.append(
                             self._function_decl(
-                                inner, source, _decorator_texts(child, source), is_method=True
+                                inner,
+                                source,
+                                _decorator_texts(child, source),
+                                is_method=True,
+                                pins=pin_index.for_definition(child),
                             )
                         )
         fields = _class_fields(body, source) if body is not None else {}
         return ClassDecl(node=node, name=name, methods=methods, fields=fields)
 
     def _function_decl(
-        self, node: TSNode, source: bytes, decorators: list[str], is_method: bool
+        self,
+        node: TSNode,
+        source: bytes,
+        decorators: list[str],
+        is_method: bool,
+        pins: list[str] | None = None,
     ) -> FunctionDecl:
         name = _identifier_text(node.child_by_field_name("name"), source) or "<anonymous>"
         params: list[ParamDecl] = []
@@ -411,6 +448,7 @@ class PythonAdapter(LanguageAdapter):
             raises=_raised_names(node, source),
             decorators=list(decorators),
             free_names=_free_names(node, source),
+            pins=list(pins or []),
         )
 
     def call_sites(self, func_node: TSNode, source: bytes) -> list[CallSite]:

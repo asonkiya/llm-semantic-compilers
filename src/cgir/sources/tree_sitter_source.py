@@ -175,6 +175,7 @@ class TreeSitterSource(GraphSource):
                     "doc": decl.doc,
                     "raises": list(decl.raises),
                     "free_names": list(decl.free_names),
+                    "pins": list(decl.pins),
                 },
             )
         )

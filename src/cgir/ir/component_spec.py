@@ -41,6 +41,7 @@ COMPONENT_SPEC_SCHEMA: dict[str, Any] = {
         "reads": {"type": "array", "items": {"type": "string"}},
         "writes": {"type": "array", "items": {"type": "string"}},
         "purity": {"type": "number", "minimum": 0, "maximum": 1},
+        "pins": {"type": "array", "items": {"type": "string"}},
         "algorithm": {"type": "array", "items": {"type": "string"}},
         "trace": {"type": "array", "items": {"type": "string"}},
     },
@@ -75,6 +76,7 @@ class ComponentSpec:
     reads: list[str] = field(default_factory=list)
     writes: list[str] = field(default_factory=list)
     purity: float | None = None
+    pins: list[str] = field(default_factory=list)
     algorithm: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:

@@ -19,10 +19,67 @@ The surface grows by phase as passes are migrated behind it:
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from tree_sitter import Node as TSNode
+
+_PIN_RE = re.compile(r"cgir:\s*([a-z0-9_,\- ]+)", re.IGNORECASE)
+
+
+class PinIndex:
+    """Row-indexed ``cgir:`` pragmas from a file's comment nodes.
+
+    Grammar-agnostic: both supported grammars use ``comment`` nodes, so the
+    index collects every comment by row and adapters ask for the pins that
+    belong to a definition (trailing comment on its first row + the
+    contiguous comment block directly above) or to the module (the header
+    comment block, when not directly attached to the first definition).
+    """
+
+    def __init__(self, root: TSNode, source: bytes) -> None:
+        self._pins_by_row: dict[int, list[str]] = {}
+        self._comment_rows: set[int] = set()
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if node.type == "comment":
+                row = node.start_point[0]
+                self._comment_rows.add(row)
+                text = source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
+                match = _PIN_RE.search(text)
+                if match:
+                    tokens = [t for t in re.split(r"[,\s]+", match.group(1).strip()) if t]
+                    self._pins_by_row.setdefault(row, []).extend(tokens)
+            stack.extend(node.children)
+
+    def for_definition(self, outermost: TSNode) -> list[str]:
+        """Pins attached to a definition (pass the *outermost* node, so a
+        pin above a decorator or ``export`` keyword is found)."""
+        start = outermost.start_point[0]
+        pins = list(self._pins_by_row.get(start, []))  # trailing form
+        row = start - 1
+        while row in self._comment_rows:
+            pins.extend(self._pins_by_row.get(row, []))
+            row -= 1
+        return sorted(set(pins))
+
+    def module_pins(self, first_decl_row: int | None) -> list[str]:
+        """Pins from the file-header comment block (rows from 0), unless that
+        block is directly attached to the first definition."""
+        if 0 not in self._comment_rows:
+            return []
+        row, last = 0, -1
+        pins: list[str] = []
+        while row in self._comment_rows:
+            pins.extend(self._pins_by_row.get(row, []))
+            last = row
+            row += 1
+        if first_decl_row is not None and last == first_decl_row - 1:
+            return []  # header block belongs to the first definition
+        return sorted(set(pins))
+
 
 # (dotted_callee, arg_identifier_names, 1-based_line)
 CallSite = tuple[str, list[str], int]
@@ -138,6 +195,8 @@ class FunctionDecl:
     raises: list[str] = field(default_factory=list)
     decorators: list[str] = field(default_factory=list)
     free_names: list[str] = field(default_factory=list)
+    # developer-declared invariants from ``cgir:`` comment pragmas
+    pins: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

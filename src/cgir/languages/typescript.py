@@ -30,6 +30,7 @@ from cgir.languages.base import (
     LoopDesc,
     MatchDesc,
     ParamDecl,
+    PinIndex,
     ReturnDesc,
     SimpleDesc,
     StatementDesc,
@@ -385,20 +386,48 @@ class TypeScriptAdapter(LanguageAdapter):
     def module_declarations(
         self, root: TSNode, source: bytes, module_name: str, rel_path: str
     ) -> list[Declaration]:
+        pin_index = PinIndex(root, source)
         decls: list[Declaration] = []
         for child in root.children:
-            decls.extend(self._top_level(child, source, rel_path))
+            decls.extend(self._top_level(child, source, rel_path, pin_index))
+        first_decl = next((c for c in root.children if c.type != "comment"), None)
+        module_pins = pin_index.module_pins(
+            first_decl.start_point[0] if first_decl is not None else None
+        )
+        if module_pins:
+            for decl in decls:
+                if isinstance(decl, FunctionDecl):
+                    decl.pins = sorted(set(decl.pins) | set(module_pins))
+                elif isinstance(decl, ClassDecl):
+                    for method in decl.methods:
+                        method.pins = sorted(set(method.pins) | set(module_pins))
         return decls
 
-    def _top_level(self, node: TSNode, source: bytes, rel_path: str) -> list[Declaration]:
+    def _top_level(
+        self,
+        node: TSNode,
+        source: bytes,
+        rel_path: str,
+        pin_index: PinIndex,
+        outer: TSNode | None = None,
+    ) -> list[Declaration]:
+        outer = outer or node  # pins attach to the outermost node (`export ...`)
         t = node.type
         if t == "export_statement":
             inner = node.child_by_field_name("declaration")
-            return self._top_level(inner, source, rel_path) if inner is not None else []
+            return (
+                self._top_level(inner, source, rel_path, pin_index, outer=node)
+                if inner is not None
+                else []
+            )
         if t == "function_declaration":
-            return [self._function_decl(node, source, is_method=False)]
+            return [
+                self._function_decl(
+                    node, source, is_method=False, pins=pin_index.for_definition(outer)
+                )
+            ]
         if t == "class_declaration":
-            return [self._class_decl(node, source)]
+            return [self._class_decl(node, source, pin_index)]
         if t in {"lexical_declaration", "variable_declaration"}:
             out: list[Declaration] = []
             for decl in node.named_children:
@@ -410,7 +439,9 @@ class TypeScriptAdapter(LanguageAdapter):
                     continue
                 name = _text(name_node, source)
                 if value is not None and value.type in _FUNCTION_VALUES:
-                    out.append(self._arrow_decl(node, value, name, source))
+                    arrow = self._arrow_decl(node, value, name, source)
+                    arrow.pins = pin_index.for_definition(outer)
+                    out.append(arrow)
                 else:
                     out.append(VariableDecl(node=node, name=name))
             return out
@@ -418,7 +449,7 @@ class TypeScriptAdapter(LanguageAdapter):
             return list(self._imports(node, source, rel_path))
         return []
 
-    def _class_decl(self, node: TSNode, source: bytes) -> ClassDecl:
+    def _class_decl(self, node: TSNode, source: bytes, pin_index: PinIndex) -> ClassDecl:
         name = (
             _text(node.child_by_field_name("name"), source)
             if node.child_by_field_name("name")
@@ -430,7 +461,14 @@ class TypeScriptAdapter(LanguageAdapter):
         if body is not None:
             for child in body.named_children:
                 if child.type == "method_definition":
-                    methods.append(self._function_decl(child, source, is_method=True))
+                    methods.append(
+                        self._function_decl(
+                            child,
+                            source,
+                            is_method=True,
+                            pins=pin_index.for_definition(child),
+                        )
+                    )
                     if _node_name(child) == "constructor":
                         fields.update(_di_fields(child, source))
                 elif child.type == "public_field_definition":
@@ -440,7 +478,13 @@ class TypeScriptAdapter(LanguageAdapter):
                         fields[_text(fname, source)] = tname
         return ClassDecl(node=node, name=name, methods=methods, fields=fields)
 
-    def _function_decl(self, node: TSNode, source: bytes, is_method: bool) -> FunctionDecl:
+    def _function_decl(
+        self,
+        node: TSNode,
+        source: bytes,
+        is_method: bool,
+        pins: list[str] | None = None,
+    ) -> FunctionDecl:
         name = _fn_name(node, source)
         return FunctionDecl(
             node=node,
@@ -452,6 +496,7 @@ class TypeScriptAdapter(LanguageAdapter):
             raises=_thrown_names(node, source),
             decorators=[],
             free_names=_free_names(node, source),
+            pins=list(pins or []),
         )
 
     def _arrow_decl(

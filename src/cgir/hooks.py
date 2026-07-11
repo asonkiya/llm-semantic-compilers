@@ -32,6 +32,7 @@ from cgir.languages import ADAPTERS
 from cgir.pipeline import scan_repo
 from cgir.report.diff import compute_diff, render_diff, violations
 from cgir.report.impact import compute_typed_impact
+from cgir.report.pins import change_violations, state_violations
 
 # The low-noise default from the real-history noise measurement: fail only
 # when something starts — or silently stops — reaching the outside world.
@@ -110,6 +111,9 @@ def run_check(repo: Path, fail_on: list[str] | None = None) -> HookResult:
 
     diff = compute_diff(base_specs, head_specs)
     found = violations(diff, rules)
+    # Pin invariants are always enforced, independent of --fail-on rules.
+    found += change_violations(base_specs, head_specs)
+    found += state_violations(head_specs)
     changed = [c["id"] for c in diff["changed"]]
 
     tests: set[str] = set()

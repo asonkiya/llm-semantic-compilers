@@ -141,6 +141,7 @@ def build_pack(
             "entrypoint": target.entrypoint,
             "doc": target.doc,
             "raises": target.raises,
+            "pins": target.pins,
             "trace": target.trace,
             "source": source,
         },
@@ -192,6 +193,8 @@ def render_pack(pack: dict[str, Any]) -> str:
         lines.append(f"Returns: {', '.join(target['outputs'])}")
     if target.get("raises"):
         lines.append(f"Raises: {', '.join(target['raises'])}")
+    if target.get("pins"):
+        lines.append(f"Pinned: {', '.join(sorted(target['pins']))} — these invariants must hold.")
     if target["trace"]:
         lines.append(f"Source location: {target['trace'][0]}")
     if target.get("doc"):

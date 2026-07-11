@@ -55,9 +55,14 @@ H --> I[LLM regenerate / test / trace]
 "inputs":{"type":"array","items":{"type":"string"}},"outputs":{"type":"array","items":{"type":"string"}},
 "effects":{"type":"array","items":{"type":"string"}},"calls":{"type":"array","items":{"type":"string"}},
 "reads":{"type":"array","items":{"type":"string"}},"writes":{"type":"array","items":{"type":"string"}},
-"purity":{"type":"number"},"algorithm":{"type":"array","items":{"type":"string"}},
+"purity":{"type":"number"},"pins":{"type":"array","items":{"type":"string"}},
+"algorithm":{"type":"array","items":{"type":"string"}},
 "trace":{"type":"array","items":{"type":"string"}}}}
 ```
+
+`pins` are developer-declared invariants extracted from `cgir:` comment
+pragmas (`pure`, `no-<tag>`, `stable-signature`, `frozen`): state pins hold on
+every scan; change pins hold across scan pairs and are always enforced.
 
 **Example Python → ComponentSpec**
 ```python

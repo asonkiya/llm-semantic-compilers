@@ -107,6 +107,12 @@
       "items": {
         "type": "string"
       }
+    },
+    "pins": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "additionalProperties": false

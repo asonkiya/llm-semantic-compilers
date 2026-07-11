@@ -458,26 +458,36 @@ def lint(
     config: Annotated[Path, typer.Option("--config", help="Rules file.")] = Path("cgir.toml"),
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Check the index against semantic architecture rules (effects, kind, calls)."""
+    """Check the index against semantic architecture rules (effects, kind, calls).
+
+    Pin invariants (`# cgir: pure`, `no-<tag>`) are always checked — no rules
+    file needed for those.
+    """
     from cgir.report.lint import lint as run_lint
     from cgir.report.lint import load_rules, render_lint
+    from cgir.report.pins import state_violations
 
-    if not config.exists():
-        raise typer.BadParameter(f"No rules file at {config}")
-    violations = run_lint(_load_specs(index_dir), load_rules(config))
+    specs = _load_specs(index_dir)
+    violations = run_lint(specs, load_rules(config)) if config.exists() else []
+    pin_lines = state_violations(specs)
     if as_json:
         typer.echo(
             json.dumps(
-                [
-                    {"rule": v.rule, "component": v.component, "detail": v.detail}
-                    for v in violations
+                [{"rule": v.rule, "component": v.component, "detail": v.detail} for v in violations]
+                + [
+                    {"rule": "pin", "component": line.split(":")[0], "detail": line}
+                    for line in pin_lines
                 ],
                 indent=2,
             )
         )
     else:
         typer.echo(render_lint(violations), nl=False)
-    if violations:
+        if pin_lines:
+            typer.echo(f"pin violations ({len(pin_lines)}):")
+            for line in pin_lines:
+                typer.echo(f"  ! {line}")
+    if violations or pin_lines:
         raise typer.Exit(code=1)
 
 
@@ -562,10 +572,19 @@ def diff(
         ),
     ] = None,
 ) -> None:
-    """Compare two scan indexes: added/removed components and contract drift."""
+    """Compare two scan indexes: added/removed components and contract drift.
+
+    Pin invariants are always enforced: change pins (stable-signature, frozen)
+    across the pair, state pins (pure, no-<tag>) on the new index.
+    """
+    from cgir.report.pins import change_violations, state_violations
+
     warning = compatibility_warning(read_manifest(old_index), read_manifest(new_index))
-    result = compute_diff(_load_specs(old_index), _load_specs(new_index))
+    old_specs, new_specs = _load_specs(old_index), _load_specs(new_index)
+    result = compute_diff(old_specs, new_specs)
     found = violations(result, list(fail_on or []))
+    found += change_violations(old_specs, new_specs)
+    found += state_violations(new_specs)
     if as_json:
         payload = dict(result)
         if warning:

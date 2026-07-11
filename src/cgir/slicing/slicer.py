@@ -55,6 +55,7 @@ def slice_components(
         decorators = attrs.get("decorators")
         doc = attrs.get("doc")
         raises = attrs.get("raises")
+        pins = attrs.get("pins")
         covered_by = _covering_tests(graph, node.id)
 
         specs.append(
@@ -76,6 +77,7 @@ def slice_components(
                 raises=list(raises) if isinstance(raises, list) else [],
                 covered_by=covered_by,
                 purity=purity_score,
+                pins=list(pins) if isinstance(pins, list) else [],
             )
         )
 
