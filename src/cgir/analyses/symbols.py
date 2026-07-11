@@ -41,6 +41,8 @@ def build_symbol_tables(graph: RepoGraph) -> dict[str, SymbolTable]:
                 table.bindings[child.name] = child.id
         tables[module.id] = table
 
+    _merge_go_packages(graph, tables)
+
     for module in graph.nodes(NodeKind.Module):
         table = tables[module.id]
         for child in graph.children(module.id, NodeKind.Import):
@@ -50,6 +52,31 @@ def build_symbol_tables(graph: RepoGraph) -> dict[str, SymbolTable]:
             table.bindings[local] = _resolve_target(qualname_index, target)
 
     return tables
+
+
+def _merge_go_packages(graph: RepoGraph, tables: dict[str, SymbolTable]) -> None:
+    """Go's package scope: files in one directory share top-level names.
+
+    Modules are per-file, but Go code calls sibling-file functions with no
+    import. Union the local bindings of go modules that share a directory
+    (existing bindings win, so a file's own names shadow siblings').
+    """
+    by_dir: dict[str, list[Node]] = {}
+    for module in graph.nodes(NodeKind.Module):
+        if module.attrs.get("language") != "go" or not module.path:
+            continue
+        directory = module.path.rsplit("/", 1)[0] if "/" in module.path else ""
+        by_dir.setdefault(directory, []).append(module)
+    for modules in by_dir.values():
+        if len(modules) < 2:
+            continue
+        union: dict[str, str | None] = {}
+        for module in modules:
+            union.update(tables[module.id].bindings)
+        for module in modules:
+            merged = dict(union)
+            merged.update(tables[module.id].bindings)  # own names shadow siblings
+            tables[module.id].bindings = merged
 
 
 def _resolve_target(qualname_index: dict[str, str], target: str) -> str | None:

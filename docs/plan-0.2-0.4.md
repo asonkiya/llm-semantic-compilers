@@ -1,5 +1,8 @@
 # Plan: 0.2 → 0.4 (pins, init, impact --run; data-shape contracts; Go)
 
+**Status: all three workstreams landed 2026-07-10** (single sitting; see git
+log). Shipping as one 0.2.0 release rather than three.
+
 Three workstreams, landed in this order — each one's machinery feeds the next.
 Depth before width: pins + shapes strengthen the gate for the two languages
 people can use today; Go then inherits all of it.

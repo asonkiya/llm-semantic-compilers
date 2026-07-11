@@ -66,6 +66,11 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Python DI field types (`__init__` annotations, class-level annotations, direct construction) → `self.<field>.<method>()` resolution + `self.`/`this.` receiver in packs | done | `src/cgir/languages/python.py:_class_fields`, `cli._call_receivers` |
 | Per-component `language` on specs (multi-language repos) | done | `src/cgir/slicing/slicer.py:_node_language` |
 | Packaging: distribution `codegraph-ir` (import + CLI stay `cgir`), py.typed, tag-triggered PyPI release via trusted publishing | done | `pyproject.toml`, `.github/workflows/release.yml`, `RELEASING.md` |
+| Declarable contracts (`cgir:` pins — pure/no-tag/stable-signature/frozen) enforced by lint/diff/hook/verify; rendered in pack | done | `src/cgir/report/pins.py`, `languages/base.py:PinIndex` |
+| `cgir init` (scan summary, starter cgir.toml, .gitignore, `--hook`) | done | `src/cgir/cli.py:init` |
+| `cgir impact --run` (execute the blast-radius tests via pytest node-ids) | done | `report/impact.py:runnable_selectors` |
+| Data-shape contracts (`types` diff section + opt-in `shape-change` rule; TS interfaces/type-aliases, Py TypedDict/dataclass) | done | `report/diff.py:_type_shape_changes`, `json_export.read_types` |
+| Go adapter (package=dir symbol merge, struct-field DI, panic≙raise, effects tables) | done | `src/cgir/languages/go.py` |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware, type closure + docstrings + raises) | done | `src/cgir/report/pack.py` |
 | Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |
@@ -85,7 +90,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 391 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
+`pytest -q` runs 444 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
 
 | File | Covers |
 |---|---|

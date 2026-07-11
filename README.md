@@ -23,7 +23,7 @@ For library/agent use in a project: `uv pip install codegraph-ir`
 ## The local loop
 
 ```bash
-cgir scan .                          # build the .cgir index (Python + TypeScript)
+cgir scan .                          # build the .cgir index (Python, TypeScript, Go)
 cgir watch .                         # keep it live: re-scan + show contract drift on save
 cgir pack app.service.charge --repo .   # minimal context bundle for one component
 cgir impact app.service.charge          # blast radius: affected callers, entrypoints, tests

@@ -27,6 +27,7 @@ full test suite green.
 | 2 | CFG statement classification + field extraction (normalized `StatementDesc`) | ✅ done |
 | 3 | ingest structural dispatch + attr extraction (normalized `Declaration`s) | ✅ done |
 | 4 | `TypeScriptAdapter` + per-file language dispatch | ✅ done |
+| 5 | `GoAdapter` (package=directory merge, struct-field DI, panic≙raise) | ✅ done |
 
 **Two languages ship (Python, TypeScript); a mixed repo scans both.**
 Zero grammar node-type strings remain outside `cgir/languages/`. The CFG builder is pure topology over statement
