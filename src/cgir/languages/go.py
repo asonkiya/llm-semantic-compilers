@@ -384,9 +384,9 @@ def _struct_fields(type_node: TSNode) -> dict[str, str]:
             for name in names:
                 fields[_node_text(name)] = type_text
         elif member.type == "method_spec":
-            name = member.child_by_field_name("name")
-            if name is not None:
-                fields[_node_text(name)] = "func"
+            spec_name = member.child_by_field_name("name")
+            if spec_name is not None:
+                fields[_node_text(spec_name)] = "func"
     return fields
 
 
