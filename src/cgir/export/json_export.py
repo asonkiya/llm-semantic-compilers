@@ -19,6 +19,28 @@ def read_specs(index_dir: Path) -> list[ComponentSpec]:
     ]
 
 
+def read_types(index_dir: Path) -> dict[str, dict[str, str]]:
+    """Type shapes (qualname -> field name -> type text) from an index's graph.
+
+    Sourced from Class nodes' ``fields`` attr — TypedDict/dataclass/pydantic
+    bodies and TS interfaces/type-aliases. Empty-field types are skipped.
+    """
+    graph_path = index_dir / "repo_graph.json"
+    if not graph_path.exists():
+        return {}
+    data = json.loads(graph_path.read_text())
+    out: dict[str, dict[str, str]] = {}
+    for node in data.get("nodes", []):
+        if node.get("kind") != "Class":
+            continue
+        attrs = node.get("attrs") or {}
+        fields = attrs.get("fields")
+        qual = attrs.get("qualname")
+        if isinstance(fields, dict) and fields and isinstance(qual, str):
+            out[qual] = {str(k): str(v) for k, v in fields.items()}
+    return out
+
+
 def write_index(out_dir: Path, graph: RepoGraph, specs: list[ComponentSpec]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "repo_graph.json").write_text(

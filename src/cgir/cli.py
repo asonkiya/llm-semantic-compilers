@@ -683,11 +683,14 @@ def diff(
     Pin invariants are always enforced: change pins (stable-signature, frozen)
     across the pair, state pins (pure, no-<tag>) on the new index.
     """
+    from cgir.export.json_export import read_types
     from cgir.report.pins import change_violations, state_violations
 
     warning = compatibility_warning(read_manifest(old_index), read_manifest(new_index))
     old_specs, new_specs = _load_specs(old_index), _load_specs(new_index)
-    result = compute_diff(old_specs, new_specs)
+    result = compute_diff(
+        old_specs, new_specs, old_types=read_types(old_index), new_types=read_types(new_index)
+    )
     found = violations(result, list(fail_on or []))
     found += change_violations(old_specs, new_specs)
     found += state_violations(new_specs)

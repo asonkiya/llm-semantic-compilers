@@ -428,6 +428,9 @@ class TypeScriptAdapter(LanguageAdapter):
             ]
         if t == "class_declaration":
             return [self._class_decl(node, source, pin_index)]
+        if t in {"interface_declaration", "type_alias_declaration"}:
+            shape = _shape_decl(node, source)
+            return [shape] if shape is not None else []
         if t in {"lexical_declaration", "variable_declaration"}:
             out: list[Declaration] = []
             for decl in node.named_children:
@@ -557,6 +560,38 @@ def _text(node: TSNode | None, source: bytes) -> str:
 def _node_text(node: TSNode | None) -> str:
     """Node's own source text via tree-sitter (offset-safe, no file needed)."""
     return node.text.decode("utf-8", errors="replace") if node is not None and node.text else ""
+
+
+def _shape_decl(node: TSNode, source: bytes) -> ClassDecl | None:
+    """An ``interface`` / object type-alias as a fields-only ClassDecl.
+
+    These are pure data shapes, so the field values keep the *full* type text
+    (``string | null``) for shape-drift fidelity — unlike DI fields, they are
+    never matched against class bindings.
+    """
+    name_node = node.child_by_field_name("name")
+    if name_node is None:
+        return None
+    body = (
+        node.child_by_field_name("body")
+        if node.type == "interface_declaration"
+        else node.child_by_field_name("value")
+    )
+    if body is None or body.type not in {"interface_body", "object_type"}:
+        return None
+    fields: dict[str, str] = {}
+    for member in body.named_children:
+        if member.type != "property_signature":
+            continue
+        prop = member.child_by_field_name("name")
+        annotation = member.child_by_field_name("type")
+        if prop is None:
+            continue
+        type_text = ""
+        if annotation is not None:
+            type_text = _text(annotation, source).lstrip(":").strip()
+        fields[_text(prop, source)] = type_text
+    return ClassDecl(node=node, name=_text(name_node, source), methods=[], fields=fields)
 
 
 def _di_fields(ctor: TSNode, source: bytes) -> dict[str, str]:

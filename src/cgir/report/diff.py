@@ -22,7 +22,12 @@ from cgir.ir.component_spec import ComponentSpec
 CONTRACT_FIELDS = ("kind", "purity", "effects", "signature", "outputs")
 
 
-def compute_diff(old_specs: list[ComponentSpec], new_specs: list[ComponentSpec]) -> dict[str, Any]:
+def compute_diff(
+    old_specs: list[ComponentSpec],
+    new_specs: list[ComponentSpec],
+    old_types: dict[str, dict[str, str]] | None = None,
+    new_types: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
     old = {s.id: s for s in old_specs}
     new = {s.id: s for s in new_specs}
 
@@ -37,7 +42,48 @@ def compute_diff(old_specs: list[ComponentSpec], new_specs: list[ComponentSpec])
         "removed": sorted(old.keys() - new.keys()),
         "changed": changed,
         "entrypoints": _entrypoint_surface(old, new),
+        "types": _type_shape_changes(old_types or {}, new_types or {}, new_specs),
     }
+
+
+def _type_shape_changes(
+    old_types: dict[str, dict[str, str]],
+    new_types: dict[str, dict[str, str]],
+    new_specs: list[ComponentSpec],
+) -> dict[str, Any]:
+    """Field-level drift per type: "the rewrite dropped a field" made visible.
+
+    ``referenced_by`` names the components whose contract (outputs/params via
+    :func:`referenced_type_names`) mentions the drifted type — the blast
+    surface a shape change actually has.
+    """
+    changed: list[dict[str, Any]] = []
+    for name in sorted(old_types.keys() & new_types.keys()):
+        before, after = old_types[name], new_types[name]
+        if before == after:
+            continue
+        entry: dict[str, Any] = {
+            "name": name,
+            "added": sorted(after.keys() - before.keys()),
+            "removed": sorted(before.keys() - after.keys()),
+            "changed": {
+                f: {"old": before[f], "new": after[f]}
+                for f in sorted(before.keys() & after.keys())
+                if before[f] != after[f]
+            },
+        }
+        short = name.rsplit(".", 1)[-1]
+        entry["referenced_by"] = sorted(
+            s.id for s in new_specs if short in _referenced_type_names(s)
+        )
+        changed.append(entry)
+    return {"changed": changed}
+
+
+def _referenced_type_names(spec: ComponentSpec) -> set[str]:
+    from cgir.report.pack import referenced_type_names
+
+    return referenced_type_names(spec)
 
 
 def _entrypoint_surface(
@@ -120,6 +166,23 @@ def violations(diff: dict[str, Any], rules: list[str]) -> list[str]:
         elif rule == "entrypoint-change":
             for e in surface.get("changed", []):
                 found.append(f"{e['id']}: entrypoint changed {e['old']} -> {e['new']}")
+        elif rule == "shape-change":
+            # Only referenced types fire: an internal shape nobody's contract
+            # names is a private refactor, not drift.
+            for t in diff.get("types", {}).get("changed", []):
+                if not t["referenced_by"]:
+                    continue
+                deltas = []
+                if t["removed"]:
+                    deltas.append(f"removed {', '.join(t['removed'])}")
+                if t["added"]:
+                    deltas.append(f"added {', '.join(t['added'])}")
+                if t["changed"]:
+                    deltas.append(f"retyped {', '.join(t['changed'])}")
+                found.append(
+                    f"{t['name']}: shape changed ({'; '.join(deltas)}) — "
+                    f"referenced by {', '.join(t['referenced_by'])}"
+                )
     return found
 
 
@@ -144,9 +207,19 @@ def _as_float(value: Any) -> float:
 def render_diff(diff: dict[str, Any]) -> str:
     surface = diff.get("entrypoints", {"added": [], "removed": [], "changed": []})
     has_surface = surface["added"] or surface["removed"] or surface["changed"]
-    if not (diff["added"] or diff["removed"] or diff["changed"] or has_surface):
+    type_changes = diff.get("types", {}).get("changed", [])
+    if not (diff["added"] or diff["removed"] or diff["changed"] or has_surface or type_changes):
         return "no changes\n"
     lines: list[str] = []
+    if type_changes:
+        lines.append(f"type shapes changed ({len(type_changes)}):")
+        for t in type_changes:
+            deltas = [f"-{f}" for f in t["removed"]] + [f"+{f}" for f in t["added"]]
+            deltas += [f"~{f}" for f in t["changed"]]
+            refs = (
+                f"  (referenced by {', '.join(t['referenced_by'])})" if t["referenced_by"] else ""
+            )
+            lines.append(f"  ~ {t['name']}: {' '.join(deltas)}{refs}")
     if has_surface:
         lines.append("entrypoint surface:")
         lines.extend(f"  + {e['entrypoint']}  ({e['id']})" for e in surface["added"])

@@ -9,7 +9,7 @@ conventions); the CLI and API are thin surfaces over :func:`scan_repo`.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from cgir.analyses import effects as effects_pass
@@ -21,6 +21,7 @@ from cgir.analyses.symbols import build_symbol_tables
 from cgir.config import CGIRConfig
 from cgir.export import json_export
 from cgir.ir.component_spec import ComponentSpec
+from cgir.ir.nodes import NodeKind
 from cgir.slicing import slice_components
 from cgir.sources import TreeSitterSource
 from cgir.trace import build_trace_map
@@ -30,6 +31,8 @@ from cgir.trace import build_trace_map
 class ScanResult:
     out_dir: Path
     specs: list[ComponentSpec]
+    # type shapes: qualname -> field name -> type text (for shape-drift)
+    types: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def scan_repo(
@@ -51,4 +54,9 @@ def scan_repo(
     trace_map = build_trace_map(graph)
     json_export.write_index(config.out_dir, graph, specs)
     trace_map.write(config.out_dir / "trace_map.json")
-    return ScanResult(out_dir=config.out_dir, specs=specs)
+    types = {
+        str(node.attrs["qualname"]): dict(node.attrs["fields"])
+        for node in graph.nodes(NodeKind.Class)
+        if node.attrs.get("fields") and node.attrs.get("qualname")
+    }
+    return ScanResult(out_dir=config.out_dir, specs=specs, types=types)

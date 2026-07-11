@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cgir.export.json_export import read_specs
+from cgir.export.json_export import read_specs, read_types
 from cgir.languages import ADAPTERS
 from cgir.pipeline import scan_repo
 from cgir.report.diff import compute_diff
@@ -102,11 +102,12 @@ def tick(repo: Path, index_dir: Path, prev_hashes: dict[str, str]) -> tuple[Tick
         return Tick(), now
 
     old_specs = read_specs(index_dir) if (index_dir / "components").exists() else []
+    old_types = read_types(index_dir)  # before the rescan overwrites the graph
     start = time.perf_counter()
     result = scan_repo(repo, out=index_dir)
     elapsed = (time.perf_counter() - start) * 1000
     write_manifest(index_dir, now)
-    drift = compute_diff(old_specs, result.specs)
+    drift = compute_diff(old_specs, result.specs, old_types=old_types, new_types=result.types)
     return (
         Tick(
             changed=changed,

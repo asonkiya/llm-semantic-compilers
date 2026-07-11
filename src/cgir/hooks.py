@@ -79,15 +79,16 @@ def _staged_supported(repo: Path) -> bool:
     return any(Path(n).suffix in _SUPPORTED_EXTS for n in names)
 
 
-def _specs_of_tree(repo: Path, tree: str) -> list[ComponentSpec]:
-    """Scan the content of a git tree-ish out-of-tree."""
+def _scan_tree(repo: Path, tree: str) -> tuple[list[ComponentSpec], dict[str, dict[str, str]]]:
+    """Scan the content of a git tree-ish out-of-tree: (specs, type shapes)."""
     with tempfile.TemporaryDirectory() as td:
         src = Path(td) / "src"
         src.mkdir()
         archive = subprocess.check_output(["git", "-C", str(repo), "archive", tree])
         subprocess.run(["tar", "-x", "-C", str(src)], input=archive, check=True)
         with tempfile.TemporaryDirectory() as od:
-            return scan_repo(src, out=Path(od)).specs
+            result = scan_repo(src, out=Path(od))
+            return result.specs, result.types
 
 
 def run_check(repo: Path, fail_on: list[str] | None = None) -> HookResult:
@@ -104,12 +105,12 @@ def run_check(repo: Path, fail_on: list[str] | None = None) -> HookResult:
         if head_tree == staged_tree:
             return HookResult(checked=False)
 
-        base_specs = _specs_of_tree(repo, head_tree) if head_tree else []
-        head_specs = _specs_of_tree(repo, staged_tree)
+        base_specs, base_types = _scan_tree(repo, head_tree) if head_tree else ([], {})
+        head_specs, head_types = _scan_tree(repo, staged_tree)
     except Exception as exc:  # never block a commit because of our own bug
         return HookResult(checked=False, error=f"{type(exc).__name__}: {exc}")
 
-    diff = compute_diff(base_specs, head_specs)
+    diff = compute_diff(base_specs, head_specs, old_types=base_types, new_types=head_types)
     found = violations(diff, rules)
     # Pin invariants are always enforced, independent of --fail-on rules.
     found += change_violations(base_specs, head_specs)
