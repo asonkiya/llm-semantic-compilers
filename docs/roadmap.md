@@ -1,5 +1,7 @@
 # Roadmap
 
+**Active plan: [`plan-0.2-0.4.md`](./plan-0.2-0.4.md)** — pins/init/impact-run (0.2.0), data-shape contracts (0.3.0), Go adapter (0.4.0).
+
 Forward-looking sequencing. The grouping mirrors `Code-IR.md` §Architecture: **P0** is "you can produce a `ComponentSpec`," **P1** is "you can trust it," **P2** is "you can scale it." Within each tier the order below reflects current dependencies, not strict chronology — feel free to interleave when dependencies allow.
 
 ## Done
