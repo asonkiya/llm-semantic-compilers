@@ -33,6 +33,11 @@ ADAPTER_API_VERSION = 1
 
 _PIN_RE = re.compile(r"cgir:\s*([a-z0-9_,\- ]+)", re.IGNORECASE)
 
+# Grammars disagree on the comment node type: python/ts/go use "comment",
+# rust/c/c++/java use line_comment/block_comment. (Found by the docs-only
+# Rust-adapter experiment — pins silently never appeared.)
+COMMENT_NODE_TYPES = frozenset({"comment", "line_comment", "block_comment", "doc_comment"})
+
 
 class PinIndex:
     """Row-indexed ``cgir:`` pragmas from a file's comment nodes.
@@ -50,7 +55,7 @@ class PinIndex:
         stack = [root]
         while stack:
             node = stack.pop()
-            if node.type == "comment":
+            if node.type in COMMENT_NODE_TYPES:
                 row = node.start_point[0]
                 self._comment_rows.add(row)
                 text = source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")

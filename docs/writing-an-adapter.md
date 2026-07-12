@@ -24,6 +24,13 @@ language, behind the `LanguageAdapter` ABC:
 You never build graph nodes or edges. You translate grammar shapes into
 the descriptor dataclasses below.
 
+## Grammar version compatibility (check first)
+
+tree-sitter grammar wheels ship a compiled language ABI; the `tree-sitter`
+core only accepts a range. If `Language(...)` raises
+``Incompatible Language version``, pin an older grammar wheel (e.g.
+``tree-sitter-rust<0.24`` against ``tree-sitter 0.24``).
+
 ## Setup
 
 ```python
@@ -49,6 +56,11 @@ class RustAdapter(LanguageAdapter):
 
 Useful helper you'll write once: `node.text` returns the node's source
 bytes (offset-safe); decode with `errors="replace"`.
+
+**Comment node types:** grammars disagree (`comment` in python/ts/go;
+`line_comment`/`block_comment` in rust/c/java). `PinIndex` handles all of
+these (`cgir.languages.base.COMMENT_NODE_TYPES`) — but your
+`block_statements` comment filter must use *your grammar's* comment types.
 
 ## The required methods, exactly
 
@@ -78,7 +90,9 @@ Declaration shapes (all carry `node: TSNode` — used for line spans):
   - `returns`: return-type text or None.
   - `doc`: docstring/doc-comment text, `""` if none.
   - `raises`: exception-ish names; for panic-style languages return
-    `["panic"]` when the body contains a panic, else `[]`.
+    `["panic"]` when the body contains a panic, else `[]`. For
+    Result/error-value languages (Rust `?`, Go `error` returns), error
+    *values* are not raises — only aborts (panic) count.
   - `decorators`: attribute/annotation strings (may be `[]`).
   - `free_names`: identifiers the body references that aren't locally
     bound (feeds context packing; `[]` is acceptable v1).
@@ -254,7 +268,10 @@ def _scan(tmp_path):
 
 Cover at least:
 1. functions and methods ingested with correct ids
-   (`<module>.<fn>` / `<module>.<Type>.<method>`)
+   (`<module>.<fn>` / `<module>.<Type>.<method>`). Note the graph split:
+   free functions are `NodeKind.Function` with `func:` node ids; methods
+   are `NodeKind.Method` with `method:` ids — queries must use the right
+   prefix.
 2. params + signature extracted; `spec.language == "<your name>"`
 3. effect detection per tag you implement, incl. a pure function staying
    `ComponentKind.pure_function` with `purity == 1.0`
@@ -268,10 +285,21 @@ Cover at least:
 8. a `// cgir: pure` pin lands in `spec.pins`
 9. cross-file call resolution through your ImportDecls
 
-Note for tests using `TreeSitterSource().ingest(...)`: ingest dispatches
-by file extension over *registered* adapters — during development,
-register yours (in-tree tuple or an installed entry point) or construct
-`TreeSitterSource(adapter=YourAdapter())`.
+**Unregistered-adapter warning (applies to every pass, not just
+ingest):** each analysis that reads source (`build_call_graph`,
+`build_cfg`, `classify`) resolves the adapter per file extension over
+*registered* adapters, and **silently produces empty results** for files
+nobody claims. During development either register your adapter (in-tree
+tuple or installed entry point) or pass it explicitly everywhere:
+
+```python
+adapter = RustAdapter()
+graph = TreeSitterSource(adapter=adapter).ingest(tmp_path)
+tables = build_symbol_tables(graph)
+build_call_graph(graph, tables, tmp_path, adapter=adapter)
+build_cfg(graph, tmp_path, adapter=adapter)
+effects = classify(graph, tmp_path, adapter=adapter)
+```
 
 ## Honesty requirements
 

@@ -229,3 +229,21 @@ def test_module_pin_adjacent_to_def_still_belongs_to_def(tmp_path: Path) -> None
     specs = {s.id: s for s in _scan(tmp_path)}
     assert specs["m.f"].pins == ["pure"]
     assert specs["m.g"].pins == []
+
+
+def test_pin_index_handles_line_comment_grammars() -> None:
+    """Rust/C/C++/Java grammars emit line_comment/block_comment, not `comment`.
+
+    Found by the docs-only Rust-adapter experiment: pins silently never
+    appeared. PinIndex must accept all common comment node types.
+    """
+    import tree_sitter_rust
+    from tree_sitter import Language, Parser
+
+    from cgir.languages.base import PinIndex
+
+    parser = Parser(Language(tree_sitter_rust.language()))
+    src = b"// cgir: pure\nfn add(a: i64, b: i64) -> i64 {\n    a + b\n}\n"
+    root = parser.parse(src).root_node
+    fn = next(c for c in root.named_children if c.type == "function_item")
+    assert PinIndex(root, src).for_definition(fn) == ["pure"]

@@ -80,6 +80,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Coverage-grounded test linkage (.coverage/coverage.json contexts ∪ static; pack test sources capped) | done | `analyses/coverage_link.py` |
 | LSP diagnostics (`cgir lsp`, `cgir[lsp]` extra): pin violations as errors, gate drift as warnings, on save | done | `src/cgir/api/lsp_server.py`, `docs/lsp.md` |
 | Language plugin registry (`cgir.languages` entry points, `cgir languages`, ADAPTER_API_VERSION; builtins win conflicts, broken plugins degrade to warnings) | done | `languages/registry.py:discover_adapters` |
+| Adapter authoring guide, validated by a docs-only agent experiment (Rust adapter, 36/36, 9/9 bar; gaps folded back; PinIndex line_comment fix) | done | `docs/writing-an-adapter.md`, `examples/rust-adapter/` |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware, type closure + docstrings + raises) | done | `src/cgir/report/pack.py` |
 | Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |
@@ -99,7 +100,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 505 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
+`pytest -q` runs 506 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
 
 | File | Covers |
 |---|---|
