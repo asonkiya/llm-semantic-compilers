@@ -1,6 +1,6 @@
 # Roadmap
 
-**Active plan: [`plan-0.2-0.4.md`](./plan-0.2-0.4.md)** — pins/init/impact-run (0.2.0), data-shape contracts (0.3.0), Go adapter (0.4.0).
+**Active plan: [`plan-0.3.md`](./plan-0.3.md)** — trust (confidence tiers), reach (go.mod resolution, pre-commit, agents), and the incremental-analysis design. `plan-0.2-0.4.md` is fully landed.
 
 Forward-looking sequencing. The grouping mirrors `Code-IR.md` §Architecture: **P0** is "you can produce a `ComponentSpec`," **P1** is "you can trust it," **P2** is "you can scale it." Within each tier the order below reflects current dependencies, not strict chronology — feel free to interleave when dependencies allow.
 
