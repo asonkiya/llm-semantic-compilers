@@ -67,6 +67,8 @@ Register it in `cgir/languages/__init__.py:ADAPTERS`. The effect *taxonomy*
 (`io`/`net`/`fs`/`db`/`nondeterm`/`raise`) is language-neutral and fixed in
 `analyses/effects.py`; the adapter only decides which calls map to which tag.
 
+**Full authoring guide: [`writing-an-adapter.md`](./writing-an-adapter.md)** — self-contained; written so an implementer (human or agent) needs no other source.
+
 ## Packaging a language plugin
 
 Adapters are discovered via the ``cgir.languages`` entry-point group — no
