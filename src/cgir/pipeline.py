@@ -12,6 +12,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from cgir.analyses import coverage_link
 from cgir.analyses import effects as effects_pass
 from cgir.analyses import purity as purity_pass
 from cgir.analyses.call_graph import build_call_graph
@@ -25,6 +26,36 @@ from cgir.ir.nodes import NodeKind
 from cgir.slicing import slice_components
 from cgir.sources import TreeSitterSource
 from cgir.trace import build_trace_map
+
+
+def _coverage_covered(graph: object, repo_path: Path) -> dict[str, set[str]]:
+    """Measured test linkage from coverage contexts, when present."""
+    from cgir.ir.graph import RepoGraph
+
+    assert isinstance(graph, RepoGraph)
+    cov = coverage_link.read_coverage_contexts(repo_path)
+    if not cov:
+        return {}
+    spans = [
+        (n.id, n.path, n.start_line, n.end_line)
+        for n in graph.nodes()
+        if n.kind in {NodeKind.Function, NodeKind.Method}
+        and n.path is not None
+        and n.start_line is not None
+        and n.end_line is not None
+    ]
+    # coverage tests are named by qualname; span keys are node ids — map back
+    qual_by_id = {
+        n.id: str(n.attrs.get("qualname") or n.name)
+        for n in graph.nodes()
+        if n.kind in {NodeKind.Function, NodeKind.Method}
+    }
+    raw = coverage_link.coverage_covered_by(cov, spans)
+    # drop a test covering itself under its own qualname
+    return {
+        node_id: {t for t in tests if t != qual_by_id.get(node_id)}
+        for node_id, tests in raw.items()
+    }
 
 
 @dataclass(slots=True)
@@ -50,8 +81,13 @@ def scan_repo(
     build_pdg(graph)
     effects, lexical = effects_pass.classify_with_confidence(graph, config.repo_path)
     purity_scores = purity_pass.score(graph, effects)
+    coverage_covered = _coverage_covered(graph, config.repo_path)
     specs = slice_components(
-        graph, effects=effects, purity_scores=purity_scores, lexical_effects=lexical
+        graph,
+        effects=effects,
+        purity_scores=purity_scores,
+        lexical_effects=lexical,
+        coverage_covered=coverage_covered,
     )
     trace_map = build_trace_map(graph)
     json_export.write_index(config.out_dir, graph, specs)

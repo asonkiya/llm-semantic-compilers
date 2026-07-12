@@ -423,7 +423,10 @@ def pack(
     graph = _load_graph(index_dir) if (index_dir / "repo_graph.json").exists() else None
     source = _component_source(graph, component_id, repo) if repo else None
     types = _type_sources(graph, referenced_type_names(target), repo) if repo else {}
-    tests = _test_sources(graph, target.covered_by, repo) if repo else {}
+    # Coverage-grounded linkage can attach dozens of tests to hot-path
+    # components; embed at most a handful of sources (impact --run still
+    # uses the full set — accuracy there, budget here).
+    tests = _test_sources(graph, target.covered_by[:_PACK_TEST_CAP], repo) if repo else {}
     context = _module_context(graph, component_id, repo) if repo else {}
     receivers = _call_receivers(graph, target)
     bundle = build_pack(
@@ -440,6 +443,7 @@ def pack(
 
 
 _HELPER_MAX_LINES = 25
+_PACK_TEST_CAP = 5
 
 
 def _module_context(

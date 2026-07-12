@@ -29,10 +29,12 @@ def slice_components(
     purity_scores: dict[str, float] | None = None,
     language: str = "python",
     lexical_effects: dict[str, list[str]] | None = None,
+    coverage_covered: dict[str, set[str]] | None = None,
 ) -> list[ComponentSpec]:
     effects = effects or {}
     purity_scores = purity_scores or {}
     lexical_effects = lexical_effects or {}
+    coverage_covered = coverage_covered or {}
     specs: list[ComponentSpec] = []
 
     for node in graph.nodes():
@@ -58,7 +60,9 @@ def slice_components(
         doc = attrs.get("doc")
         raises = attrs.get("raises")
         pins = attrs.get("pins")
-        covered_by = _covering_tests(graph, node.id)
+        covered_by = sorted(
+            set(_covering_tests(graph, node.id)) | coverage_covered.get(node.id, set())
+        )
 
         specs.append(
             ComponentSpec(

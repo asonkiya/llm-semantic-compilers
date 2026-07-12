@@ -54,6 +54,15 @@ landed), `gate-noise.md` (measured rule noise), `experiment-log.md`
 - Neutralizes the import-linter/ArchUnit objection using graph data we
   already have — and our violations can say the edge *also* carries `net`.
 
+**C. Coverage-grounded test linkage** *(landed)* — `.coverage` (sqlite,
+numbits decoded via stdlib) / `coverage.json --show-contexts` per-test
+contexts mapped onto component spans, unioned with static linkage. On CGIR
+itself (pytest-cov --cov-context=test): components with test linkage went
+48 → 345 of 389 (12% → 89%). Hot components link many tests (integration
+tests execute the pipeline — accurate); pack embeds at most 5 test sources,
+impact --run keeps the full set. Staleness limit: an old .coverage may
+reference moved lines; static linkage is the floor.
+
 ## Not built — next up, in value order
 
 1. **Per-component incremental analysis** (the latency lever). Watch/hook
