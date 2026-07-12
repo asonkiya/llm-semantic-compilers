@@ -27,6 +27,33 @@ landed), `gate-noise.md` (measured rule noise), `experiment-log.md`
    systematic fix for the `self.now()` false-positive class measured in
    gate-noise.md.
 
+## In flight: market-driven quick strikes (designed 2026-07-12)
+
+**A. Ranked, structured search** (`report/search.py`, pure over specs; MCP
+`search` delegates; new `cgir search` CLI command).
+
+- Free terms rank: exact name (100) > name-word (50) > id substring (20) >
+  entrypoint (15) > doc (5); sum across terms, sort desc, cap 25.
+- Structured predicates (colon syntax, AND-combined, mixable with terms):
+  `kind:pure_function` (alias `kind:pure`), `effects:net`, `effects:none`,
+  `lexical:true|false`, `callers:>3|0`, `calls:>5`, `pins:pure`,
+  `pinned:true`, `lang:go`, `entrypoint:true|HTTP`, `covered:false`.
+  Caller counts computed from the spec set (reverse of `calls`).
+- The moat angle: contract predicates no vector index can answer
+  ("effects:net lexical:false callers:>3").
+
+**B. Cycles + layers in `cgir lint`** (existing `[[rule]]` config).
+
+- `forbid-cycle = true` (+ `in` scope glob): Tarjan SCCs over the spec-level
+  call graph within scope; every SCC of size ≥2 is a violation naming the
+  cycle. Self-recursion (size-1) is NOT a violation — recursion is normal.
+- `layers = ["app.api.*", "app.core.*", "app.db.*"]` (top→bottom): a
+  component in a lower layer calling one in a higher layer is a violation
+  (dependencies must point down; same-layer calls fine; unmatched
+  components ignored).
+- Neutralizes the import-linter/ArchUnit objection using graph data we
+  already have — and our violations can say the edge *also* carries `net`.
+
 ## Not built — next up, in value order
 
 1. **Per-component incremental analysis** (the latency lever). Watch/hook
