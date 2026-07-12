@@ -187,3 +187,47 @@ def test_go_pins_extracted(tmp_path: Path) -> None:
     )
     specs = _scan(tmp_path)
     assert specs["p.Add"].pins == ["pure"]
+
+
+def _cross_pkg_repo(tmp_path: Path, gomod: bool = True) -> Path:
+    if gomod:
+        (tmp_path / "go.mod").write_text("module example.com/myapp\n\ngo 1.22\n")
+    store = tmp_path / "internal" / "store"
+    store.mkdir(parents=True)
+    (store / "keys.go").write_text(
+        'package store\n\nimport "fmt"\n\nfunc SaveKey(k string) {\n\tfmt.Println(k)\n}\n'
+    )
+    api = tmp_path / "api"
+    api.mkdir()
+    (api / "handler.go").write_text(
+        "package api\n\n"
+        'import "example.com/myapp/internal/store"\n\n'
+        "func Handle(k string) {\n\tstore.SaveKey(k)\n}\n"
+    )
+    return tmp_path
+
+
+def test_cross_package_call_resolves_via_gomod(tmp_path: Path) -> None:
+    """import "example.com/myapp/internal/store" resolves via the go.mod
+    module directive: strip the prefix, bind to the package directory."""
+    repo = _cross_pkg_repo(tmp_path)
+    graph = TreeSitterSource().ingest(repo)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, repo)
+    callees = {e.dst for e in graph.out_edges("func:api.handler.Handle", EdgeKind.CALLS)}
+    assert "func:internal.store.keys.SaveKey" in callees
+
+
+def test_cross_package_taints_caller(tmp_path: Path) -> None:
+    repo = _cross_pkg_repo(tmp_path)
+    specs = _scan(repo)
+    assert "calls_effectful" in specs["api.handler.Handle"].effects
+
+
+def test_cross_package_without_gomod_falls_back_to_suffix(tmp_path: Path) -> None:
+    repo = _cross_pkg_repo(tmp_path, gomod=False)
+    graph = TreeSitterSource().ingest(repo)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, repo)
+    callees = {e.dst for e in graph.out_edges("func:api.handler.Handle", EdgeKind.CALLS)}
+    assert "func:internal.store.keys.SaveKey" in callees

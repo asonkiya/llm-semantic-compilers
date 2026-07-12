@@ -42,16 +42,61 @@ def build_symbol_tables(graph: RepoGraph) -> dict[str, SymbolTable]:
         tables[module.id] = table
 
     _merge_go_packages(graph, tables)
+    go_dirs = _go_package_dirs(graph)
+    go_module_prefix = _go_module_prefix(graph)
 
     for module in graph.nodes(NodeKind.Module):
         table = tables[module.id]
+        is_go = module.attrs.get("language") == "go"
         for child in graph.children(module.id, NodeKind.Import):
             target = str(child.attrs.get("target") or child.name)
             alias = child.attrs.get("alias")
             local = alias if isinstance(alias, str) else target.rsplit(".", 1)[-1]
-            table.bindings[local] = _resolve_target(qualname_index, target)
+            resolved = _resolve_go_package(target, go_dirs, go_module_prefix) if is_go else None
+            table.bindings[local] = resolved or _resolve_target(qualname_index, target)
 
     return tables
+
+
+def _go_module_prefix(graph: RepoGraph) -> str | None:
+    """The go.mod ``module`` directive (dotted), stashed on the Repository node."""
+    for repo in graph.nodes(NodeKind.Repository):
+        gomod = repo.attrs.get("go_module")
+        if isinstance(gomod, str) and gomod:
+            return gomod.replace("/", ".")
+    return None
+
+
+def _go_package_dirs(graph: RepoGraph) -> dict[str, list[str]]:
+    """Dotted package directory -> module node ids of the go files in it."""
+    dirs: dict[str, list[str]] = {}
+    for module in graph.nodes(NodeKind.Module):
+        if module.attrs.get("language") != "go" or not module.path:
+            continue
+        directory = module.path.rsplit("/", 1)[0] if "/" in module.path else ""
+        dirs.setdefault(directory.replace("/", "."), []).append(module.id)
+    return {d: sorted(ids) for d, ids in dirs.items()}
+
+
+def _resolve_go_package(
+    target: str, go_dirs: dict[str, list[str]], module_prefix: str | None
+) -> str | None:
+    """Resolve a Go import path to a package directory's module.
+
+    ``import "example.com/myapp/internal/store"`` → strip the go.mod module
+    prefix → ``internal.store`` → bind to a module in that directory (the
+    directory merge exposes every package member through it). Without a
+    go.mod, fall back to a *unique* directory-suffix match — ambiguity stays
+    unresolved rather than guessed.
+    """
+    if module_prefix and target.startswith(module_prefix + "."):
+        rel = target[len(module_prefix) + 1 :]
+        modules = go_dirs.get(rel)
+        return modules[0] if modules else None
+    matches = [d for d in go_dirs if d and (target == d or target.endswith("." + d))]
+    if len(matches) == 1:
+        return go_dirs[matches[0]][0]
+    return None
 
 
 def _merge_go_packages(graph: RepoGraph, tables: dict[str, SymbolTable]) -> None:

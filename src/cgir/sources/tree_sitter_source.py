@@ -52,6 +52,19 @@ DEFAULT_IGNORE_DIRS: frozenset[str] = frozenset(
 )
 
 
+def _repo_attrs(repo_path: Path) -> dict[str, str]:
+    """Repo-level facts adapters/analyses need: the go.mod module path."""
+    attrs: dict[str, str] = {}
+    gomod = repo_path / "go.mod"
+    if gomod.exists():
+        for line in gomod.read_text(errors="replace").splitlines():
+            line = line.strip()
+            if line.startswith("module "):
+                attrs["go_module"] = line.split(None, 1)[1].strip()
+                break
+    return attrs
+
+
 class TreeSitterSource(GraphSource):
     def __init__(
         self,
@@ -73,7 +86,13 @@ class TreeSitterSource(GraphSource):
         graph = RepoGraph()
         repo_id = f"repo:{repo_path.name}"
         graph.add_node(
-            Node(id=repo_id, kind=NodeKind.Repository, name=repo_path.name, path=str(repo_path))
+            Node(
+                id=repo_id,
+                kind=NodeKind.Repository,
+                name=repo_path.name,
+                path=str(repo_path),
+                attrs=_repo_attrs(repo_path),
+            )
         )
         files: list[Path] = []
         for ext in self._extensions():
