@@ -66,3 +66,44 @@ closure, symbol-table resolution, slicing, and all seven product surfaces.
 Register it in `cgir/languages/__init__.py:ADAPTERS`. The effect *taxonomy*
 (`io`/`net`/`fs`/`db`/`nondeterm`/`raise`) is language-neutral and fixed in
 `analyses/effects.py`; the adapter only decides which calls map to which tag.
+
+## Packaging a language plugin
+
+Adapters are discovered via the ``cgir.languages`` entry-point group — no
+fork needed. A minimal plugin package:
+
+```toml
+# pyproject.toml of cgir-rust
+[project]
+name = "cgir-rust"
+dependencies = ["codegraph-ir", "tree-sitter-rust"]
+
+[project.entry-points."cgir.languages"]
+rust = "cgir_rust:RustAdapter"
+```
+
+```python
+# cgir_rust/__init__.py
+from cgir.languages.base import ADAPTER_API_VERSION, LanguageAdapter
+
+class RustAdapter(LanguageAdapter):
+    name = "rust"
+    file_extensions = (".rs",)
+    api_version = ADAPTER_API_VERSION
+    # implement: parse, locate_function, direct_effects, call_sites,
+    # function_body, block_statements, describe_statement,
+    # module_declarations — see GoAdapter for the most recent template.
+    # Optional (defaults provided): direct_effects_confidence,
+    # global_declared_names.
+```
+
+`pip install cgir-rust` and `cgir languages` shows it. Safety rules:
+builtins win extension conflicts; a plugin that fails to load, isn't a
+`LanguageAdapter`, or reuses a language name is skipped with a warning —
+a broken plugin never crashes cgir. An `api_version` mismatch warns but
+loads (new adapter methods get base-class defaults, so older plugins
+usually keep working).
+
+Start from `src/cgir/languages/go.py` — the newest adapter and the best
+template — and mirror `tests/unit/test_go_adapter.py` for the expected
+pipeline-level test coverage.

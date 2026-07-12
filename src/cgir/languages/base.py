@@ -25,6 +25,12 @@ from dataclasses import dataclass, field
 
 from tree_sitter import Node as TSNode
 
+# Bump when the LanguageAdapter surface changes incompatibly. New optional
+# methods get base-class defaults (see direct_effects_confidence,
+# global_declared_names), so most evolution does NOT require a bump —
+# plugins declaring an older version load with a warning.
+ADAPTER_API_VERSION = 1
+
 _PIN_RE = re.compile(r"cgir:\s*([a-z0-9_,\- ]+)", re.IGNORECASE)
 
 

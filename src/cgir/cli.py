@@ -687,6 +687,21 @@ def mcp(
 
 
 @app.command()
+def languages() -> None:
+    """List registered language adapters (builtins + installed plugins)."""
+    from cgir.languages.base import ADAPTER_API_VERSION
+    from cgir.languages.registry import _BUILTINS, _PLUGIN_WARNINGS, ADAPTERS
+
+    builtin_names = {a.name for a in _BUILTINS}
+    typer.echo(f"adapter api version: {ADAPTER_API_VERSION}")
+    for name, adapter in sorted(ADAPTERS.items()):
+        origin = "builtin" if name in builtin_names else "plugin"
+        typer.echo(f"  {name:14} {', '.join(adapter.file_extensions):18} [{origin}]")
+    for note in _PLUGIN_WARNINGS:
+        typer.echo(f"  ! {note}")
+
+
+@app.command()
 def lsp() -> None:
     """Serve live contract diagnostics over LSP (stdio; requires cgir[lsp])."""
     from cgir.api.lsp_server import create_server
