@@ -64,6 +64,27 @@ agent-PR case study.
 Setup guide for agents (MCP config + CLAUDE.md snippet): [`docs/agents.md`](./docs/agents.md).
 Or via the [pre-commit framework](https://pre-commit.com): hook id `cgir-contract-check`.
 
+## How it compares (honestly)
+
+| | **CGIR** | CodeGraph-style MCP graphs | Greptile / CodeRabbit | import-linter / ArchUnit | oasdiff / Pact |
+|---|---|---|---|---|---|
+| Effects & purity contracts per function | ✅ | ❌ | ❌ LLM judgment | ❌ | ❌ |
+| Invariants declared in source (`# cgir: pure`) & enforced | ✅ | ❌ | ❌ | imports only | API boundary only |
+| Deterministic (same input → same verdict, zero LLM) | ✅ | ✅ structure only | ❌ | ✅ | ✅ |
+| Catches "service silently stopped calling the backend" | ✅ | ❌ | sometimes | ❌ | at spec boundaries |
+| Blast radius + coverage-grounded test selection | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Agent context over MCP | ✅ contract packs | ✅ broader retrieval | ❌ | ❌ | ❌ |
+| Finds logic bugs | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Languages | 3 (Py/TS/Go) | 30+ | most | per-tool | spec-level |
+| Cycle / layer rules | ✅ | ❌ | ❌ | ✅ mature | ❌ |
+| Cost | free, local | mostly free | ~$24–30/user/mo | free | free |
+
+Where CGIR loses, we say so: it does **not** find logic bugs (a subtly wrong
+algorithm with unchanged effects passes the gate — pair it with tests or a
+reviewer), supports 3 languages not 38, and its effect detection is static
+analysis with [documented, measured limits](./docs/gate-noise.md) — every
+tag carries a confidence tier so you know which claims are verified.
+
 ## Docs
 
 - [`docs/strategy.md`](./docs/strategy.md) — positioning: the deterministic contract layer
