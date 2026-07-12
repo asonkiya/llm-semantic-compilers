@@ -95,9 +95,12 @@ module = ["tree_sitter.*", "tree_sitter_python.*", "networkx.*", "anthropic.*", 
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# FastMCP/pygls are lazily imported (optional extras), so their decorators are Any.
+# FastMCP/pygls are lazily imported (optional extras), so their decorators are
+# Any — and the pygls 1.x-fallback ignore is only "used" when pygls is
+# installed, so unused-ignore warnings are off for these modules.
 module = ["cgir.api.mcp_server", "cgir.api.lsp_server"]
 disallow_untyped_decorators = false
+warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
