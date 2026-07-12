@@ -81,3 +81,75 @@ def test_scope_glob_limits_rule() -> None:
     specs = [_spec("other.mod", effects=["net"])]
     rules = [{"name": "pure-core", "in": "aspen.zones.*", "forbid-effect": ["net"]}]
     assert lint(specs, rules) == []
+
+
+# --- forbid-cycle (market: import-linter/ArchUnit parity, over CALLS) ------------
+
+
+def test_cycle_detected() -> None:
+    specs = [
+        _spec("m.a", calls=["m.b"]),
+        _spec("m.b", calls=["m.c"]),
+        _spec("m.c", calls=["m.a"]),
+    ]
+    found = lint(specs, [{"name": "no cycles", "forbid-cycle": True}])
+    assert len(found) == 1
+    assert "m.a" in found[0].detail and "m.c" in found[0].detail
+
+
+def test_self_recursion_is_not_a_cycle() -> None:
+    specs = [_spec("m.fact", calls=["m.fact"])]
+    assert lint(specs, [{"name": "no cycles", "forbid-cycle": True}]) == []
+
+
+def test_cycle_scope_respected() -> None:
+    specs = [
+        _spec("app.a", calls=["app.b"]),
+        _spec("app.b", calls=["app.a"]),
+        _spec("other.x", calls=["other.y"]),
+        _spec("other.y", calls=["other.x"]),
+    ]
+    found = lint(specs, [{"name": "core acyclic", "in": "app.*", "forbid-cycle": True}])
+    assert len(found) == 1
+    assert "app.a" in found[0].detail
+
+
+def test_no_cycle_clean() -> None:
+    specs = [_spec("m.a", calls=["m.b"]), _spec("m.b")]
+    assert lint(specs, [{"name": "no cycles", "forbid-cycle": True}]) == []
+
+
+# --- layers (dependencies point down; same-layer fine) ---------------------------
+
+
+LAYER_RULE = {"name": "layered", "layers": ["app.api.*", "app.core.*", "app.db.*"]}
+
+
+def test_lower_layer_calling_higher_fires() -> None:
+    specs = [
+        _spec("app.api.route", calls=["app.core.logic"]),
+        _spec("app.core.logic", calls=["app.db.save"]),
+        _spec("app.db.save", calls=["app.api.route"]),  # db -> api: violation
+    ]
+    found = lint(specs, [LAYER_RULE])
+    assert len(found) == 1
+    assert "app.db.save" in found[0].component
+    assert "app.api.route" in found[0].detail
+
+
+def test_downward_and_same_layer_calls_pass() -> None:
+    specs = [
+        _spec("app.api.route", calls=["app.db.save", "app.api.helper"]),  # skip layers ok
+        _spec("app.api.helper"),
+        _spec("app.db.save"),
+    ]
+    assert lint(specs, [LAYER_RULE]) == []
+
+
+def test_unmatched_components_ignored_by_layers() -> None:
+    specs = [
+        _spec("app.db.save", calls=["vendor.util.log"]),
+        _spec("vendor.util.log", calls=["app.api.route"]),  # not in any layer
+        _spec("app.api.route"),
+    ]
+    assert lint(specs, [LAYER_RULE]) == []

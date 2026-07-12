@@ -58,3 +58,23 @@ component id (`aspen.zones.*` matches `aspen.zones.contains.point_in_polygon`).
 - **Kind-aware**: "handlers must be orchestrators, not effect adapters."
 - **Call-target-aware**: layer boundaries over *resolved calls*, catching
   a cross-layer call even when the import is indirect.
+
+## Cycles and layers
+
+```toml
+[[rule]]
+name = "core is acyclic"
+in = "app.*"
+forbid-cycle = true          # Tarjan SCCs over resolved CALLS; self-recursion OK
+
+[[rule]]
+name = "layered architecture"
+layers = ["app.api.*", "app.core.*", "app.db.*"]   # top -> bottom
+```
+
+`forbid-cycle` fires once per strongly-connected component (size >= 2),
+naming the cycle. `layers` requires dependencies to point *downward*:
+a `db` component calling an `api` component is a violation; same-layer and
+layer-skipping downward calls are fine; components matching no layer are
+ignored. Unlike import linters, these run over the resolved *call* graph —
+and the same index tells you whether the violating edge also carries `net`.

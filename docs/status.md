@@ -75,6 +75,8 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Confidence tiers (`lexical_effects`; gates fire high-confidence by default, `:any` opts in; pack marks `tag?`) | done | `analyses/effects.py:classify_with_confidence` |
 | Global/nonlocal rebinding as mutation (`global_declared_names` hook) | done | `languages/base.py`, `analyses/cfg.py` |
 | pre-commit framework hook (`cgir-contract-check`) + agents guide | done | `.pre-commit-hooks.yaml`, `docs/agents.md` |
+| Ranked/structured search (`cgir search`, MCP `search`): term ranking + contract predicates (kind/effects/lexical/callers/pins/entrypoint/lang/covered) | done | `src/cgir/report/search.py` |
+| `forbid-cycle` (Tarjan SCCs) + `layers` rules in lint | done | `report/lint.py:_cycle_violations`, `_layer_violations` |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware, type closure + docstrings + raises) | done | `src/cgir/report/pack.py` |
 | Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |
@@ -94,7 +96,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 463 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
+`pytest -q` runs 481 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
 
 | File | Covers |
 |---|---|

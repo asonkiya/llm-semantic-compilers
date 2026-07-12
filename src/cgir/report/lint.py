@@ -72,6 +72,96 @@ def lint(specs: list[ComponentSpec], rules: list[dict[str, Any]]) -> list[LintVi
                         violations.append(
                             LintViolation(name, spec.id, f"calls forbidden target: {callee}")
                         )
+        if rule.get("forbid-cycle"):
+            violations.extend(_cycle_violations(name, matched))
+        if "layers" in rule:
+            layer_globs = [str(g) for g in rule["layers"]]
+            violations.extend(_layer_violations(name, specs, layer_globs))
+    return violations
+
+
+def _cycle_violations(name: str, matched: list[ComponentSpec]) -> list[LintViolation]:
+    """Call-graph cycles among the matched components (Tarjan SCCs).
+
+    Self-recursion (a component calling itself) is normal, not a cycle —
+    only strongly connected components of size >=2 fire.
+    """
+    in_scope = {s.id for s in matched}
+    adj = {s.id: [c for c in s.calls if c in in_scope] for s in matched}
+
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on_stack: set[str] = set()
+    stack: list[str] = []
+    counter = [0]
+    sccs: list[list[str]] = []
+
+    def strongconnect(v: str) -> None:
+        index[v] = low[v] = counter[0]
+        counter[0] += 1
+        stack.append(v)
+        on_stack.add(v)
+        for w in adj.get(v, []):
+            if w not in index:
+                strongconnect(w)
+                low[v] = min(low[v], low[w])
+            elif w in on_stack:
+                low[v] = min(low[v], index[w])
+        if low[v] == index[v]:
+            component: list[str] = []
+            while True:
+                w = stack.pop()
+                on_stack.discard(w)
+                component.append(w)
+                if w == v:
+                    break
+            if len(component) > 1:
+                sccs.append(sorted(component))
+
+    for node in sorted(adj):
+        if node not in index:
+            strongconnect(node)
+
+    return [
+        LintViolation(name, scc[0], f"call cycle: {' -> '.join(scc)} -> {scc[0]}")
+        for scc in sorted(sccs)
+    ]
+
+
+def _layer_violations(
+    name: str, specs: list[ComponentSpec], layer_globs: list[str]
+) -> list[LintViolation]:
+    """Dependencies must point downward through the ordered layers.
+
+    A component in a lower layer (higher index) calling one in a strictly
+    higher layer is a violation; same-layer and downward (including
+    layer-skipping) calls are fine. Components matching no layer are
+    ignored — layers constrain only what they name.
+    """
+
+    def layer_of(spec_id: str) -> int | None:
+        for i, glob in enumerate(layer_globs):
+            if fnmatch(spec_id, glob):
+                return i
+        return None
+
+    layer_index = {s.id: layer_of(s.id) for s in specs}
+    violations: list[LintViolation] = []
+    for spec in specs:
+        src_layer = layer_index.get(spec.id)
+        if src_layer is None:
+            continue
+        for callee in spec.calls:
+            dst_layer = layer_index.get(callee)
+            if dst_layer is not None and dst_layer < src_layer:
+                violations.append(
+                    LintViolation(
+                        name,
+                        spec.id,
+                        f"layer {layer_globs[src_layer]!r} calls up into "
+                        f"{layer_globs[dst_layer]!r}: {callee}",
+                    )
+                )
     return violations
 
 

@@ -197,6 +197,14 @@ _STARTER_CONFIG = """\
 # name = "core stays pure"
 # in = "app.core.*"
 # forbid-effect = ["net", "db"]
+#
+# [[rule]]
+# name = "no call cycles"
+# forbid-cycle = true
+#
+# [[rule]]
+# name = "layered"
+# layers = ["app.api.*", "app.core.*", "app.db.*"]
 """
 
 _NEXT_STEPS = """\
@@ -273,6 +281,19 @@ def watch(
         run_watch(repo, index_dir, interval=interval, once=once, emit=typer.echo)
     except KeyboardInterrupt:
         typer.echo("\nstopped.")
+
+
+@app.command()
+def search(
+    query: Annotated[
+        str, typer.Argument(help="Free terms + predicates (kind:pure effects:net callers:>3 ...)")
+    ],
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+) -> None:
+    """Ranked component search over the index (contract predicates included)."""
+    from cgir.report.search import render_search
+
+    typer.echo(render_search(_load_specs(index_dir), query), nl=False)
 
 
 @app.command()

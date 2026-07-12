@@ -73,19 +73,12 @@ def tool_pack(index_dir: Path, component_id: str, budget: int = 4000) -> str:
 
 
 def tool_search(index_dir: Path, query: str) -> str:
-    """Components whose id, entrypoint, or effects match a substring."""
-    needle = query.lower()
-    hits: list[str] = []
-    for spec in read_specs(index_dir):
-        haystack = " ".join([spec.id, spec.entrypoint or "", " ".join(spec.effects)]).lower()
-        if needle in haystack:
-            line = f"{spec.id}  [{spec.kind.value}]"
-            if spec.entrypoint:
-                line += f"  ({spec.entrypoint})"
-            hits.append(line)
-    if not hits:
-        return f"no components match {query!r}"
-    return "\n".join(hits) + "\n"
+    """Ranked search: free terms + contract predicates (kind:pure,
+    effects:net, lexical:false, callers:>3, pins:pure, entrypoint:HTTP,
+    lang:go, covered:false)."""
+    from cgir.report.search import render_search
+
+    return render_search(read_specs(index_dir), query)
 
 
 def tool_entrypoints(index_dir: Path) -> str:
@@ -156,7 +149,10 @@ def create_server(index_dir: Path) -> Any:
 
     @server.tool()
     def search(query: str) -> str:
-        """Find components by id / entrypoint / effect substring."""
+        """Ranked component search. Free terms + contract predicates:
+        kind:pure | effects:net | effects:none | lexical:true/false |
+        callers:>3 | calls:>5 | pins:pure | pinned:true |
+        entrypoint:true/HTTP | lang:python/typescript/go | covered:false."""
         return tool_search(index_dir, query)
 
     @server.tool()

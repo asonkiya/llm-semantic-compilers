@@ -33,8 +33,11 @@ Paste into the repo's agent instructions:
 This repo has a semantic contract index served over MCP (server: `cgir`).
 Prefer it over grepping:
 
-- **Finding code**: `search(query)` — by name, entrypoint, or effect
-  ("net" finds everything that touches the network).
+- **Finding code**: `search(query)` — ranked free terms + contract
+  predicates: `kind:pure`, `effects:net`, `effects:none`, `lexical:false`,
+  `callers:>3`, `pins:pure`, `entrypoint:HTTP`, `lang:go`, `covered:false`.
+  E.g. "effects:net lexical:false callers:>2" = verified network code with
+  real fan-in — queries grep and vector search cannot answer.
 - **Loading context to edit a component**: `pack(component_id)` — the
   minimal contract bundle (signature, effects, pins, callee interfaces,
   linked tests). Do NOT read whole files for context first.
