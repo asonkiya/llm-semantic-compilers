@@ -1,0 +1,19 @@
+# CGIR contract seatbelt for the pre-commit framework (https://pre-commit.com).
+# In your repo's .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/asonkiya/llm-semantic-compilers
+#       rev: v0.2.1
+#       hooks:
+#         - id: cgir-contract-check
+#
+- id: cgir-contract-check
+  name: cgir contract seatbelt
+  description: >-
+    Block commits that alter component contracts: effect gain/loss on
+    net/fs/db, pin violations (cgir: pure / stable-signature / frozen),
+    and referenced type-shape drift.
+  entry: cgir hook run
+  language: python
+  pass_filenames: false
+  types_or: [python, ts, tsx, go]

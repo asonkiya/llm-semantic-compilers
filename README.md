@@ -60,6 +60,9 @@ change touches, and `verify` / `impact_of_change` to contract-check its own
 edit before proposing it. See [`examples/`](./examples) for a worked
 agent-PR case study.
 
+Setup guide for agents (MCP config + CLAUDE.md snippet): [`docs/agents.md`](./docs/agents.md).
+Or via the [pre-commit framework](https://pre-commit.com): hook id `cgir-contract-check`.
+
 ## Docs
 
 - [`docs/strategy.md`](./docs/strategy.md) — positioning: the deterministic contract layer

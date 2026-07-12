@@ -146,7 +146,10 @@ def render_hook(result: HookResult) -> str:
         lines.append("")
         lines.append(f"  ❌ blocked — {len(result.violations)} drift violation(s):")
         lines.extend(f"    ! {v}" for v in result.violations)
-        lines.append("  (bypass once with `git commit --no-verify`)")
+        lines.append("  (fix and re-stage — note the blocked change is still staged; discard it")
+        lines.append(
+            "   with `git restore -S -W <file>` — or bypass once with `git commit --no-verify`)"
+        )
     else:
         lines.append("  ✅ no blocking contract drift")
     return "\n".join(lines) + "\n"
