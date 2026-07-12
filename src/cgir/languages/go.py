@@ -82,19 +82,24 @@ _FUNC_TYPES = frozenset({"function_declaration", "method_declaration"})
 
 
 def _classify_call(dotted: str) -> str | None:
+    hit = _classify_call_conf(dotted)
+    return hit[0] if hit else None
+
+
+def _classify_call_conf(dotted: str) -> tuple[str, str] | None:
     if dotted in _FS_NOT:
         return None
     if dotted in _IO_EXACT or dotted.startswith(_IO_PREFIXES):
-        return "io"
+        return ("io", "high")
     if dotted.startswith(_NET_PREFIXES):
-        return "net"
+        return ("net", "high")
     if dotted.startswith(_FS_PREFIXES):
-        return "fs"
+        return ("fs", "high")
     if dotted in _NONDETERM_EXACT or dotted.startswith(_NONDETERM_PREFIXES):
-        return "nondeterm"
+        return ("nondeterm", "high")
     parts = dotted.split(".")
     if len(parts) >= 2 and parts[-2].lower() in _DB_RECEIVERS and parts[-1] in _DB_METHODS:
-        return "db"
+        return ("db", "lexical")
     return None
 
 
@@ -126,7 +131,12 @@ class GoAdapter(LanguageAdapter):
     # --- effects ---------------------------------------------------------------
 
     def direct_effects(self, func_node: TSNode, source: bytes, aliases: dict[str, str]) -> set[str]:
-        tags: set[str] = set()
+        return set(self.direct_effects_confidence(func_node, source, aliases))
+
+    def direct_effects_confidence(
+        self, func_node: TSNode, source: bytes, aliases: dict[str, str]
+    ) -> dict[str, str]:
+        tags: dict[str, str] = {}
         body = func_node.child_by_field_name("body")
         if body is None:
             return tags
@@ -138,11 +148,11 @@ class GoAdapter(LanguageAdapter):
                 if fn is not None:
                     dotted = _node_text(fn)
                     if fn.type == "identifier" and dotted == "panic":
-                        tags.add("raise")
+                        tags.setdefault("raise", "high")
                     else:
-                        tag = _classify_call(dotted)
-                        if tag is not None:
-                            tags.add(tag)
+                        hit = _classify_call_conf(dotted)
+                        if hit is not None and tags.get(hit[0]) != "high":
+                            tags[hit[0]] = hit[1]
             stack.extend(node.children)
         return tags
 

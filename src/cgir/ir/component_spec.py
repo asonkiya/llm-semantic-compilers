@@ -42,6 +42,7 @@ COMPONENT_SPEC_SCHEMA: dict[str, Any] = {
         "writes": {"type": "array", "items": {"type": "string"}},
         "purity": {"type": "number", "minimum": 0, "maximum": 1},
         "pins": {"type": "array", "items": {"type": "string"}},
+        "lexical_effects": {"type": "array", "items": {"type": "string"}},
         "algorithm": {"type": "array", "items": {"type": "string"}},
         "trace": {"type": "array", "items": {"type": "string"}},
     },
@@ -77,6 +78,8 @@ class ComponentSpec:
     writes: list[str] = field(default_factory=list)
     purity: float | None = None
     pins: list[str] = field(default_factory=list)
+    # effects backed only by lexical (suffix/receiver-name) evidence
+    lexical_effects: list[str] = field(default_factory=list)
     algorithm: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:

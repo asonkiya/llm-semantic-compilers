@@ -88,7 +88,15 @@ the `io` / `nondeterm` effect tags (a `print`/timestamp shouldn't fail CI).
    Trade-off (documented in `diff.violations`): a true removal paired with a
    new unrelated effectful call is masked — the loss stays visible in the
    diff report, it just doesn't fail the build.
-2. **Import-resolution stability** — kind/purity flipping on stub-vs-real
+2. **Confidence tiers** *(landed 0.3.0)* — every effect tag now carries
+   provenance: `high` (exact/prefix table match) vs `lexical` (bare-suffix /
+   receiver-name heuristics — `self.now()`, `db.query()`). Gate rules fire
+   on high-confidence tags by default; `:any` opts in
+   (`effect-gain:db:any`). Measured on camera-tracking: fs evidence is 89%
+   lexical, and 48% of the `calls_effectful` taint tree rests on lexical
+   evidence — all still *reported*, no longer build-failing. Lexical means
+   unverified, not wrong.
+3. **Import-resolution stability** — kind/purity flipping on stub-vs-real
    imports is the dominant `kind-change`/`purity-drop` noise source. A
    scan run compares two checkouts in one environment (CI does this), so it
    only bites when the stub *source itself* changes — but it's worth

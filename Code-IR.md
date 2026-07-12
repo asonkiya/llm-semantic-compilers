@@ -60,7 +60,9 @@ H --> I[LLM regenerate / test / trace]
 "trace":{"type":"array","items":{"type":"string"}}}}
 ```
 
-`pins` are developer-declared invariants extracted from `cgir:` comment
+`lexical_effects` marks the subset of `effects` backed only by lexical
+(suffix/receiver-name) evidence — lower confidence, reported but not
+build-failing by default. `pins` are developer-declared invariants extracted from `cgir:` comment
 pragmas (`pure`, `no-<tag>`, `stable-signature`, `frozen`): state pins hold on
 every scan; change pins hold across scan pairs and are always enforced.
 

@@ -137,6 +137,7 @@ def build_pack(
             "inputs": target.inputs,
             "outputs": target.outputs,
             "effects": target.effects,
+            "lexical_effects": target.lexical_effects,
             "purity": target.purity,
             "entrypoint": target.entrypoint,
             "doc": target.doc,
@@ -188,7 +189,11 @@ def render_pack(pack: dict[str, Any]) -> str:
     if target["entrypoint"]:
         lines.append(f"Entrypoint: **{target['entrypoint']}**")
     if target["effects"]:
-        lines.append(f"Effects: {', '.join(target['effects'])}")
+        lexical = set(target.get("lexical_effects") or [])
+        rendered = [t + "?" if t in lexical else t for t in target["effects"]]
+        lines.append(f"Effects: {', '.join(rendered)}")
+        if lexical:
+            lines.append("  (? = lexically inferred — lower confidence)")
     if target["outputs"]:
         lines.append(f"Returns: {', '.join(target['outputs'])}")
     if target.get("raises"):

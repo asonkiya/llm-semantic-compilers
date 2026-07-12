@@ -206,7 +206,17 @@ class TypeScriptAdapter(LanguageAdapter):
     # --- effects -------------------------------------------------------------
 
     def direct_effects(self, func_node: TSNode, source: bytes, aliases: dict[str, str]) -> set[str]:
-        tags: set[str] = set()
+        return set(self.direct_effects_confidence(func_node, source, aliases))
+
+    def direct_effects_confidence(
+        self, func_node: TSNode, source: bytes, aliases: dict[str, str]
+    ) -> dict[str, str]:
+        tags: dict[str, str] = {}
+
+        def add(tag: str, conf: str) -> None:
+            if tags.get(tag) != "high":
+                tags[tag] = conf
+
         body = self.function_body(func_node)
         if body is None:
             return tags
@@ -214,7 +224,7 @@ class TypeScriptAdapter(LanguageAdapter):
         while stack:
             node = stack.pop()
             if node.type == "throw_statement":
-                tags.add("raise")
+                add("raise", "high")
             elif node.type == "call_expression":
                 fn = node.child_by_field_name("function")
                 if fn is not None:
@@ -224,9 +234,9 @@ class TypeScriptAdapter(LanguageAdapter):
                         dotted = f"{aliases[head]}.{rest}"
                     elif dotted in aliases:
                         dotted = aliases[dotted]
-                    tag = _classify_call(dotted)
-                    if tag is not None:
-                        tags.add(tag)
+                    hit = _classify_call_conf(dotted)
+                    if hit is not None:
+                        add(*hit)
             stack.extend(node.children)
         return tags
 
@@ -690,21 +700,28 @@ def _resolve_specifier(specifier: str, rel_path: str) -> str:
 
 
 def _classify_call(dotted: str) -> str | None:
-    if any(ch in dotted for ch in "()[] \n"):
-        return None
+    hit = _classify_call_conf(dotted)
+    return hit[0] if hit else None
+
+
+def _classify_call_conf(dotted: str) -> tuple[str, str] | None:
+    """(tag, confidence): known-client receivers (this.http.get) are high;
+    generic db-receiver gating and bare fs suffixes are lexical."""
     parts = dotted.split(".")
-    if len(parts) >= 2 and parts[-1] in _DB_METHODS and parts[-2] in _DB_RECEIVERS:
-        return "db"
     if len(parts) >= 2 and parts[-1] in _HTTP_VERBS and parts[-2] in _NET_RECEIVERS:
-        return "net"
+        return ("net", "high")
     if dotted.startswith(_IO_PREFIXES):
-        return "io"
+        return ("io", "high")
     if dotted in _NET_EXACT or dotted.startswith(_NET_PREFIXES):
-        return "net"
-    if dotted.startswith(_FS_PREFIXES) or dotted.endswith(_FS_METHOD_SUFFIXES):
-        return "fs"
+        return ("net", "high")
+    if dotted.startswith(_FS_PREFIXES):
+        return ("fs", "high")
     if dotted in _NONDETERM_EXACT:
-        return "nondeterm"
+        return ("nondeterm", "high")
+    if dotted.endswith(_FS_METHOD_SUFFIXES):
+        return ("fs", "lexical")
+    if len(parts) >= 2 and parts[-1] in _DB_METHODS and parts[-2] in _DB_RECEIVERS:
+        return ("db", "lexical")
     return None
 
 

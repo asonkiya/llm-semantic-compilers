@@ -264,6 +264,14 @@ class LanguageAdapter(ABC):
     def describe_statement(self, node: TSNode, source: bytes) -> StatementDesc:
         """Classify one statement and extract its parts (see descriptors)."""
 
+    def direct_effects_confidence(
+        self, func_node: TSNode, source: bytes, aliases: dict[str, str]
+    ) -> dict[str, str]:
+        """Effect tags with provenance: ``high`` (exact/prefix table match)
+        vs ``lexical`` (suffix / receiver-name heuristics). Default: every
+        tag from :meth:`direct_effects` is high."""
+        return dict.fromkeys(self.direct_effects(func_node, source, aliases), "high")
+
     def global_declared_names(self, func_node: TSNode, source: bytes) -> set[str]:
         """Names this function declares as outer-scope (`global`/`nonlocal`).
 

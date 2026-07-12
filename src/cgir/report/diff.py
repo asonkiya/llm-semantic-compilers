@@ -35,7 +35,18 @@ def compute_diff(
     for spec_id in sorted(old.keys() & new.keys()):
         fields = _field_changes(old[spec_id], new[spec_id])
         if fields:
-            changed.append({"id": spec_id, "fields": fields})
+            changed.append(
+                {
+                    "id": spec_id,
+                    "fields": fields,
+                    # confidence metadata (not a contract field): lets gate
+                    # rules ignore lexically-inferred tags by default.
+                    "lexical": {
+                        "old": list(old[spec_id].lexical_effects),
+                        "new": list(new[spec_id].lexical_effects),
+                    },
+                }
+            )
 
     return {
         "added": sorted(new.keys() - old.keys()),
@@ -126,17 +137,26 @@ def violations(diff: dict[str, Any], rules: list[str]) -> list[str]:
     for change in diff["changed"]:
         fields = change["fields"]
         spec_id = change["id"]
+        lexical = change.get("lexical", {"old": [], "new": []})
         for rule in rules:
             if rule.startswith("effect-gain"):
+                rule, include_lexical = _strip_any(rule)
                 _, _, wanted = rule.partition(":")
                 gained = _gained_effects(fields)
+                if not include_lexical:
+                    # a tag backed only by lexical evidence (suffix/receiver
+                    # heuristics) is low-confidence — report, don't fail.
+                    gained = [t for t in gained if t not in lexical["new"]]
                 if wanted:
                     gained = [t for t in gained if t == wanted]
                 if gained:
                     found.append(f"{spec_id}: gained effect(s) {', '.join(gained)}")
             elif rule.startswith("effect-loss"):
+                rule, include_lexical = _strip_any(rule)
                 _, _, wanted = rule.partition(":")
                 lost = _lost_effects(fields)
+                if not include_lexical:
+                    lost = [t for t in lost if t not in lexical["old"]]
                 if wanted:
                     lost = [t for t in lost if t == wanted]
                 # Indirection, not removal: if the component *simultaneously*
@@ -184,6 +204,14 @@ def violations(diff: dict[str, Any], rules: list[str]) -> list[str]:
                     f"referenced by {', '.join(t['referenced_by'])}"
                 )
     return found
+
+
+def _strip_any(rule: str) -> tuple[str, bool]:
+    """``effect-gain:net:any`` → (``effect-gain:net``, True): opt into
+    firing on lexically-inferred tags too."""
+    if rule.endswith(":any"):
+        return rule[: -len(":any")], True
+    return rule, False
 
 
 def _gained_effects(fields: dict[str, dict[str, Any]]) -> list[str]:

@@ -111,6 +111,15 @@ _NONDETERM_EXACT: frozenset[str] = frozenset(
         "uuid.uuid4",
         "os.urandom",
         "os.getrandom",
+        # literal stdlib spellings — high confidence; `anything.now()` on an
+        # unknown receiver stays a lexical suffix match
+        "datetime.now",
+        "datetime.utcnow",
+        "datetime.today",
+        "date.today",
+        "datetime.datetime.now",
+        "datetime.datetime.utcnow",
+        "datetime.date.today",
     }
 )
 _NONDETERM_METHOD_SUFFIXES: tuple[str, ...] = (".now", ".utcnow", ".today")
@@ -170,7 +179,17 @@ class PythonAdapter(LanguageAdapter):
         return None
 
     def direct_effects(self, func_node: TSNode, source: bytes, aliases: dict[str, str]) -> set[str]:
-        tags: set[str] = set()
+        return set(self.direct_effects_confidence(func_node, source, aliases))
+
+    def direct_effects_confidence(
+        self, func_node: TSNode, source: bytes, aliases: dict[str, str]
+    ) -> dict[str, str]:
+        tags: dict[str, str] = {}
+
+        def add(tag: str, conf: str) -> None:
+            if tags.get(tag) != "high":
+                tags[tag] = conf
+
         body = func_node.child_by_field_name("body")
         if body is None:
             return tags
@@ -178,25 +197,25 @@ class PythonAdapter(LanguageAdapter):
         while stack:
             node = stack.pop()
             if node.type == "raise_statement":
-                tags.add("raise")
+                add("raise", "high")
             elif node.type == "call":
                 fn = node.child_by_field_name("function")
                 if fn is not None and fn.type == "identifier":
                     name = _text(fn, source)
                     if name in _IO_BUILTINS:
-                        tags.add("io")
+                        add("io", "high")
                     elif name in aliases:
-                        tag = _classify_dotted_call(aliases[name])
-                        if tag is not None:
-                            tags.add(tag)
+                        hit = _classify_dotted_call_conf(aliases[name])
+                        if hit is not None:
+                            add(*hit)
                 elif fn is not None and fn.type == "attribute":
                     dotted = _text(fn, source)
                     head, _, rest = dotted.partition(".")
                     if rest and head in aliases and aliases[head] != head:
                         dotted = f"{aliases[head]}.{rest}"
-                    tag = _classify_dotted_call(dotted)
-                    if tag is not None:
-                        tags.add(tag)
+                    hit = _classify_dotted_call_conf(dotted)
+                    if hit is not None:
+                        add(*hit)
             stack.extend(node.children)
         return tags
 
@@ -512,29 +531,36 @@ def _text(node: TSNode, source: bytes) -> str:
 
 
 def _classify_dotted_call(dotted: str) -> str | None:
-    """Match a dotted callee (``requests.get``, ``p.write_text``) to a tag."""
+    """Match a dotted callee to a tag (confidence discarded)."""
+    hit = _classify_dotted_call_conf(dotted)
+    return hit[0] if hit else None
+
+
+def _classify_dotted_call_conf(dotted: str) -> tuple[str, str] | None:
+    """Match a dotted callee to ``(tag, confidence)``.
+
+    ``high``: exact/prefix table matches (alias-normalized upstream).
+    ``lexical``: bare-suffix and receiver-name heuristics — ``clock.now()``,
+    ``db.query()`` — the measured false-positive class (gate-noise.md).
+    """
     if any(ch in dotted for ch in "()[] \n"):
         # A computed receiver (call/subscript chain) — skip rather than guess.
         return None
+    if dotted in _IO_DOTTED_EXACT:
+        return ("io", "high")
+    if dotted.startswith(_NET_PREFIXES):
+        return ("net", "high")
+    if dotted in _FS_EXACT or dotted.startswith(_FS_PREFIXES):
+        return ("fs", "high")
+    if dotted in _NONDETERM_EXACT or dotted.startswith(_NONDETERM_PREFIXES):
+        return ("nondeterm", "high")
     parts = dotted.split(".")
     if len(parts) >= 2 and parts[-1] in _DB_METHODS and parts[-2] in _DB_RECEIVERS:
-        return "db"
-    if dotted in _IO_DOTTED_EXACT:
-        return "io"
-    if dotted.startswith(_NET_PREFIXES):
-        return "net"
-    if (
-        dotted in _FS_EXACT
-        or dotted.startswith(_FS_PREFIXES)
-        or dotted.endswith(_FS_METHOD_SUFFIXES)
-    ):
-        return "fs"
-    if (
-        dotted in _NONDETERM_EXACT
-        or dotted.startswith(_NONDETERM_PREFIXES)
-        or dotted.endswith(_NONDETERM_METHOD_SUFFIXES)
-    ):
-        return "nondeterm"
+        return ("db", "lexical")
+    if dotted.endswith(_FS_METHOD_SUFFIXES):
+        return ("fs", "lexical")
+    if dotted.endswith(_NONDETERM_METHOD_SUFFIXES):
+        return ("nondeterm", "lexical")
     return None
 
 
