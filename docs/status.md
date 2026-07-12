@@ -71,6 +71,10 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | `cgir impact --run` (execute the blast-radius tests via pytest node-ids) | done | `report/impact.py:runnable_selectors` |
 | Data-shape contracts (`types` diff section + opt-in `shape-change` rule; TS interfaces/type-aliases, Py TypedDict/dataclass) | done | `report/diff.py:_type_shape_changes`, `json_export.read_types` |
 | Go adapter (package=dir symbol merge, struct-field DI, panic≙raise, effects tables) | done | `src/cgir/languages/go.py` |
+| Go cross-package resolution (go.mod module-prefix strip; unique dir-suffix fallback) | done | `analyses/symbols.py:_resolve_go_package` |
+| Confidence tiers (`lexical_effects`; gates fire high-confidence by default, `:any` opts in; pack marks `tag?`) | done | `analyses/effects.py:classify_with_confidence` |
+| Global/nonlocal rebinding as mutation (`global_declared_names` hook) | done | `languages/base.py`, `analyses/cfg.py` |
+| pre-commit framework hook (`cgir-contract-check`) + agents guide | done | `.pre-commit-hooks.yaml`, `docs/agents.md` |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware, type closure + docstrings + raises) | done | `src/cgir/report/pack.py` |
 | Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |
@@ -90,7 +94,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 444 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
+`pytest -q` runs 463 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
 
 | File | Covers |
 |---|---|
