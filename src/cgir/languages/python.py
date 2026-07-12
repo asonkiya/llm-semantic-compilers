@@ -205,6 +205,28 @@ class PythonAdapter(LanguageAdapter):
     def function_body(self, func_node: TSNode) -> TSNode | None:
         return func_node.child_by_field_name("body")
 
+    def global_declared_names(self, func_node: TSNode, source: bytes) -> set[str]:
+        """Names bound by `global`/`nonlocal` in *this* function's own body.
+
+        Nested function bodies are skipped — their declarations apply to
+        their own CFG walk, not this one."""
+        names: set[str] = set()
+        body = func_node.child_by_field_name("body")
+        if body is None:
+            return names
+        stack: list[TSNode] = [body]
+        while stack:
+            node = stack.pop()
+            if node.type in {"function_definition", "class_definition"}:
+                continue  # a nested scope's declarations are not ours
+            if node.type in {"global_statement", "nonlocal_statement"}:
+                for child in node.named_children:
+                    if child.type == "identifier":
+                        names.add(_text(child, source))
+                continue
+            stack.extend(node.named_children)
+        return names
+
     def block_statements(self, block: TSNode) -> list[TSNode]:
         return [c for c in block.named_children if c.type != "comment"]
 

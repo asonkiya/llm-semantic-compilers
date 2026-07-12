@@ -264,3 +264,69 @@ def test_subscript_write_to_local_is_not_state_transformation(tmp_path: Path) ->
         """,
     )
     assert specs["m.index"].kind == ComponentKind.pure_function
+
+
+def test_global_rebinding_is_state_transformer(tmp_path: Path) -> None:
+    """`global x; x = ...` mutates module state — found dogfooding: a lazy-init
+    service accessor with 34 callers scanned as pure_function."""
+    specs = _specs_for(
+        tmp_path,
+        """
+        _client = None
+
+
+        def get_client():
+            global _client
+            if _client is None:
+                _client = object()
+            return _client
+        """,
+    )
+    assert specs["m.get_client"].kind == ComponentKind.state_transformer
+
+
+def test_nonlocal_names_extracted_by_adapter(tmp_path: Path) -> None:
+    # nested functions aren't sliced as components (yet), so pin the adapter
+    # hook directly: nonlocal declarations are collected like global ones.
+    from cgir.languages.python import PythonAdapter
+
+    a = PythonAdapter()
+    src = b"def bump():\n    nonlocal count\n    count = count + 1\n"
+    fn = a.locate_function(a.parse(src), "bump", 0)
+    assert fn is not None
+    assert a.global_declared_names(fn, src) == {"count"}
+
+
+def test_local_rebinding_of_same_name_stays_pure(tmp_path: Path) -> None:
+    # a plain local assignment (no global decl) is not a mutation
+    specs = _specs_for(
+        tmp_path,
+        """
+        _client = None
+
+
+        def pure_shadow():
+            _client = 5
+            return _client
+        """,
+    )
+    assert specs["m.pure_shadow"].kind == ComponentKind.pure_function
+
+
+def test_nested_global_decl_does_not_taint_outer(tmp_path: Path) -> None:
+    # the nested function's `global x` must not make the OUTER local write a mutation
+    specs = _specs_for(
+        tmp_path,
+        """
+        x = 0
+
+
+        def outer():
+            x = 1
+            def inner():
+                global x
+                x = 2
+            return x
+        """,
+    )
+    assert specs["m.outer"].kind == ComponentKind.pure_function

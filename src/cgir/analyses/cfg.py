@@ -79,7 +79,13 @@ def build(graph: RepoGraph, repo_path: Path, adapter: LanguageAdapter | None = N
         body = file_adapter.function_body(func_ts)
         if body is None:
             continue
-        builder = _CFGBuilder(graph=graph, owner=func, source=source, adapter=file_adapter)
+        builder = _CFGBuilder(
+            graph=graph,
+            owner=func,
+            source=source,
+            adapter=file_adapter,
+            global_names=file_adapter.global_declared_names(func_ts, source),
+        )
         builder.build_block(body, predecessors=[func.id], controller=None)
 
 
@@ -89,6 +95,9 @@ class _CFGBuilder:
     owner: Node
     source: bytes
     adapter: LanguageAdapter
+    # names declared global/nonlocal in this function: writes to them mutate
+    # outer state and are recorded as `mutates`, not local `writes`.
+    global_names: set[str] = field(default_factory=set)
     _counter: int = field(default=0, init=False)
 
     def build_block(
@@ -102,6 +111,11 @@ class _CFGBuilder:
 
     def build_stmt(self, ts_node: TSNode, preds: list[str], controller: str | None) -> list[str]:
         desc = self.adapter.describe_statement(ts_node, self.source)
+        if isinstance(desc, AssignDesc) and self.global_names:
+            outer = [w for w in desc.writes if w in self.global_names]
+            if outer:
+                desc.writes = [w for w in desc.writes if w not in self.global_names]
+                desc.mutates = list(desc.mutates) + outer
         if isinstance(desc, BranchDesc):
             return self._build_branch(ts_node, desc, preds, controller)
         if isinstance(desc, LoopDesc):

@@ -264,6 +264,14 @@ class LanguageAdapter(ABC):
     def describe_statement(self, node: TSNode, source: bytes) -> StatementDesc:
         """Classify one statement and extract its parts (see descriptors)."""
 
+    def global_declared_names(self, func_node: TSNode, source: bytes) -> set[str]:
+        """Names this function declares as outer-scope (`global`/`nonlocal`).
+
+        Assignments to these names mutate state *outside* the function, so
+        the CFG builder records them as ``mutates`` rather than local
+        ``writes``. Default: none (TS/Go have no such declaration form)."""
+        return set()
+
     # --- phase 3: ingest extraction ------------------------------------------
 
     @abstractmethod
