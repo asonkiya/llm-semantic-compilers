@@ -687,6 +687,18 @@ def mcp(
 
 
 @app.command()
+def lsp() -> None:
+    """Serve live contract diagnostics over LSP (stdio; requires cgir[lsp])."""
+    from cgir.api.lsp_server import create_server
+
+    try:
+        server = create_server()
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    server.start_io()
+
+
+@app.command()
 def diff(
     old_index: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
     new_index: Annotated[Path, typer.Argument(exists=True, file_okay=False)],

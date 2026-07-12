@@ -30,6 +30,7 @@ cgir impact app.service.charge          # blast radius: affected callers, entryp
 cgir impact app.service.charge --candidate new.py --repo .   # radius narrowed by the real delta
 cgir verify app.service.charge --candidate new.py --repo .   # contract-check an edit
 cgir hook install                    # pre-commit seatbelt: block contract-breaking commits
+cgir lsp                             # editor squiggles for pin violations + drift (cgir[lsp])
 ```
 
 `pack` → edit → `impact` → `verify` → `hook`, with `watch` keeping the index

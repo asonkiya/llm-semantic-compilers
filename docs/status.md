@@ -78,6 +78,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Ranked/structured search (`cgir search`, MCP `search`): term ranking + contract predicates (kind/effects/lexical/callers/pins/entrypoint/lang/covered) | done | `src/cgir/report/search.py` |
 | `forbid-cycle` (Tarjan SCCs) + `layers` rules in lint | done | `report/lint.py:_cycle_violations`, `_layer_violations` |
 | Coverage-grounded test linkage (.coverage/coverage.json contexts ∪ static; pack test sources capped) | done | `analyses/coverage_link.py` |
+| LSP diagnostics (`cgir lsp`, `cgir[lsp]` extra): pin violations as errors, gate drift as warnings, on save | done | `src/cgir/api/lsp_server.py`, `docs/lsp.md` |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware, type closure + docstrings + raises) | done | `src/cgir/report/pack.py` |
 | Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |
@@ -97,7 +98,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 490 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
+`pytest -q` runs 498 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
 
 | File | Covers |
 |---|---|
