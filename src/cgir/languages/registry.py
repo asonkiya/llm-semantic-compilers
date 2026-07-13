@@ -22,9 +22,15 @@ from typing import Any
 from cgir.languages.base import ADAPTER_API_VERSION, LanguageAdapter
 from cgir.languages.go import GoAdapter
 from cgir.languages.python import PythonAdapter
+from cgir.languages.rust import RustAdapter
 from cgir.languages.typescript import TypeScriptAdapter
 
-_BUILTINS: tuple[LanguageAdapter, ...] = (PythonAdapter(), TypeScriptAdapter(), GoAdapter())
+_BUILTINS: tuple[LanguageAdapter, ...] = (
+    PythonAdapter(),
+    TypeScriptAdapter(),
+    GoAdapter(),
+    RustAdapter(),
+)
 
 
 def discover_adapters(

@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from cgir.analyses.call_graph import build_call_graph
 from cgir.analyses.cfg import build as build_cfg
 from cgir.analyses.effects import classify
@@ -19,30 +17,23 @@ from cgir.analyses.symbols import build_symbol_tables
 from cgir.ir.component_spec import ComponentKind, ComponentSpec
 from cgir.ir.edges import EdgeKind
 from cgir.ir.nodes import NodeKind
+from cgir.languages import adapter_for_extension
 from cgir.slicing import slice_components
 from cgir.sources import TreeSitterSource
-
-from rust_adapter import RustAdapter
-
 
 # ---------------------------------------------------------------------------
 # Pipeline driver
 # ---------------------------------------------------------------------------
 
 
-def _scan(
-    tmp_path: Path, adapter: RustAdapter | None = None
-) -> tuple[object, dict[str, ComponentSpec]]:
-    if adapter is None:
-        adapter = RustAdapter()
-    source = TreeSitterSource(adapter=adapter)
-    graph = source.ingest(tmp_path)
+def _scan(tmp_path: Path) -> tuple[object, dict[str, ComponentSpec]]:
+    graph = TreeSitterSource().ingest(tmp_path)  # rust is a registered builtin
     tables = build_symbol_tables(graph)
-    build_call_graph(graph, tables, tmp_path, adapter=adapter)
-    build_cfg(graph, tmp_path, adapter=adapter)
-    effects = classify(graph, tmp_path, adapter=adapter)
+    build_call_graph(graph, tables, tmp_path)
+    build_cfg(graph, tmp_path)
+    effects = classify(graph, tmp_path)
     purity = score(graph, effects)
-    specs = {s.id: s for s in slice_components(graph, effects=effects, purity_scores=purity, language="rust")}
+    specs = {s.id: s for s in slice_components(graph, effects=effects, purity_scores=purity)}
     return graph, specs
 
 
@@ -275,14 +266,14 @@ def test_pure_function_stays_pure(tmp_path: Path) -> None:
 
 def test_struct_fields_extracted(tmp_path: Path) -> None:
     (tmp_path / "svc.rs").write_text(STRUCT_RS)
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     source = TreeSitterSource(adapter=adapter)
     graph = source.ingest(tmp_path)
 
-    api_class = next(
-        (n for n in graph.nodes(NodeKind.Class) if n.name == "ApiService"), None
+    api_class = next((n for n in graph.nodes(NodeKind.Class) if n.name == "ApiService"), None)
+    assert api_class is not None, (
+        f"ApiService not found; classes={[n.name for n in graph.nodes(NodeKind.Class)]}"
     )
-    assert api_class is not None, f"ApiService not found; classes={[n.name for n in graph.nodes(NodeKind.Class)]}"
     fields = api_class.attrs.get("fields") or {}
     assert "client" in fields, f"fields: {fields}"
     assert fields["client"] == "HttpClient"
@@ -291,13 +282,11 @@ def test_struct_fields_extracted(tmp_path: Path) -> None:
 
 def test_http_client_fields(tmp_path: Path) -> None:
     (tmp_path / "svc.rs").write_text(STRUCT_RS)
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     source = TreeSitterSource(adapter=adapter)
     graph = source.ingest(tmp_path)
 
-    http_class = next(
-        (n for n in graph.nodes(NodeKind.Class) if n.name == "HttpClient"), None
-    )
+    http_class = next((n for n in graph.nodes(NodeKind.Class) if n.name == "HttpClient"), None)
     assert http_class is not None
     fields = http_class.attrs.get("fields") or {}
     assert "base_url" in fields
@@ -311,7 +300,7 @@ def test_http_client_fields(tmp_path: Path) -> None:
 def test_receiver_field_call_resolves(tmp_path: Path) -> None:
     """self.client.get(...) in ApiService.call resolves to HttpClient.get."""
     (tmp_path / "svc.rs").write_text(STRUCT_RS)
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     source = TreeSitterSource(adapter=adapter)
     graph = source.ingest(tmp_path)
     tables = build_symbol_tables(graph)
@@ -334,9 +323,7 @@ def test_receiver_field_call_resolves(tmp_path: Path) -> None:
         None,
     )
     assert get_id is not None, f"HttpClient.get not found; nodes={[n.id for n in all_callable]}"
-    assert get_id in callee_ids, (
-        f"Expected {get_id} in callees of {call_id}, got: {callee_ids}"
-    )
+    assert get_id in callee_ids, f"Expected {get_id} in callees of {call_id}, got: {callee_ids}"
 
 
 # ---------------------------------------------------------------------------
@@ -349,9 +336,7 @@ def test_calls_effectful_propagates(tmp_path: Path) -> None:
     so ApiService.call should get calls_effectful."""
     (tmp_path / "svc.rs").write_text(STRUCT_RS)
     _, specs = _scan(tmp_path)
-    call_spec = next(
-        (v for k, v in specs.items() if "ApiService" in k and "call" in k), None
-    )
+    call_spec = next((v for k, v in specs.items() if "ApiService" in k and "call" in k), None)
     assert call_spec is not None
     assert "calls_effectful" in call_spec.effects, f"call effects: {call_spec.effects}"
 
@@ -363,14 +348,12 @@ def test_calls_effectful_propagates(tmp_path: Path) -> None:
 
 def test_cfg_branch_and_loop(tmp_path: Path) -> None:
     (tmp_path / "svc.rs").write_text(SERVICE_RS)
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     source = TreeSitterSource(adapter=adapter)
     graph = source.ingest(tmp_path)
     build_cfg(graph, tmp_path, adapter=adapter)
 
-    add_id = next(
-        (n.id for n in graph.nodes(NodeKind.Function) if n.id.endswith(".add")), None
-    )
+    add_id = next((n.id for n in graph.nodes(NodeKind.Function) if n.id.endswith(".add")), None)
     assert add_id is not None
 
     child_kinds = {c.kind for c in graph.children(add_id)}
@@ -419,25 +402,21 @@ def test_cross_file_import_resolution(tmp_path: Path) -> None:
     (sub / "a.rs").write_text(CROSS_FILE_A_RS)
     (sub / "b.rs").write_text(CROSS_FILE_B_RS)
 
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     source = TreeSitterSource(adapter=adapter)
     graph = source.ingest(sub)
     tables = build_symbol_tables(graph)
     build_call_graph(graph, tables, sub, adapter=adapter)
 
-    runner_id = next(
-        (n.id for n in graph.nodes(NodeKind.Function) if "runner" in n.id), None
+    runner_id = next((n.id for n in graph.nodes(NodeKind.Function) if "runner" in n.id), None)
+    assert runner_id is not None, (
+        f"runner not found; funcs={[n.id for n in graph.nodes(NodeKind.Function)]}"
     )
-    assert runner_id is not None, f"runner not found; funcs={[n.id for n in graph.nodes(NodeKind.Function)]}"
 
     callee_ids = {e.dst for e in graph.out_edges(runner_id, EdgeKind.CALLS)}
-    helper_id = next(
-        (n.id for n in graph.nodes(NodeKind.Function) if "helper" in n.id), None
-    )
+    helper_id = next((n.id for n in graph.nodes(NodeKind.Function) if "helper" in n.id), None)
     assert helper_id is not None
-    assert helper_id in callee_ids, (
-        f"Expected helper in callees of runner, got: {callee_ids}"
-    )
+    assert helper_id in callee_ids, f"Expected helper in callees of runner, got: {callee_ids}"
 
 
 # ---------------------------------------------------------------------------
@@ -446,13 +425,13 @@ def test_cross_file_import_resolution(tmp_path: Path) -> None:
 
 
 def test_adapter_parse_returns_root(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     root = adapter.parse(b"fn foo() {}")
     assert root.type == "source_file"
 
 
 def test_locate_function(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"fn bar() {}\nfn baz(x: i32) {}\n"
     root = adapter.parse(src)
     node = adapter.locate_function(root, "baz", 1)
@@ -461,7 +440,7 @@ def test_locate_function(tmp_path: Path) -> None:
 
 
 def test_locate_impl_method(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"struct Foo {}\nimpl Foo {\n    fn method(&self) {}\n}\n"
     root = adapter.parse(src)
     node = adapter.locate_function(root, "method", 2)
@@ -470,7 +449,7 @@ def test_locate_impl_method(tmp_path: Path) -> None:
 
 
 def test_call_sites_simple(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"fn foo() { bar(1, 2); baz(); }"
     root = adapter.parse(src)
     fn_node = root.named_children[0]
@@ -481,7 +460,7 @@ def test_call_sites_simple(tmp_path: Path) -> None:
 
 
 def test_call_sites_method(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"fn foo(x: MyType) { x.do_thing(1); }"
     root = adapter.parse(src)
     fn_node = root.named_children[0]
@@ -491,8 +470,8 @@ def test_call_sites_method(tmp_path: Path) -> None:
 
 
 def test_call_sites_scoped(tmp_path: Path) -> None:
-    adapter = RustAdapter()
-    src = b"fn foo() { std::fs::read_to_string(\"f\"); }"
+    adapter = adapter_for_extension(".rs")
+    src = b'fn foo() { std::fs::read_to_string("f"); }'
     root = adapter.parse(src)
     fn_node = root.named_children[0]
     sites = adapter.call_sites(fn_node, src)
@@ -501,7 +480,7 @@ def test_call_sites_scoped(tmp_path: Path) -> None:
 
 
 def test_describe_let(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"fn foo() { let x = 42; }"
     root = adapter.parse(src)
     fn_node = root.named_children[0]
@@ -509,21 +488,25 @@ def test_describe_let(tmp_path: Path) -> None:
     stmts = adapter.block_statements(body)
     assert len(stmts) >= 1
     from cgir.languages.base import AssignDesc
+
     desc = adapter.describe_statement(stmts[0], src)
     assert isinstance(desc, AssignDesc)
     assert "x" in desc.writes
 
 
 def test_describe_for(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"fn foo(items: Vec<i32>) { for item in items { let x = item; } }"
     root = adapter.parse(src)
     fn_node = root.named_children[0]
     body = adapter.function_body(fn_node)
     stmts = adapter.block_statements(body)
     from cgir.languages.base import LoopDesc
+
     # find the for loop
-    loop_stmt = next((s for s in stmts if s.type in ("for_expression", "expression_statement")), None)
+    loop_stmt = next(
+        (s for s in stmts if s.type in ("for_expression", "expression_statement")), None
+    )
     assert loop_stmt is not None
     desc = adapter.describe_statement(loop_stmt, src)
     assert isinstance(desc, LoopDesc), f"got {type(desc)}"
@@ -532,33 +515,35 @@ def test_describe_for(tmp_path: Path) -> None:
 
 
 def test_describe_if(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"fn foo(x: i32) { if x > 0 { let y = 1; } else { let z = 2; } }"
     root = adapter.parse(src)
     fn_node = root.named_children[0]
     body = adapter.function_body(fn_node)
     stmts = adapter.block_statements(body)
     from cgir.languages.base import BranchDesc
+
     desc = adapter.describe_statement(stmts[0], src)
     assert isinstance(desc, BranchDesc), f"got {type(desc)}"
     assert desc.consequence is not None
 
 
 def test_describe_match(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b'fn foo(x: i32) -> &str { match x { 0 => "zero", _ => "other" } }'
     root = adapter.parse(src)
     fn_node = root.named_children[0]
     body = adapter.function_body(fn_node)
     stmts = adapter.block_statements(body)
     from cgir.languages.base import MatchDesc
+
     desc = adapter.describe_statement(stmts[0], src)
     assert isinstance(desc, MatchDesc), f"got {type(desc)}"
     assert len(desc.cases) >= 2
 
 
 def test_use_import_scoped(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"use std::fs::File;\nfn foo() {}"
     root = adapter.parse(src)
     decls = adapter.module_declarations(root, src, "mymod", "mymod.rs")
@@ -569,7 +554,7 @@ def test_use_import_scoped(tmp_path: Path) -> None:
 
 
 def test_use_import_list(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"use std::io::{Read, Write};\nfn foo() {}"
     root = adapter.parse(src)
     decls = adapter.module_declarations(root, src, "mymod", "mymod.rs")
@@ -580,7 +565,7 @@ def test_use_import_list(tmp_path: Path) -> None:
 
 
 def test_use_import_as_clause(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"use sqlx::{Pool, Postgres as PG};\nfn foo() {}"
     root = adapter.parse(src)
     decls = adapter.module_declarations(root, src, "mymod", "mymod.rs")
@@ -591,20 +576,23 @@ def test_use_import_as_clause(tmp_path: Path) -> None:
 
 
 def test_use_plain_crate(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"use reqwest;\nfn foo() {}"
     root = adapter.parse(src)
     decls = adapter.module_declarations(root, src, "mymod", "mymod.rs")
     imports = [d for d in decls if hasattr(d, "target")]
-    assert any(d.target == "reqwest" for d in imports), f"imports: {[(d.target, d.alias) for d in imports]}"
+    assert any(d.target == "reqwest" for d in imports), (
+        f"imports: {[(d.target, d.alias) for d in imports]}"
+    )
 
 
 def test_doc_comment_extracted(tmp_path: Path) -> None:
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = b"/// Does math.\n/// Second line.\npub fn add(a: i32, b: i32) -> i32 { a + b }"
     root = adapter.parse(src)
     decls = adapter.module_declarations(root, src, "m", "m.rs")
     from cgir.languages.base import FunctionDecl
+
     fn_decl = next((d for d in decls if isinstance(d, FunctionDecl) and d.name == "add"), None)
     assert fn_decl is not None
     assert "Does math" in fn_decl.doc
@@ -617,7 +605,7 @@ pub fn safe_get(x: Option<i32>) -> i32 {
     x.unwrap()
 }
 """
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     src = src_code.encode()
     root = adapter.parse(src)
     fn_node = root.named_children[0]
@@ -636,13 +624,11 @@ pub fn count(limit: i32) -> i32 {
 }
 """
     (tmp_path / "w.rs").write_text(while_code)
-    adapter = RustAdapter()
+    adapter = adapter_for_extension(".rs")
     source = TreeSitterSource(adapter=adapter)
     graph = source.ingest(tmp_path)
     build_cfg(graph, tmp_path, adapter=adapter)
-    count_id = next(
-        (n.id for n in graph.nodes(NodeKind.Function) if "count" in n.id), None
-    )
+    count_id = next((n.id for n in graph.nodes(NodeKind.Function) if "count" in n.id), None)
     assert count_id is not None
     child_kinds = {c.kind for c in graph.children(count_id)}
     assert NodeKind.Loop in child_kinds

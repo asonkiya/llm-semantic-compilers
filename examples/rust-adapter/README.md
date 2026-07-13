@@ -1,21 +1,15 @@
 # Rust adapter — the docs-only experiment
 
-This adapter was written by an **independent agent (Claude Sonnet) given
+Rust support was written by an **independent agent (Claude Sonnet) given
 only [`docs/writing-an-adapter.md`](../../docs/writing-an-adapter.md)** —
-no access to CGIR's source — as a usability test of the plugin docs.
-Result: all 9 points of the doc's test bar, 36/36 tests passing.
+no access to CGIR's source — as a usability test of the plugin docs. It hit
+all 9 points of the doc's test bar (36/36 tests) in one sitting; the doc
+gaps it surfaced were folded back into the guide, and its biggest find —
+`PinIndex` missing `line_comment` grammars — became a core fix.
 
-It is a *reference example*, not a shipped builtin: review `NOTES.md` for
-its documented limits (enums/traits not ingested, `#[cfg]` ignored,
-implicit tail-expression returns are SimpleDesc). The experiment's doc-gap
-findings were folded back into the authoring guide, and its biggest
-discovery — `PinIndex` missing `line_comment` grammars — is fixed in core.
+The adapter was then reviewed and **promoted to a builtin**:
+`src/cgir/languages/rust.py` (tests: `tests/unit/test_rust_adapter.py`).
+`NOTES.md` here preserves the agent's original gap report and limits list.
 
-To use: package it per the guide's plugin section, or pass
-`TreeSitterSource(adapter=RustAdapter())` (+ `adapter=` on each analysis).
-
-Run its tests:
-```bash
-pip install "tree-sitter-rust>=0.23,<0.24"
-pytest examples/rust-adapter/test_rust_adapter.py
-```
+The takeaway for plugin authors: the guide is sufficient — an implementer
+who has never seen the codebase produced a promotable adapter from it.

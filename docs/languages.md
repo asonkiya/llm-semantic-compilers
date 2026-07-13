@@ -28,6 +28,7 @@ full test suite green.
 | 3 | ingest structural dispatch + attr extraction (normalized `Declaration`s) | ✅ done |
 | 4 | `TypeScriptAdapter` + per-file language dispatch | ✅ done |
 | 5 | `GoAdapter` (package=directory merge, struct-field DI, panic≙raise) | ✅ done |
+| 6 | `RustAdapter` (agent-written from the docs, reviewed & promoted; structs/impl, use-trees, match CFG) | ✅ done |
 
 **Two languages ship (Python, TypeScript); a mixed repo scans both.**
 Zero grammar node-type strings remain outside `cgir/languages/`. The CFG builder is pure topology over statement

@@ -44,6 +44,8 @@ dependencies = [
   "tree-sitter-python>=0.23,<0.24",
   "tree-sitter-typescript>=0.23,<0.24",
   "tree-sitter-go>=0.23,<0.25",
+  # <0.24: 0.24.x ships language ABI 15, incompatible with tree-sitter 0.24
+  "tree-sitter-rust>=0.23,<0.24",
   "jsonschema>=4.21",
 ]
 
@@ -60,9 +62,6 @@ dev = [
   "types-jsonschema",
   "httpx>=0.27",
   "pyyaml>=6.0",
-  # grammar for PinIndex line_comment tests; <0.24 pins language ABI 14
-  # (0.24.x ships ABI 15, incompatible with tree-sitter 0.24 core)
-  "tree-sitter-rust>=0.23,<0.24",
 ]
 
 [project.urls]

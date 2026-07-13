@@ -1,34 +1,33 @@
-"""RustAdapter — Rust implementation of :class:`LanguageAdapter`.
+"""RustAdapter — the Rust implementation of :class:`LanguageAdapter`.
 
-Maps the tree-sitter-rust grammar (0.23.x / tree-sitter 0.24) to CGIR's
-normalized descriptors. Covers:
-  - top-level functions, structs, impl blocks, use declarations, const/static
-  - CFG statement classification (if/for/while/loop/match/return/let/compound-assign)
-  - call site extraction (plain, path, method-chain, macro)
-  - effect detection (io, fs, net, nondeterm, db, raise)
-  - doc comments (/// lines preceding a definition)
-  - cgir: pin pragmas (// cgir: pin comment)
-  - struct field extraction for DI resolution
+Originally written by an independent agent from ``docs/writing-an-adapter.md``
+alone (the docs-usability experiment; see ``examples/rust-adapter/``), then
+reviewed and promoted to a builtin. Maps tree-sitter-rust (0.23.x) to CGIR's
+normalized descriptors: functions, structs + impl methods (struct fields power
+DI resolution of ``self.field.method()``), use-declaration trees (incl.
+grouped/aliased forms), CFG statement shapes (if/else-if, for/while/loop,
+match arms, let/assign/compound-assign), effect tables with confidence tiers,
+doc comments, attributes, and ``cgir:`` pins.
 
-Known limits (documented in NOTES.md):
-  - PinIndex uses node.type == "comment"; Rust uses "line_comment". We provide
-    RustPinIndex that handles both.
-  - Dynamic dispatch (trait objects), macros expanding to calls, and
-    lifetime-parameterized types are approximated.
-  - block_statements filters "line_comment" rather than "comment" for Rust.
+Known limits:
+- enums, traits, and ``impl Trait for Type`` methods are not ingested as
+  components (impl name extraction is best-effort for plain ``impl Type``);
+- Rust's ``?`` operator is value-flow, not ``raise``; ``panic!``-family
+  macros and ``.unwrap()``/``.expect()`` are tagged ``raise`` (aggressive but
+  benign — raise is not impure in the taxonomy);
+- implicit tail-expression returns classify as ``SimpleDesc``, not
+  ``ReturnDesc``; ``#[cfg]`` conditional compilation is ignored;
+- ``db``-receiver gating and bare ``.now()`` are lexical-confidence guesses.
 """
 
 from __future__ import annotations
-
-import re
-from dataclasses import dataclass, field
 
 import tree_sitter_rust
 from tree_sitter import Language, Parser
 from tree_sitter import Node as TSNode
 
 from cgir.languages.base import (
-    ADAPTER_API_VERSION,  # noqa: F401 (re-exported for plugin metadata)
+    ADAPTER_API_VERSION,
     AssignDesc,
     BranchDesc,
     CallSite,
@@ -125,63 +124,9 @@ _DB_METHODS: frozenset[str] = frozenset(
 _PANIC_METHODS: frozenset[str] = frozenset({"unwrap", "expect"})
 
 # Macros that are effects, not user-facing calls
-_EFFECT_MACROS: frozenset[str] = _IO_MACROS | _PANIC_MACROS | frozenset({"assert", "assert_eq", "assert_ne", "debug_assert"})
-
-# ---------------------------------------------------------------------------
-# Pin-index that handles Rust "line_comment" nodes
-# ---------------------------------------------------------------------------
-
-_PIN_RE = re.compile(r"cgir:\s*([a-z0-9_,\- ]+)", re.IGNORECASE)
-_COMMENT_TYPES = frozenset({"comment", "line_comment", "block_comment"})
-
-
-class RustPinIndex:
-    """Like PinIndex but recognises Rust's ``line_comment`` node type.
-
-    PinIndex is grammar-agnostic in design but its implementation hard-codes
-    ``node.type == "comment"``. Rust's tree-sitter grammar uses ``line_comment``
-    and ``block_comment``. Rather than monkey-patching base, we replicate the
-    logic with an extended type check.
-    """
-
-    def __init__(self, root: TSNode, source: bytes) -> None:
-        self._pins_by_row: dict[int, list[str]] = {}
-        self._comment_rows: set[int] = set()
-        stack: list[TSNode] = [root]
-        while stack:
-            node = stack.pop()
-            if node.type in _COMMENT_TYPES:
-                row = node.start_point[0]
-                self._comment_rows.add(row)
-                text = source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
-                match = _PIN_RE.search(text)
-                if match:
-                    tokens = [t for t in re.split(r"[,\s]+", match.group(1).strip()) if t]
-                    self._pins_by_row.setdefault(row, []).extend(tokens)
-            stack.extend(node.children)
-
-    def for_definition(self, outermost: TSNode) -> list[str]:
-        start = outermost.start_point[0]
-        pins = list(self._pins_by_row.get(start, []))
-        row = start - 1
-        while row in self._comment_rows:
-            pins.extend(self._pins_by_row.get(row, []))
-            row -= 1
-        return sorted(set(pins))
-
-    def module_pins(self, first_decl_row: int | None) -> list[str]:
-        if 0 not in self._comment_rows:
-            return []
-        row, last = 0, -1
-        pins: list[str] = []
-        while row in self._comment_rows:
-            pins.extend(self._pins_by_row.get(row, []))
-            last = row
-            row += 1
-        if first_decl_row is not None and last == first_decl_row - 1:
-            return []
-        return sorted(set(pins))
-
+_EFFECT_MACROS: frozenset[str] = (
+    _IO_MACROS | _PANIC_MACROS | frozenset({"assert", "assert_eq", "assert_ne", "debug_assert"})
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -261,13 +206,6 @@ def _callee_dotted(fn_node: TSNode) -> str:
 def _collect_reads_from(node: TSNode, source: bytes, into: list[str], seen: set[str]) -> None:
     """Walk node collecting data-bearing identifiers, not descending into nested blocks."""
     t = node.type
-    # Stop at nested function or closure bodies
-    if t in {"block", "closure_expression"} and node.parent is not None:
-        # Only descend if this is the immediate function body we started from
-        # i.e., don't go into nested blocks (they have their own scope)
-        # Actually for reads we want to descend into most expressions
-        # but stop at function_item or closure
-        pass
     if t in {"function_item", "closure_expression"}:
         return
     if t == "identifier":
@@ -317,8 +255,6 @@ def _idents_in_pattern(node: TSNode) -> list[str]:
         for child in node.named_children:
             names.extend(_idents_in_pattern(child))
         return names
-    if node.type == "identifier":
-        return [_node_text(node)]
     # Just look for identifier descendants
     names = []
     for child in node.named_children:
@@ -340,9 +276,7 @@ def _get_doc_comments(children: list[TSNode], fn_index: int) -> str:
         is_doc = any(c.type == "outer_doc_comment_marker" for c in node.children)
         if not is_doc:
             break  # stop at non-doc comment
-        doc_node = next(
-            (c for c in node.named_children if c.type == "doc_comment"), None
-        )
+        doc_node = next((c for c in node.named_children if c.type == "doc_comment"), None)
         if doc_node is not None:
             collected.append(_node_text(doc_node).strip())
         j -= 1
@@ -376,8 +310,7 @@ def _type_name(type_node: TSNode | None) -> str | None:
     if t == "primitive_type":
         return _node_text(type_node)
     if t == "generic_type":
-        # e.g. Vec<i32> -> Vec, Option<Foo> -> Foo (inner)
-        # For DI we want the outer type name
+        # Vec<i32> -> Vec: DI matching wants the outer type name
         inner = type_node.named_children[0] if type_node.named_child_count else None
         if inner is not None and inner.type in {"type_identifier", "scoped_type_identifier"}:
             return _node_text(inner).split("::")[-1]
@@ -410,7 +343,6 @@ def _build_signature(
     name: str,
     params_node: TSNode | None,
     return_type_node: TSNode | None,
-    source: bytes,
 ) -> str:
     """Build a signature string like ``name(param: type, ...) -> ret``."""
     parts: list[str] = []
@@ -500,9 +432,7 @@ class RustAdapter(LanguageAdapter):
 
     # --- effects ---------------------------------------------------------------
 
-    def direct_effects(
-        self, func_node: TSNode, source: bytes, aliases: dict[str, str]
-    ) -> set[str]:
+    def direct_effects(self, func_node: TSNode, source: bytes, aliases: dict[str, str]) -> set[str]:
         return set(self.direct_effects_confidence(func_node, source, aliases))
 
     def direct_effects_confidence(
@@ -523,9 +453,7 @@ class RustAdapter(LanguageAdapter):
             node = stack.pop()
 
             if node.type == "macro_invocation":
-                macro_id = next(
-                    (c for c in node.named_children if c.type == "identifier"), None
-                )
+                macro_id = next((c for c in node.named_children if c.type == "identifier"), None)
                 if macro_id is not None:
                     mname = _node_text(macro_id)
                     if mname in _PANIC_MACROS:
@@ -544,10 +472,10 @@ class RustAdapter(LanguageAdapter):
                     head = dotted_norm.split(".")[0]
                     if head in aliases:
                         resolved = aliases[head]
-                        tail = dotted_norm[len(head):]
+                        tail = dotted_norm[len(head) :]
                         dotted_norm = resolved + tail
 
-                    hit = _classify_rust_call_conf(dotted_norm, node, source)
+                    hit = _classify_rust_call_conf(dotted_norm)
                     if hit is not None:
                         add(*hit)
 
@@ -562,9 +490,6 @@ class RustAdapter(LanguageAdapter):
         body = func_node.child_by_field_name("body")
         if body is None:
             return sites
-
-        params_node = func_node.child_by_field_name("parameters")
-        is_method = _has_self_param(params_node) if params_node else False
 
         stack: list[TSNode] = [body]
         while stack:
@@ -590,9 +515,7 @@ class RustAdapter(LanguageAdapter):
 
             elif node.type == "macro_invocation":
                 # Emit macro calls that aren't effect-only macros
-                macro_id = next(
-                    (c for c in node.named_children if c.type == "identifier"), None
-                )
+                macro_id = next((c for c in node.named_children if c.type == "identifier"), None)
                 if macro_id is not None:
                     mname = _node_text(macro_id)
                     if mname not in _EFFECT_MACROS:
@@ -608,7 +531,11 @@ class RustAdapter(LanguageAdapter):
         return func_node.child_by_field_name("body")
 
     def block_statements(self, block: TSNode) -> list[TSNode]:
-        return [c for c in block.named_children if c.type not in {"line_comment", "block_comment", "comment"}]
+        return [
+            c
+            for c in block.named_children
+            if c.type not in {"line_comment", "block_comment", "comment"}
+        ]
 
     def describe_statement(self, node: TSNode, source: bytes) -> StatementDesc:
         t = node.type
@@ -623,7 +550,7 @@ class RustAdapter(LanguageAdapter):
         if t == "let_declaration":
             patt = node.child_by_field_name("pattern")
             val = node.child_by_field_name("value")
-            writes = _idents_in_pattern(patt) if patt is not None else []
+            writes: list[str] = _idents_in_pattern(patt) if patt is not None else []
             reads = _reads_of(val, source)
             return AssignDesc(writes=writes, reads=reads)
 
@@ -659,15 +586,13 @@ class RustAdapter(LanguageAdapter):
 
         if t == "return_expression":
             # The returned expression is the first named child after "return" keyword
-            ret_val = next(
-                (c for c in node.named_children if c.type != "return"), None
-            )
+            ret_val = next((c for c in node.named_children if c.type != "return"), None)
             return ReturnDesc(reads=_reads_of(ret_val, source))
 
         if t == "assignment_expression":
             left = node.child_by_field_name("left")
             right = node.child_by_field_name("right")
-            writes: list[str] = []
+            writes = []
             mutates: list[str] = []
             if left is not None:
                 if left.type == "identifier":
@@ -727,9 +652,7 @@ class RustAdapter(LanguageAdapter):
                     continue
                 arm_val = arm.child_by_field_name("value")
                 # The consequence node is the arm's value (could be block or expr)
-                cases.append(
-                    CaseDesc(node=arm, reads=list(subject_reads), consequence=arm_val)
-                )
+                cases.append(CaseDesc(node=arm, reads=list(subject_reads), consequence=arm_val))
 
         if cases:
             return MatchDesc(cases=cases)
@@ -740,7 +663,7 @@ class RustAdapter(LanguageAdapter):
     def module_declarations(
         self, root: TSNode, source: bytes, module_name: str, rel_path: str
     ) -> list[Declaration]:
-        pin_index = RustPinIndex(root, source)
+        pin_index = PinIndex(root, source)
         decls: list[Declaration] = []
         # Map from struct name to ClassDecl so we can attach impl methods
         classes: dict[str, ClassDecl] = {}
@@ -768,9 +691,10 @@ class RustAdapter(LanguageAdapter):
                 decls.append(decl)
 
             elif t == "impl_item":
-                struct_name = _get_impl_type_name(child)
-                if struct_name is None:
+                impl_name = _get_impl_type_name(child)
+                if impl_name is None:
                     continue
+                struct_name = impl_name
                 if struct_name not in classes:
                     classes[struct_name] = ClassDecl(node=child, name=struct_name)
 
@@ -781,19 +705,14 @@ class RustAdapter(LanguageAdapter):
                 for j, fn_node in enumerate(impl_children):
                     if fn_node.type == "function_item":
                         fn_decl = self._extract_function(
-                            fn_node, impl_children, j, source, pin_index, is_method=True
+                            fn_node, impl_children, j, source, pin_index
                         )
                         classes[struct_name].methods.append(fn_decl)
 
             elif t == "use_declaration":
                 decls.extend(_extract_imports(child, source))
 
-            elif t == "const_item":
-                name_node = child.child_by_field_name("name")
-                if name_node is not None:
-                    decls.append(VariableDecl(node=child, name=_node_text(name_node)))
-
-            elif t == "static_item":
+            elif t == "const_item" or t == "static_item":
                 name_node = child.child_by_field_name("name")
                 if name_node is not None:
                     decls.append(VariableDecl(node=child, name=_node_text(name_node)))
@@ -802,7 +721,11 @@ class RustAdapter(LanguageAdapter):
 
         # Apply module-level pins
         first_decl = next(
-            (c for c in children if c.type not in {"line_comment", "block_comment", "comment", "attribute_item"}),
+            (
+                c
+                for c in children
+                if c.type not in {"line_comment", "block_comment", "comment", "attribute_item"}
+            ),
             None,
         )
         pinnable = {"function_item", "struct_item", "impl_item"}
@@ -812,11 +735,11 @@ class RustAdapter(LanguageAdapter):
             else None
         )
         if module_pins:
-            for decl in decls:
-                if isinstance(decl, FunctionDecl):
-                    decl.pins = sorted(set(decl.pins) | set(module_pins))
-                elif isinstance(decl, ClassDecl):
-                    for method in decl.methods:
+            for d in decls:
+                if isinstance(d, FunctionDecl):
+                    d.pins = sorted(set(d.pins) | set(module_pins))
+                elif isinstance(d, ClassDecl):
+                    for method in d.methods:
                         method.pins = sorted(set(method.pins) | set(module_pins))
 
         return decls
@@ -827,8 +750,7 @@ class RustAdapter(LanguageAdapter):
         siblings: list[TSNode],
         index: int,
         source: bytes,
-        pin_index: RustPinIndex,
-        is_method: bool = False,
+        pin_index: PinIndex,
     ) -> FunctionDecl:
         name_node = fn_node.child_by_field_name("name")
         name = _node_text(name_node) if name_node is not None else "<anonymous>"
@@ -847,7 +769,7 @@ class RustAdapter(LanguageAdapter):
                         pname = _node_text(patt)
                         params.append(ParamDecl(name=pname, node=child))
 
-        sig = _build_signature(name, params_node, return_type_node, source)
+        sig = _build_signature(name, params_node, return_type_node)
         returns = _node_text(return_type_node) if return_type_node is not None else None
 
         # Doc comments from preceding /// lines
@@ -1014,7 +936,7 @@ def _extract_use_tree(
         pass
 
 
-def _classify_rust_call_conf(dotted: str, node: TSNode, source: bytes) -> tuple[str, str] | None:
+def _classify_rust_call_conf(dotted: str) -> tuple[str, str] | None:
     """Classify a (::->. normalized) dotted callee to (effect_tag, confidence)."""
     # Skip computed expressions
     if any(ch in dotted for ch in "()[] \n"):

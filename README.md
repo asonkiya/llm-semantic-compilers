@@ -23,7 +23,7 @@ For library/agent use in a project: `uv pip install codegraph-ir`
 ## The local loop
 
 ```bash
-cgir scan .                          # build the .cgir index (Python, TypeScript, Go)
+cgir scan .                          # build the .cgir index (Python, TypeScript, Go, Rust)
 cgir watch .                         # keep it live: re-scan + show contract drift on save
 cgir pack app.service.charge --repo .   # minimal context bundle for one component
 cgir impact app.service.charge          # blast radius: affected callers, entrypoints, tests
@@ -75,7 +75,7 @@ Or via the [pre-commit framework](https://pre-commit.com): hook id `cgir-contrac
 | Blast radius + coverage-grounded test selection | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Agent context over MCP | ✅ contract packs | ✅ broader retrieval | ❌ | ❌ | ❌ |
 | Finds logic bugs | ❌ | ❌ | ✅ | ❌ | ❌ |
-| Languages | 3 builtin + [plugin API](./docs/languages.md) | 30+ | most | per-tool | spec-level |
+| Languages | 4 builtin + [plugin API](./docs/languages.md) | 30+ | most | per-tool | spec-level |
 | Cycle / layer rules | ✅ | ❌ | ❌ | ✅ mature | ❌ |
 | Cost | free, local | mostly free | ~$24–30/user/mo | free | free |
 
