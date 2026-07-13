@@ -174,10 +174,7 @@ def _field_expr_dotted(node: TSNode) -> str:
     elif value.type == "call_expression":
         # chained call: c.get(...).send() — resolve the receiver of the chain
         fn = value.child_by_field_name("function")
-        if fn is not None:
-            prefix = _callee_dotted(fn)
-        else:
-            prefix = _node_text(value).split("(")[0]
+        prefix = _callee_dotted(fn) if fn is not None else _node_text(value).split("(")[0]
     else:
         # fall back to raw text, strip call expressions
         raw = _node_text(value)
@@ -267,7 +264,6 @@ def _idents_in_pattern(node: TSNode) -> list[str]:
 
 def _get_doc_comments(children: list[TSNode], fn_index: int) -> str:
     """Collect consecutive /// doc comments immediately before fn_index."""
-    lines: list[str] = []
     j = fn_index - 1
     # Walk backwards collecting doc comment lines
     collected: list[str] = []
@@ -672,7 +668,7 @@ class RustAdapter(LanguageAdapter):
         children: list[TSNode] = list(root.children)
 
         # First pass: collect struct declarations
-        for i, child in enumerate(children):
+        for child in children:
             if child.type == "struct_item":
                 name_node = child.child_by_field_name("name")
                 if name_node is None:
@@ -884,7 +880,7 @@ def _extract_use_tree(
     if t == "identifier":
         # e.g. `use reqwest;`
         name = _node_text(node)
-        parts = prefix_parts + [name]
+        parts = [*prefix_parts, name]
         target = ".".join(parts)
         decls.append(ImportDecl(node=use_node, target=target, alias=name))
 
@@ -922,12 +918,12 @@ def _extract_use_tree(
         if len(children_idents) >= 2:
             original = children_idents[0]
             alias_id = children_idents[1]
-            parts = prefix_parts + [_node_text(original)]
+            parts = [*prefix_parts, _node_text(original)]
             target = ".".join(parts)
             alias = _node_text(alias_id)
             decls.append(ImportDecl(node=use_node, target=target, alias=alias))
         elif len(children_idents) == 1:
-            parts = prefix_parts + [_node_text(children_idents[0])]
+            parts = [*prefix_parts, _node_text(children_idents[0])]
             target = ".".join(parts)
             decls.append(ImportDecl(node=use_node, target=target, alias=target.split(".")[-1]))
 
