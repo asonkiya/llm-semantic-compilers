@@ -43,9 +43,10 @@ dependencies = [
   "tree-sitter>=0.23,<0.25",
   "tree-sitter-python>=0.23,<0.24",
   "tree-sitter-typescript>=0.23,<0.24",
-  "tree-sitter-go>=0.23,<0.25",
-  # <0.24: 0.24.x ships language ABI 15, incompatible with tree-sitter 0.24
-  "tree-sitter-rust>=0.23,<0.24",
+  "tree-sitter-go>=0.23,<0.24",  # 0.24+ ships language ABI 15
+  # <0.23.3: rust grammar bumped language ABI to 15 in a PATCH release;
+  # tree-sitter 0.24 core supports <=14 (0.23.2 is the last ABI-14 wheel)
+  "tree-sitter-rust>=0.23,<0.23.3",
   "jsonschema>=4.21",
 ]
 
