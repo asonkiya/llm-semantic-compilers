@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cgir": {
+      "command": "cgir",
+      "args": ["mcp", "--index", ".cgir"]
+    }
+  }
+}

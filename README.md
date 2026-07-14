@@ -1,8 +1,8 @@
 # CodeGraph IR (CGIR)
 
 **The deterministic contract layer for AI-modified codebases.** Agents write
-more of the code than you can review. CGIR reads a repo and — with **zero LLM
-calls** — tells you what each component *is* (effects, purity, contract,
+more of the code than you can review. CGIR reads a repo (Python, TypeScript,
+Go, Rust) and — with **zero LLM calls** — tells you what each component *is* (effects, purity, contract,
 entrypoints, call surface) and whether a change *altered* it. Think **ruff,
 but for architecture instead of style**: fast, static, hallucination-free.
 
