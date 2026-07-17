@@ -66,6 +66,16 @@ def classify_with_confidence(
         aliases = alias_maps.get(module_id, {}) if module_id else {}
         conf[func.id] = _direct_effects_confidence(cache, func, aliases)
 
+    return transitive_close(graph, conf)
+
+
+def transitive_close(
+    graph: RepoGraph, conf: dict[str, dict[str, str]]
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Global calls_effectful closure over per-function direct-effect
+    confidences. Public so incremental verify can merge old direct effects
+    with a changed file's fresh ones and re-close over the merged graph."""
+    func_nodes = [n for n in graph.nodes() if n.kind in {NodeKind.Function, NodeKind.Method}]
     # Two fixpoints over CALLS: does any reachable callee carry impurity at
     # all, and is any of it high-confidence? Only *impure* effects taint
     # callers — raise-only callees don't.
@@ -90,7 +100,7 @@ def classify_with_confidence(
     effects: dict[str, list[str]] = {}
     lexical: dict[str, list[str]] = {}
     for func in func_nodes:
-        tags = dict(conf[func.id])
+        tags = dict(conf.get(func.id, {}))
         if func.id in reaches_any:
             tags[TRANSITIVE_TAG] = "high" if func.id in reaches_high else "lexical"
         effects[func.id] = sorted(tags)

@@ -62,10 +62,17 @@ from cgir.languages.base import (
 )
 
 
-def build(graph: RepoGraph, repo_path: Path, adapter: LanguageAdapter | None = None) -> None:
+def build(
+    graph: RepoGraph,
+    repo_path: Path,
+    adapter: LanguageAdapter | None = None,
+    only_paths: set[str] | None = None,
+) -> None:
     cache = SourceCache(repo_path, adapter)
     for func in list(graph.nodes()):
         if func.kind not in {NodeKind.Function, NodeKind.Method}:
+            continue
+        if only_paths is not None and func.path not in only_paths:
             continue
         if func.path is None or func.start_line is None:
             continue

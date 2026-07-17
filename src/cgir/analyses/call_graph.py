@@ -25,10 +25,13 @@ def build_call_graph(
     tables: dict[str, SymbolTable],
     repo_path: Path,
     adapter: LanguageAdapter | None = None,
+    only_paths: set[str] | None = None,
 ) -> None:
     cache = SourceCache(repo_path, adapter)
     for func in list(graph.nodes()):
         if func.kind not in {NodeKind.Function, NodeKind.Method}:
+            continue
+        if only_paths is not None and func.path not in only_paths:
             continue
         module_id = module_of(graph, func)
         if module_id is None or func.path is None:

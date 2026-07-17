@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from cgir.export.json_export import read_specs
+from cgir.ir.component_spec import ComponentSpec
 from cgir.ir.graph import RepoGraph
 from cgir.ir.nodes import Node, NodeKind
 from cgir.pipeline import scan_repo
@@ -54,13 +55,26 @@ def verify(
     repo: Path,
     fail_on: list[str] | None = None,
     run_tests: bool = False,
+    incremental: bool = True,
 ) -> VerifyResult:
+    """Contract-check a candidate. Incremental by default: only the spliced
+    file is re-analyzed and the effect closure re-run over the merged graph
+    (equivalence with the full path is pinned by tests). ``run_tests`` (or
+    any incremental failure) takes the full-shadow path."""
     old_specs = read_specs(index_dir)
     if component_id not in {s.id for s in old_specs}:
         raise KeyError(component_id)
     node = _find_node(index_dir, component_id)
     if node is None or node.path is None or node.start_line is None or node.end_line is None:
         raise KeyError(f"{component_id}: no source span in index")
+
+    if incremental and not run_tests:
+        try:
+            new_specs = _incremental_new_specs(index_dir, repo, node, candidate)
+        except Exception:
+            new_specs = None  # anything unexpected -> full-shadow fallback
+        if new_specs is not None:
+            return _contract_result(old_specs, new_specs, component_id, fail_on)
 
     shadow = Path(tempfile.mkdtemp(prefix="cgir-verify-"))
     try:
@@ -73,26 +87,6 @@ def verify(
         scan_repo(shadow / "repo", new_index)
         new_specs = read_specs(new_index)
 
-        diff = compute_diff(old_specs, new_specs)
-        drift: dict[str, Any] = next(
-            (c["fields"] for c in diff["changed"] if c["id"] == component_id), {}
-        )
-        target_diff = {
-            "changed": [c for c in diff["changed"] if c["id"] == component_id],
-            "entrypoints": {
-                key: [e for e in items if e.get("id") == component_id]
-                for key, items in diff["entrypoints"].items()
-            },
-        }
-        viol = violations(target_diff, fail_on or [])
-        # Pin invariants on the candidate are always enforced.
-        from cgir.report.pins import change_violations, state_violations
-
-        old_target = [s for s in old_specs if s.id == component_id]
-        new_target = [s for s in new_specs if s.id == component_id]
-        viol += change_violations(old_target, new_target)
-        viol += [v for v in state_violations(new_specs) if v.startswith(component_id)]
-
         tests_ran: list[str] = []
         tests_ok: bool | None = None
         detail = ""
@@ -101,14 +95,8 @@ def verify(
             if tests_ran:
                 tests_ok, detail = _run_tests(shadow / "repo", tests_ran)
 
-        return VerifyResult(
-            component_id=component_id,
-            contract_ok=not drift,
-            violations=viol,
-            drift=drift,
-            tests_ran=tests_ran,
-            tests_ok=tests_ok,
-            detail=detail,
+        return _contract_result(
+            old_specs, new_specs, component_id, fail_on, tests_ran, tests_ok, detail
         )
     finally:
         shutil.rmtree(shadow, ignore_errors=True)
@@ -178,3 +166,153 @@ def _run_tests(repo: Path, test_files: list[str]) -> tuple[bool, str]:
     )
     tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-5:])
     return proc.returncode == 0, tail
+
+
+def _contract_result(
+    old_specs: list[ComponentSpec],
+    new_specs: list[ComponentSpec],
+    component_id: str,
+    fail_on: list[str] | None,
+    tests_ran: list[str] | None = None,
+    tests_ok: bool | None = None,
+    detail: str = "",
+) -> VerifyResult:
+    diff = compute_diff(old_specs, new_specs)
+    drift: dict[str, Any] = next(
+        (c["fields"] for c in diff["changed"] if c["id"] == component_id), {}
+    )
+    target_diff = {
+        "changed": [c for c in diff["changed"] if c["id"] == component_id],
+        "entrypoints": {
+            key: [e for e in items if e.get("id") == component_id]
+            for key, items in diff["entrypoints"].items()
+        },
+    }
+    viol = violations(target_diff, fail_on or [])
+    # Pin invariants on the candidate are always enforced.
+    from cgir.report.pins import change_violations, state_violations
+
+    old_target = [s for s in old_specs if s.id == component_id]
+    new_target = [s for s in new_specs if s.id == component_id]
+    viol += change_violations(old_target, new_target)
+    viol += [v for v in state_violations(new_specs) if v.startswith(component_id)]
+    return VerifyResult(
+        component_id=component_id,
+        contract_ok=not drift,
+        violations=viol,
+        drift=drift,
+        tests_ran=tests_ran or [],
+        tests_ok=tests_ok,
+        detail=detail,
+    )
+
+
+def _incremental_new_specs(
+    index_dir: Path, repo: Path, node: Node, candidate: str
+) -> list[ComponentSpec]:
+    """Re-analyze ONLY the spliced file against the indexed graph.
+
+    Mechanics: load the old graph from the index; write the spliced file
+    into a sparse shadow (one file, no copytree); re-ingest just that file;
+    swap its subgraph in (cross-file in-edges preserved by node id); rebuild
+    symbol tables (pure graph op); re-run call graph + CFG scoped to the
+    file; merge old direct effects (reconstructed from specs: lexical_effects
+    marks provenance) with the file's fresh ones; re-run the GLOBAL
+    transitive closure so cross-file calls_effectful drift matches a full
+    rescan. Equivalence is pinned by tests/unit/test_incremental_verify.py.
+    """
+    import json
+
+    from cgir.analyses.call_graph import build_call_graph
+    from cgir.analyses.cfg import build as build_cfg
+    from cgir.analyses.effects import (
+        TRANSITIVE_TAG,
+        _direct_effects_confidence,
+        _module_alias_maps,
+        transitive_close,
+    )
+    from cgir.analyses.purity import score
+    from cgir.analyses.symbols import build_symbol_tables, module_of
+    from cgir.ir.edges import Edge, EdgeKind
+    from cgir.languages.cache import SourceCache
+    from cgir.slicing import slice_components
+    from cgir.sources import TreeSitterSource
+
+    rel = node.path
+    assert rel is not None and node.start_line is not None and node.end_line is not None
+    graph = RepoGraph.from_jsonable(json.loads((index_dir / "repo_graph.json").read_text()))
+    old_specs = read_specs(index_dir)
+
+    shadow = Path(tempfile.mkdtemp(prefix="cgir-iverify-"))
+    try:
+        target_file = shadow / rel
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(repo / rel, target_file)
+        _splice(target_file, node.start_line, node.end_line, candidate)
+
+        mini = TreeSitterSource().ingest(shadow)
+
+        # swap the file's subgraph, preserving cross-file in-edges by id
+        file_node_ids = [n.id for n in graph.nodes() if n.path == rel]
+        preserved: list[Edge] = []
+        for nid in file_node_ids:
+            for e in graph.in_edges(nid):
+                src = graph.get_node(e.src)
+                if src.path != rel:
+                    preserved.append(e)
+        repo_node = next(n for n in graph.nodes(NodeKind.Repository))
+        for nid in file_node_ids:
+            graph.remove_node(nid)
+
+        mini_data = mini.to_jsonable()
+        mini_repo_id = next(n.id for n in mini.nodes(NodeKind.Repository))
+        for n in mini.nodes():
+            if n.kind is not NodeKind.Repository:
+                graph.add_node(n)
+        for e in mini_data["edges"]:
+            src_id: str = repo_node.id if e["src"] == mini_repo_id else e["src"]
+            if src_id == repo_node.id and e["kind"] != EdgeKind.CONTAINS.value:
+                continue
+            graph.add_edge(
+                Edge(src=src_id, dst=e["dst"], kind=EdgeKind(e["kind"]), attrs=e.get("attrs") or {})
+            )
+        for e in preserved:
+            if graph.has_node(e.src) and graph.has_node(e.dst):
+                graph.add_edge(e)
+
+        tables = build_symbol_tables(graph)
+        build_call_graph(graph, tables, shadow, only_paths={rel})
+        build_cfg(graph, shadow, only_paths={rel})
+
+        # direct effects: fresh for the file, reconstructed for the rest
+        qual_to_id = {
+            str(n.attrs.get("qualname") or n.name): n.id
+            for n in graph.nodes()
+            if n.kind in {NodeKind.Function, NodeKind.Method}
+        }
+        conf: dict[str, dict[str, str]] = {}
+        for spec in old_specs:
+            spec_nid = qual_to_id.get(spec.id)
+            if spec_nid is None:
+                continue
+            conf[spec_nid] = {
+                tag: ("lexical" if tag in spec.lexical_effects else "high")
+                for tag in spec.effects
+                if tag != TRANSITIVE_TAG
+            }
+        cache = SourceCache(shadow)
+        aliases_by_module = _module_alias_maps(graph)
+        for n in graph.nodes():
+            if n.kind not in {NodeKind.Function, NodeKind.Method} or n.path != rel:
+                continue
+            module_id = module_of(graph, n)
+            aliases = aliases_by_module.get(module_id or "", {})
+            conf[n.id] = _direct_effects_confidence(cache, n, aliases)
+
+        effects_map, lexical = transitive_close(graph, conf)
+        purity = score(graph, effects_map)
+        return slice_components(
+            graph, effects=effects_map, purity_scores=purity, lexical_effects=lexical
+        )
+    finally:
+        shutil.rmtree(shadow, ignore_errors=True)

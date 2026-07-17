@@ -31,6 +31,11 @@ class RepoGraph:
             edge.src, edge.dst, key=edge.kind.value, kind=edge.kind, attrs=dict(edge.attrs)
         )
 
+    def remove_node(self, node_id: str) -> None:
+        """Remove a node and all its incident edges (incremental re-index)."""
+        if node_id in self._g:
+            self._g.remove_node(node_id)
+
     def has_node(self, node_id: str) -> bool:
         return node_id in self._g
 
