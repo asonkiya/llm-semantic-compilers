@@ -42,6 +42,7 @@ def build_symbol_tables(graph: RepoGraph) -> dict[str, SymbolTable]:
         tables[module.id] = table
 
     _merge_go_packages(graph, tables)
+    _merge_c_globals(graph, tables)
     go_dirs = _go_package_dirs(graph)
     go_module_prefix = _go_module_prefix(graph)
 
@@ -97,6 +98,32 @@ def _resolve_go_package(
     if len(matches) == 1:
         return go_dirs[matches[0]][0]
     return None
+
+
+def _merge_c_globals(graph: RepoGraph, tables: dict[str, SymbolTable]) -> None:
+    """C's linker namespace: one repo-wide scope for external symbols.
+
+    A non-static function defined in ``a.c`` is callable from ``b.c`` with no
+    import. Merge function/class names that are defined in exactly ONE C
+    module into every C module's table; names defined in several files
+    (usually ``static`` helpers with the same name) stay unmerged — a file's
+    own definitions always shadow the merged view.
+    """
+    c_modules = [m for m in graph.nodes(NodeKind.Module) if m.attrs.get("language") == "c"]
+    if len(c_modules) < 2:
+        return
+    definitions: dict[str, list[str]] = {}
+    for module in c_modules:
+        for name, node_id in tables[module.id].bindings.items():
+            if node_id is not None:
+                definitions.setdefault(name, []).append(node_id)
+    unique: dict[str, str | None] = {
+        name: ids[0] for name, ids in definitions.items() if len(set(ids)) == 1
+    }
+    for module in c_modules:
+        merged = dict(unique)
+        merged.update(tables[module.id].bindings)  # own names shadow
+        tables[module.id].bindings = merged
 
 
 def _merge_go_packages(graph: RepoGraph, tables: dict[str, SymbolTable]) -> None:

@@ -2,7 +2,7 @@
 
 **The deterministic contract layer for AI-modified codebases.** Agents write
 more of the code than you can review. CGIR reads a repo (Python, TypeScript,
-Go, Rust) and — with **zero LLM calls** — tells you what each component *is* (effects, purity, contract,
+Go, Rust, C) and — with **zero LLM calls** — tells you what each component *is* (effects, purity, contract,
 entrypoints, call surface) and whether a change *altered* it. Think **ruff,
 but for architecture instead of style**: fast, static, hallucination-free.
 
@@ -23,7 +23,7 @@ For library/agent use in a project: `uv pip install codegraph-ir`
 ## The local loop
 
 ```bash
-cgir scan .                          # build the .cgir index (Python, TypeScript, Go, Rust)
+cgir scan .                          # build the .cgir index (Py, TS, Go, Rust, C)
 cgir watch .                         # keep it live: re-scan + show contract drift on save
 cgir pack app.service.charge --repo .   # minimal context bundle for one component
 cgir impact app.service.charge          # blast radius: affected callers, entrypoints, tests
@@ -75,7 +75,7 @@ Or via the [pre-commit framework](https://pre-commit.com): hook id `cgir-contrac
 | Blast radius + coverage-grounded test selection | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Agent context over MCP | ✅ contract packs | ✅ broader retrieval | ❌ | ❌ | ❌ |
 | Finds logic bugs | ❌ | ❌ | ✅ | ❌ | ❌ |
-| Languages | 4 builtin + [plugin API](./docs/languages.md) | 30+ | most | per-tool | spec-level |
+| Languages | 5 builtin + [plugin API](./docs/languages.md) | 30+ | most | per-tool | spec-level |
 | Cycle / layer rules | ✅ | ❌ | ❌ | ✅ mature | ❌ |
 | Cost | free, local | mostly free | ~$24–30/user/mo | free | free |
 

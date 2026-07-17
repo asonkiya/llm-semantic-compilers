@@ -285,6 +285,14 @@ Cover at least:
 8. a `// cgir: pure` pin lands in `spec.pins`
 9. cross-file call resolution through your ImportDecls
 
+**Spec field names** (exact): parameters land in `spec.inputs`
+(`list[str]` of names, not ParamDecl objects); kinds are
+`pure_function | state_transformer | effect_adapter | orchestrator |
+unknown` (there is no `ComponentKind.function`); graph edges from
+`graph.out_edges(...)` are `Edge` objects — the target is `edge.dst`,
+not a tuple index. CFG `MatchDesc` cases materialize as `NodeKind.Branch`
+chains in the graph (there is no `NodeKind.Match`).
+
 **Unregistered-adapter warning (applies to every pass, not just
 ingest):** each analysis that reads source (`build_call_graph`,
 `build_cfg`, `classify`) resolves the adapter per file extension over
@@ -300,6 +308,11 @@ build_call_graph(graph, tables, tmp_path, adapter=adapter)
 build_cfg(graph, tmp_path, adapter=adapter)
 effects = classify(graph, tmp_path, adapter=adapter)
 ```
+
+...and pass `language="<your name>"` to `slice_components` — the automatic
+per-file language lookup only sees *registered* adapters. (Once your
+adapter is registered — in-tree or via entry point — none of this section
+applies; plain calls work.)
 
 ## Honesty requirements
 

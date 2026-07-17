@@ -39,7 +39,7 @@ useful — and it funds the credibility of the flagship.
 
 ## The ladder (each rung independently valuable)
 
-1. **C adapter** *(in progress — agent-from-docs pattern, like Rust)*.
+1. **C adapter** *(✅ landed — agent-from-docs pattern, round two; 72/72, promoted with repo-wide external-linkage resolution)*.
    The kernel is C; so are the best first targets. Validate on real
    userland C, not the kernel.
 2. **`cgir decompose`** — the unshipped flagship: PDG-slice functions into

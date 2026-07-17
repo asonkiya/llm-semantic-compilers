@@ -20,6 +20,7 @@ from importlib import metadata
 from typing import Any
 
 from cgir.languages.base import ADAPTER_API_VERSION, LanguageAdapter
+from cgir.languages.c import CAdapter
 from cgir.languages.go import GoAdapter
 from cgir.languages.python import PythonAdapter
 from cgir.languages.rust import RustAdapter
@@ -30,6 +31,7 @@ _BUILTINS: tuple[LanguageAdapter, ...] = (
     TypeScriptAdapter(),
     GoAdapter(),
     RustAdapter(),
+    CAdapter(),
 )
 
 
