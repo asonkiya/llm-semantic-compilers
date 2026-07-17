@@ -29,8 +29,8 @@ converts rewriting from *generation* into **search**:
 Model quality then affects *yield*, not *correctness*. The rewrite
 benchmark (docs/experiment-log.md) already showed pack-only context makes
 rewrites *beat* whole-file context at 4–7x less input; the same harness
-run with small models, verify-filtered, is the thesis's proof-of-life
-experiment — runnable today (`scratchpad/rewrite_experiment.py`).
+run with small models, verify-filtered, was the thesis's proof-of-life
+experiment — now run: rung 3 below (`benchmarks/rung3_rewrite.py`).
 
 **Why the last two weeks weren't a detour:** the gate/pins/verify work is
 the trust machinery this vision requires. The contract layer is the
@@ -57,9 +57,15 @@ useful — and it funds the credibility of the flagship.
    impure functions decomposable (75%); SQLite 1,015/1,803 (56%).**
    Combined with the 583 already-pure functions, ~60% of SQLite is
    addressable — the rewrite-candidate pool for rungs 3–4.
-3. **Small-model benchmark** — rerun the rewrite harness with Haiku-class
-   models on pure leaf functions, verify-filtered, same-language first.
-   The headline number: *N% plug-in success at $X per component*.
+3. **Small-model benchmark** *(✅ landed — docs/experiment-log.md "Rung
+   3")*. Haiku 4.5, k=3, contract-filter → tests → one Sonnet escalation,
+   over every test-covered pure function in camera-tracking (17). **With
+   source in context (the rung-4 shape): 17/17 plug-in at ~$0.014 per
+   component, all Haiku, genuinely restructured (mean similarity 0.49).**
+   From the contract alone: 12/17 (71%) — the gap is docstring-
+   underdetermined semantics, every failure caught deterministically
+   (one by effect-gain drift before tests even ran). Harness:
+   `benchmarks/rung3_rewrite.py`.
 4. **Cross-language regeneration (C → Rust)** — light up the spec's
    dormant `REGENERATED_AS` / `TRACE_OF` edges: language-agnostic pack →
    Rust candidate → FFI boundary generation (cbindgen-shaped) → link and

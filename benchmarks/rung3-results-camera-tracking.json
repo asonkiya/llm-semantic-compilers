@@ -1,0 +1,751 @@
+{
+  "repo": "/Users/aryaman/Documents/Programming/camera-tracking",
+  "k": 3,
+  "models": {
+    "cheap": "claude-haiku-4-5-20251001",
+    "escalation": "claude-sonnet-4-6"
+  },
+  "components": 17,
+  "arms": {
+    "spec": {
+      "n": 17,
+      "solved_cheap": 10,
+      "solved_escalation": 2,
+      "unsolved": 5,
+      "plug_in_rate": 0.706,
+      "cheap_only_rate": 0.588,
+      "mean_passing_similarity": null
+    },
+    "translate": {
+      "n": 17,
+      "solved_cheap": 17,
+      "solved_escalation": 0,
+      "unsolved": 0,
+      "plug_in_rate": 1.0,
+      "cheap_only_rate": 1.0,
+      "mean_passing_similarity": 0.49
+    }
+  },
+  "cost_usd": {
+    "cheap": 0.4116,
+    "escalation": 0.0785,
+    "total": 0.4901
+  },
+  "tokens": {
+    "claude-haiku-4-5-20251001": [
+      116112,
+      59103
+    ],
+    "claude-sonnet-4-6": [
+      6356,
+      3960
+    ]
+  },
+  "results": [
+    {
+      "component_id": "aspen.actions.pose.classify.classify_window",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.633770874934271,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.classify.classify_window",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.550817341862118
+        }
+      ],
+      "verify_seconds": 3.2763885830063373,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.features.compute_pose_features",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.403568333014846,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.features.compute_pose_features",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.2493775138862287
+        }
+      ],
+      "verify_seconds": 3.2102475420106202,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.features.joint_angle",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 4.6731015420518816,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.features.joint_angle",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.7023809523809523
+        }
+      ],
+      "verify_seconds": 3.240150958066806,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_customer_journeys",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.1533660830464214,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_customer_journeys",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.21416485375876237
+        }
+      ],
+      "verify_seconds": 3.317647125106305,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_daily_rollup",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.3434676248580217,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_daily_rollup",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.37811667877027355
+        }
+      ],
+      "verify_seconds": 3.4480497089680284,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_zone_hourly_stats",
+      "arm": "spec",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_aggregate.py\u001b[0m:47: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_aggregate.py::\u001b[1mtest_zone_hourly_basic\u001b[0m - AssertionError: assert 0 >= 1\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_aggregate.py\u001b[0m:47: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_aggregate.py::\u001b[1mtest_zone_hourly_basic\u001b[0m - AssertionError: assert 0 >= 1\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_aggregate.py\u001b[0m:47: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_aggregate.py::\u001b[1mtest_zone_hourly_basic\u001b[0m - AssertionError: assert 0 >= 1\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_aggregate.py\u001b[0m:47: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_aggregate.py::\u001b[1mtest_zone_hourly_basic\u001b[0m - AssertionError: assert 0 >= 1\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 12.882807668065652,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_zone_hourly_stats",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.5062043795620438
+        }
+      ],
+      "verify_seconds": 3.3359629588667303,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.metrics.dsl.evaluate",
+      "arm": "spec",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:50: KeyError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_evaluate_fitting_room_abandoners\u001b[0m - KeyError: 'value'\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m2 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:50: KeyError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_evaluate_fitting_room_abandoners\u001b[0m - KeyError: 'value'\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m2 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31maspen/metrics/dsl.py\u001b[0m:172: AttributeError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_evaluate_fitting_room_abandoners\u001b[0m - AttributeError: 'str' object has no attribute 'get'\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m2 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mERROR\u001b[0m tests/test_custom_metrics.py\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n\u001b[31m\u001b[31m\u001b[1m1 error\u001b[0m\u001b[31m in 0.09s\u001b[0m\u001b[0m",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 12.536177458241582,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.metrics.dsl.evaluate",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.35361653272101035
+        }
+      ],
+      "verify_seconds": 3.7746385410428047,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.metrics.dsl.validate_spec",
+      "arm": "spec",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:39: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_validate_rejects_bad_specs\u001b[0m - assert False\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m1 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:34: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_validate_accepts_good_spec\u001b[0m - assert [\"'filters' must be a list\"] == []\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:34: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_validate_accepts_good_spec\u001b[0m - assert [\"missing req...ey: 'metric'\"] == []\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:34: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_validate_accepts_good_spec\u001b[0m - assert [\"filter 'min...t be numeric\"] == []\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m\u001b[31m in 0.06s\u001b[0m\u001b[0m",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 14.92956258286722,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.metrics.dsl.validate_spec",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.7285913528591352
+        }
+      ],
+      "verify_seconds": 3.78308125003241,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.graph.topo_sort",
+      "arm": "spec",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": false,
+          "tests_ok": false,
+          "feedback": "contract drift: {'effects': {'old': [], 'new': ['raise']}} violations: []",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": false,
+          "tests_ok": false,
+          "feedback": "contract drift: {'effects': {'old': [], 'new': ['raise']}} violations: []",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": false,
+          "tests_ok": false,
+          "feedback": "contract drift: {'effects': {'old': [], 'new': ['raise']}} violations: []",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "contract_ok": false,
+          "tests_ok": false,
+          "feedback": "contract drift: {'effects': {'old': [], 'new': ['raise']}} violations: []",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 2.1900557486806065,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.graph.topo_sort",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.2868525896414343
+        }
+      ],
+      "verify_seconds": 3.368895374936983,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.graph.validate",
+      "arm": "spec",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pipeline_graph.py::\u001b[1mtest_validate_bad_node_ref\u001b[0m - Failed: DID NOT RAISE <class 'KeyError'>\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m16 passed\u001b[0m, \u001b[33m2 warnings\u001b[0m\u001b[31m in 0.29s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pipeline_graph.py::\u001b[1mtest_validate_bad_node_ref\u001b[0m - Failed: DID NOT RAISE <class 'KeyError'>\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m16 passed\u001b[0m, \u001b[33m2 warnings\u001b[0m\u001b[31m in 0.29s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pipeline_graph.py::\u001b[1mtest_validate_bad_node_ref\u001b[0m - Failed: DID NOT RAISE <class 'KeyError'>\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m16 passed\u001b[0m, \u001b[33m2 warnings\u001b[0m\u001b[31m in 0.30s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pipeline_graph.py::\u001b[1mtest_validate_missing_edge_field\u001b[0m - assert False\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m15 passed\u001b[0m, \u001b[33m2 warnings\u001b[0m\u001b[31m in 0.29s\u001b[0m\u001b[0m",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 14.219063834054396,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.graph.validate",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.35493137567826366
+        }
+      ],
+      "verify_seconds": 3.7193798748776317,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.registry.all_metadata",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.3522927090525627,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.registry.all_metadata",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.6635294117647059
+        }
+      ],
+      "verify_seconds": 3.3991859999950975,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.registry.get",
+      "arm": "spec",
+      "solved_by": "escalation",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": false,
+          "tests_ok": false,
+          "feedback": "contract drift: {'effects': {'old': ['raise'], 'new': []}} violations: []",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": false,
+          "tests_ok": false,
+          "feedback": "contract drift: {'effects': {'old': ['raise'], 'new': []}} violations: []",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": false,
+          "tests_ok": false,
+          "feedback": "contract drift: {'effects': {'old': ['raise'], 'new': []}} violations: []",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 8.035457625053823,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.registry.get",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.6527415143603134
+        }
+      ],
+      "verify_seconds": 6.514338166918606,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker._iou",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.3688557501882315,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker._iou",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.57116953762466
+        }
+      ],
+      "verify_seconds": 3.4193747909739614,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker.init_tracker_state",
+      "arm": "spec",
+      "solved_by": "escalation",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_iou_tracker.py\u001b[0m:44: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_iou_tracker.py::\u001b[1mtest_tracker_creates_new_tracks\u001b[0m - assert [0, 1] == [1, 2]\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_iou_tracker.py\u001b[0m:44: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_iou_tracker.py::\u001b[1mtest_tracker_creates_new_tracks\u001b[0m - assert [0, 1] == [1, 2]\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_iou_tracker.py\u001b[0m:44: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_iou_tracker.py::\u001b[1mtest_tracker_creates_new_tracks\u001b[0m - assert [0, 1] == [1, 2]\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 12.516099540982395,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker.init_tracker_state",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.7339449541284404
+        }
+      ],
+      "verify_seconds": 3.3370536658912897,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker.update_iou_tracker",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_iou_tracker.py\u001b[0m:44: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_iou_tracker.py::\u001b[1mtest_tracker_creates_new_tracks\u001b[0m - assert [1, 1] == [1, 2]\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_iou_tracker.py\u001b[0m:65: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_iou_tracker.py::\u001b[1mtest_tracker_new_on_low_iou\u001b[0m - assert [1, 2] == [2]\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m6 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 9.554930750280619,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker.update_iou_tracker",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.5776965265082267
+        }
+      ],
+      "verify_seconds": 3.4319340840447694,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.zones.contains.point_in_polygon",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.3490857090801,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.zones.contains.point_in_polygon",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.18421052631578946
+        }
+      ],
+      "verify_seconds": 3.3226963749621063,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.zones.contains.zones_for_points",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.388238666811958,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.zones.contains.zones_for_points",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "contract_ok": true,
+          "tests_ok": true,
+          "feedback": "",
+          "similarity": 0.6175115207373272
+        }
+      ],
+      "verify_seconds": 3.6291722080204636,
+      "error": ""
+    }
+  ]
+}

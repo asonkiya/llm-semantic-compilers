@@ -202,3 +202,48 @@ bindings) — and landing it restored pack's lead. This is the same
 monotonic loop the Python rounds followed, and it demonstrates the
 contract-preservation oracle catching a real precision regression the moment
 it appeared.
+
+## Rung 3 (vision ladder): the small-model benchmark
+
+The economic-thesis experiment: **sample k=3 from Haiku 4.5 → contract
+filter (incremental verify) → component tests → escalate failures once to
+Sonnet 4.6.** Worklist: every module-level pure function in
+`camera-tracking` with direct test coverage (17 components, 3–101 lines —
+pose classification, analytics rollups, a metrics DSL, IoU tracking,
+point-in-polygon). Harness: `benchmarks/rung3_rewrite.py` (tracked;
+replaces the lost scratchpad harness). Results:
+`benchmarks/rung3-results-camera-tracking.json`.
+
+| arm | plug-in rate | Haiku-only | escalated | unsolved | cost |
+|---|---|---|---|---|---|
+| **translate** (source in context — the rung-4 mechanics proxy) | **17/17 (100%)** | 17 | 0 | 0 | ~$0.014/component |
+| **spec** (contract+docstring only, body hidden) | **12/17 (71%)** | 10 | 2 | 5 | ~$0.015/component |
+
+Whole run — 34 component-arms, 102+ generations, every candidate
+contract-verified and test-run — cost **$0.49** (Haiku $0.41, Sonnet
+$0.08). 27 of 29 solved arms passed on Haiku's *first* candidate.
+
+Translate-arm rewrites are genuine restructurings, not copies: mean
+normalized similarity to the original **0.49** (range 0.18–0.73), all 17
+passing tests.
+
+The five spec-arm failures are the "honest ceiling" made concrete —
+**contract + docstring underdetermine behavior**, and the oracles caught
+every one deterministically:
+
+- 4× killed by tests: unstated semantics (a zone-stats counting rule, DSL
+  validation rules and error-message shapes, a missing-field check).
+- 1× killed by the *contract stage itself*: `topo_sort` — Haiku added
+  cycle-detection `raise`, an effect the original doesn't have. Effect-gain
+  drift caught before any test ran.
+
+Anti-vacuity control: a deliberately wrong candidate (correct signature,
+garbage math) passes the contract stage and fails the test stage — the
+two filters measure different things and both bite.
+
+**Takeaway:** verification being free and deterministic converts cheap
+generation into search that *works*: 100% plug-in success at about a cent
+per component when the model can see the source (the C→Rust shape), 71%
+from the contract alone. Model quality affected yield, not correctness —
+nothing wrong ever got through; it just cost one escalation or stayed
+unsolved.
