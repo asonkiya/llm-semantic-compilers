@@ -426,6 +426,16 @@ class RustAdapter(LanguageAdapter):
             stack.extend(node.children)
         return None
 
+    def function_index_entries(self, root: TSNode, source: bytes):
+        stack: list[TSNode] = [root]
+        while stack:
+            node = stack.pop()
+            if node.type == "function_item":
+                name_node = node.child_by_field_name("name")
+                if name_node is not None:
+                    yield (_node_text(name_node), node.start_point[0], node)
+            stack.extend(node.children)
+
     # --- effects ---------------------------------------------------------------
 
     def direct_effects(self, func_node: TSNode, source: bytes, aliases: dict[str, str]) -> set[str]:

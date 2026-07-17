@@ -39,8 +39,8 @@ def build_call_graph(
         parsed = cache.get(func.path)
         if parsed is None:
             continue
-        source, root, file_adapter = parsed
-        func_ts = file_adapter.locate_function(root, func.name, (func.start_line or 1) - 1)
+        source, _root, file_adapter = parsed
+        func_ts = cache.locate(func.path, func.name, (func.start_line or 1) - 1)
         if func_ts is None:
             continue
         class_fields = _owning_class_fields(graph, func)

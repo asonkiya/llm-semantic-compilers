@@ -122,8 +122,8 @@ def _direct_effects_confidence(
     parsed = cache.get(func.path)
     if parsed is None:
         return {}
-    source, root, adapter = parsed
-    func_ts = adapter.locate_function(root, func.name, func.start_line - 1)
+    source, _root, adapter = parsed
+    func_ts = cache.locate(func.path, func.name, func.start_line - 1)
     if func_ts is None:
         return {}
     return adapter.direct_effects_confidence(func_ts, source, aliases)

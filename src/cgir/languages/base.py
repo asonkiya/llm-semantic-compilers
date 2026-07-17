@@ -275,6 +275,14 @@ class LanguageAdapter(ABC):
     def describe_statement(self, node: TSNode, source: bytes) -> StatementDesc:
         """Classify one statement and extract its parts (see descriptors)."""
 
+    def function_index_entries(self, root: TSNode, source: bytes):
+        """Yield ``(name, start_row, node)`` for every function/method
+        definition in one tree walk. Powers :meth:`SourceCache.locate`'s
+        per-file index — O(tree) once instead of O(functions x tree)
+        (the hot path found scanning SQLite's 270k-line amalgamation).
+        Default: empty — the cache falls back to :meth:`locate_function`."""
+        return iter(())
+
     def direct_effects_confidence(
         self, func_node: TSNode, source: bytes, aliases: dict[str, str]
     ) -> dict[str, str]:

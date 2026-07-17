@@ -395,6 +395,16 @@ class CAdapter(LanguageAdapter):
     def parse(self, source: bytes) -> TSNode:
         return self._parser.parse(source).root_node
 
+    def function_index_entries(self, root: TSNode, source: bytes):
+        stack: list[TSNode] = [root]
+        while stack:
+            node = stack.pop()
+            if node.type == "function_definition":
+                n = _extract_function_name(node)
+                if n:
+                    yield (n, node.start_point[0], node)
+            stack.extend(node.children)
+
     def locate_function(self, root: TSNode, name: str, start_row: int) -> TSNode | None:
         """Find a function_definition by name and start row (0-based)."""
         stack = [root]

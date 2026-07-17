@@ -72,8 +72,8 @@ def build(graph: RepoGraph, repo_path: Path, adapter: LanguageAdapter | None = N
         parsed = cache.get(func.path)
         if parsed is None:
             continue
-        source, root, file_adapter = parsed
-        func_ts = file_adapter.locate_function(root, func.name, func.start_line - 1)
+        source, _root, file_adapter = parsed
+        func_ts = cache.locate(func.path, func.name, func.start_line - 1)
         if func_ts is None:
             continue
         body = file_adapter.function_body(func_ts)

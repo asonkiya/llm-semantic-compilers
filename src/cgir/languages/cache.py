@@ -56,6 +56,25 @@ class SourceCache:
         self._repo_path = repo_path
         self._forced = adapter
         self._entries: dict[str, tuple[bytes, TSNode, LanguageAdapter] | None] = {}
+        self._fn_index: dict[str, dict[tuple[str, int], TSNode] | None] = {}
+
+    def locate(self, rel_path: str, name: str, start_row: int) -> TSNode | None:
+        """Find a function definition via a per-file index built in ONE tree
+        walk (vs re-walking the whole tree per lookup). Falls back to the
+        adapter's ``locate_function`` when the adapter provides no index."""
+        parsed = self.get(rel_path)
+        if parsed is None:
+            return None
+        source, root, adapter = parsed
+        if rel_path not in self._fn_index:
+            entries = {
+                (n, row): node for n, row, node in adapter.function_index_entries(root, source)
+            }
+            self._fn_index[rel_path] = entries or None
+        index = self._fn_index[rel_path]
+        if index is None:  # adapter without the hook (e.g. older plugin)
+            return adapter.locate_function(root, name, start_row)
+        return index.get((name, start_row))
 
     def get(self, rel_path: str) -> tuple[bytes, TSNode, LanguageAdapter] | None:
         """Return ``(source_bytes, root_node, adapter)`` for a path, or None."""

@@ -203,6 +203,26 @@ class TypeScriptAdapter(LanguageAdapter):
             stack.extend(node.children)
         return None
 
+    def function_index_entries(self, root: TSNode, source: bytes):
+        stack: list[TSNode] = [root]
+        while stack:
+            node = stack.pop()
+            if node.type in {"function_declaration", "method_definition", "function_expression"}:
+                name = _node_name(node)
+                if name:
+                    yield (name, node.start_point[0], node)
+            elif node.type in {"lexical_declaration", "variable_declaration"}:
+                # arrow/function values: keyed by declarator name at the
+                # DECLARATION's row; the value node carries the body
+                for decl in node.named_children:
+                    if decl.type != "variable_declarator":
+                        continue
+                    nn = decl.child_by_field_name("name")
+                    val = decl.child_by_field_name("value")
+                    if nn is not None and val is not None and val.type in _FUNCTION_VALUES:
+                        yield (_node_text(nn), node.start_point[0], val)
+            stack.extend(node.children)
+
     # --- effects -------------------------------------------------------------
 
     def direct_effects(self, func_node: TSNode, source: bytes, aliases: dict[str, str]) -> set[str]:

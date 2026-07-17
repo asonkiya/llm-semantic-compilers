@@ -115,3 +115,22 @@ def test_instance_entry_point_supported() -> None:
     # entry point may resolve to an instance instead of a class
     adapters, _ = discover_adapters([_FakeEntryPoint("fake", _FakeAdapter())])
     assert "fake" in adapters
+
+
+def test_source_cache_locate_is_indexed(tmp_path):
+    """SourceCache.locate builds a one-walk per-file function index instead
+    of re-walking the whole tree per lookup — the O(functions x tree) hot
+    path found scanning SQLite's 270k-line amalgamation (rung 1)."""
+    from pathlib import Path
+
+    from cgir.languages.cache import SourceCache
+
+    (tmp_path / "m.py").write_text(
+        "def a():\n    return 1\n\n\nclass C:\n    def m(self):\n        return 2\n"
+    )
+    cache = SourceCache(Path(tmp_path))
+    node = cache.locate("m.py", "a", 0)
+    assert node is not None and node.start_point[0] == 0
+    method = cache.locate("m.py", "m", 5)
+    assert method is not None and method.start_point[0] == 5
+    assert cache.locate("m.py", "nope", 0) is None

@@ -83,6 +83,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | Adapter authoring guide, validated by a docs-only agent experiment (Rust adapter, 36/36, 9/9 bar; gaps folded back; PinIndex line_comment fix) | done | `docs/writing-an-adapter.md`, `examples/rust-adapter/` |
 | Rust adapter (structs+impl methods w/ field DI, use-tree imports, match/loop CFG, effect tiers; agent-written, reviewed+promoted) | done | `src/cgir/languages/rust.py` |
 | C adapter (functions/structs/typedefs, include imports, switch CFG, POSIX/sqlite3 effect tables; agent-written, reviewed+promoted) + repo-wide external-linkage resolution | done | `src/cgir/languages/c.py`, `symbols._merge_c_globals` |
+| Indexed function lookup (`SourceCache.locate` + `function_index_entries`): SQLite amalgamation scan 7m46s → 37s (12.6x), byte-identical output | done | `languages/cache.py`, all 5 adapters |
 | Entrypoint recognition (HTTP/CLI/task decorators) | done | `src/cgir/analyses/entrypoints.py` |
 | Context packer (`cgir pack`, budget-aware, type closure + docstrings + raises) | done | `src/cgir/report/pack.py` |
 | Docstring / raises / module-variable extraction | done | `tree_sitter_source._docstring_text`, `_raised_names`, `_add_module_variables` |

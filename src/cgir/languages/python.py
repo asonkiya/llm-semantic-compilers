@@ -178,6 +178,20 @@ class PythonAdapter(LanguageAdapter):
             stack.extend(node.children)
         return None
 
+    def function_index_entries(self, root: TSNode, source: bytes):
+        stack: list[TSNode] = [root]
+        while stack:
+            node = stack.pop()
+            if node.type == "function_definition":
+                name_node = node.child_by_field_name("name")
+                if name_node is not None and name_node.text is not None:
+                    yield (
+                        name_node.text.decode("utf-8", errors="replace"),
+                        node.start_point[0],
+                        node,
+                    )
+            stack.extend(node.children)
+
     def direct_effects(self, func_node: TSNode, source: bytes, aliases: dict[str, str]) -> set[str]:
         return set(self.direct_effects_confidence(func_node, source, aliases))
 

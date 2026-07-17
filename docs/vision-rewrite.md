@@ -39,9 +39,15 @@ useful — and it funds the credibility of the flagship.
 
 ## The ladder (each rung independently valuable)
 
-1. **C adapter** *(✅ landed — agent-from-docs pattern, round two; 72/72, promoted with repo-wide external-linkage resolution)*.
-   The kernel is C; so are the best first targets. Validate on real
-   userland C, not the kernel.
+1. **C adapter** *(✅ landed and SQLite-validated)*. Agent-from-docs round
+   two (72/72, promoted, repo-wide external-linkage resolution). First
+   scan of the SQLite amalgamation (269,613 lines, one file): **2,663
+   components, 7,840 resolved calls, 583 pure functions (21%) — the
+   rewrite-candidate pool exists and is enumerable.** The scan also
+   surfaced the first genuine scale bottleneck (O(functions x tree)
+   function lookup: 7m46s) — fixed with per-file function indexing
+   (37s, 12.6x, byte-identical output). `cgir search "kind:pure
+   callers:>5"` over SQLite is rung 2's worklist.
 2. **`cgir decompose`** — the unshipped flagship: PDG-slice functions into
    functional-core / imperative-shell, i.e. *manufacture* the pure,
    pin-able, rewritable units. All machinery exists (PDG, effects,
