@@ -48,11 +48,15 @@ useful — and it funds the credibility of the flagship.
    function lookup: 7m46s) — fixed with per-file function indexing
    (37s, 12.6x, byte-identical output). `cgir search "kind:pure
    callers:>5"` over SQLite is rung 2's worklist.
-2. **`cgir decompose`** — the unshipped flagship: PDG-slice functions into
-   functional-core / imperative-shell, i.e. *manufacture* the pure,
-   pin-able, rewritable units. All machinery exists (PDG, effects,
-   purity, blast radius). Metric: % of a repo decomposable into pure
-   components with test coverage.
+2. **`cgir decompose`** *(✅ landed)* — PDG-sliced functional-core /
+   imperative-shell suggestions (advisory; the safety net is extract →
+   pin → verify). Per-statement effects via the adapters'
+   ``classify_calls``; shell = effectful statements + everything data- or
+   control-downstream; whole control regions containing effects collapse
+   (you can't extract half a loop). **Measured: camera-tracking 120/159
+   impure functions decomposable (75%); SQLite 1,015/1,803 (56%).**
+   Combined with the 583 already-pure functions, ~60% of SQLite is
+   addressable — the rewrite-candidate pool for rungs 3–4.
 3. **Small-model benchmark** — rerun the rewrite harness with Haiku-class
    models on pure leaf functions, verify-filtered, same-language first.
    The headline number: *N% plug-in success at $X per component*.

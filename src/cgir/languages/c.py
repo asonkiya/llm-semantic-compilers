@@ -687,10 +687,13 @@ class CAdapter(LanguageAdapter):
         self, func_node: TSNode, source: bytes, aliases: dict[str, str]
     ) -> dict[str, str]:
         body = self.function_body(func_node)
-        if body is None:
-            return {}
+        return self.classify_calls(body, source, aliases) if body is not None else {}
+
+    def classify_calls(
+        self, node: TSNode, source: bytes, aliases: dict[str, str]
+    ) -> dict[str, str]:
         tags: dict[str, str] = {}
-        for call in _walk_calls(body):
+        for call in _walk_calls(node):
             func_expr = call.child_by_field_name("function")
             if func_expr is None:
                 continue

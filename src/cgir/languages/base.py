@@ -294,6 +294,14 @@ class LanguageAdapter(ABC):
         tag from :meth:`direct_effects` is high."""
         return dict.fromkeys(self.direct_effects(func_node, source, aliases), "high")
 
+    def classify_calls(
+        self, node: TSNode, source: bytes, aliases: dict[str, str]
+    ) -> dict[str, str]:
+        """Effect tags found in an *arbitrary* subtree (statement-level
+        classification for ``cgir decompose``). Default: none — adapters
+        without this report as unsupported for decomposition."""
+        return {}
+
     def global_declared_names(self, func_node: TSNode, source: bytes) -> set[str]:
         """Names this function declares as outer-scope (`global`/`nonlocal`).
 

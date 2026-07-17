@@ -186,6 +186,13 @@ Purity note: a function is classified `pure_function` only if it has no
 impure effects **and** no caller-observable mutation — `mutates` on a
 parameter or module global is what flips it to `state_transformer`.
 
+### Optional: `classify_calls(self, node, source, aliases) -> dict[str, str]`
+Same classification as `direct_effects_confidence` but over an *arbitrary*
+subtree — powers statement-level effect location for `cgir decompose`.
+Implement it as the real walker and have `direct_effects_confidence`
+delegate (body lookup + `classify_calls`). Default: empty — decompose
+reports your language as unsupported rather than guessing.
+
 ### Optional: `global_declared_names(self, func_node, source) -> set[str]`
 Names the function declares as outer-scope (Python `global`/`nonlocal`).
 Assignments to them count as mutations. Default: empty set — correct for

@@ -702,6 +702,59 @@ def languages() -> None:
 
 
 @app.command()
+def decompose(
+    component_id: Annotated[str | None, typer.Argument(metavar="ID")] = None,
+    repo: Annotated[Path, typer.Option("--repo", help="Repo root to analyze.")] = Path("."),
+    all_: Annotated[bool, typer.Option("--all", help="Repo-wide decomposability report.")] = False,
+    min_core: Annotated[int, typer.Option("--min-core", help="Minimum pure-core statements.")] = 3,
+) -> None:
+    """Suggest a functional-core/imperative-shell split for an impure component."""
+    from cgir.analyses.call_graph import build_call_graph
+    from cgir.analyses.cfg import build as build_cfg
+    from cgir.analyses.decompose import decompose as run_decompose
+    from cgir.analyses.decompose import decompose_all, render_decompose
+    from cgir.analyses.effects import classify
+    from cgir.analyses.pdg import build as build_pdg
+    from cgir.analyses.symbols import build_symbol_tables
+    from cgir.sources import TreeSitterSource
+
+    graph = TreeSitterSource().ingest(repo)
+    tables = build_symbol_tables(graph)
+    build_call_graph(graph, tables, repo)
+    build_cfg(graph, repo)
+    build_pdg(graph)
+    effects = classify(graph, repo)
+
+    if all_:
+        report = decompose_all(graph, effects, repo, min_core=min_core)
+        typer.echo(
+            f"impure functions: {report['impure_functions']}  "
+            f"decomposable: {report['decomposable']}  "
+            f"({report['decomposability_pct']}%)"
+        )
+        for r in report["results"]:
+            if r.decomposable:
+                typer.echo(f"  {r.function_id}: {r.core_statements}/{r.total_statements} core")
+        return
+    if component_id is None:
+        raise typer.BadParameter("give a component id or --all")
+    prefix_id = component_id if ":" in component_id else None
+    target = prefix_id or next(
+        (
+            f"{p}:{component_id}"
+            for p in ("func", "method")
+            if graph.has_node(f"{p}:{component_id}")
+        ),
+        component_id,
+    )
+    try:
+        result = run_decompose(graph, effects, target, repo, min_core=min_core)
+    except Exception as exc:
+        raise typer.BadParameter(f"cannot decompose {component_id}: {exc}") from exc
+    typer.echo(render_decompose(result), nl=False)
+
+
+@app.command()
 def lsp() -> None:
     """Serve live contract diagnostics over LSP (stdio; requires cgir[lsp])."""
     from cgir.api.lsp_server import create_server

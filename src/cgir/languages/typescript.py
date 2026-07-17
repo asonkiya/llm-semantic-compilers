@@ -233,16 +233,19 @@ class TypeScriptAdapter(LanguageAdapter):
     def direct_effects_confidence(
         self, func_node: TSNode, source: bytes, aliases: dict[str, str]
     ) -> dict[str, str]:
+        body = self.function_body(func_node)
+        return self.classify_calls(body, source, aliases) if body is not None else {}
+
+    def classify_calls(
+        self, node: TSNode, source: bytes, aliases: dict[str, str]
+    ) -> dict[str, str]:
         tags: dict[str, str] = {}
 
         def add(tag: str, conf: str) -> None:
             if tags.get(tag) != "high":
                 tags[tag] = conf
 
-        body = self.function_body(func_node)
-        if body is None:
-            return tags
-        stack: list[TSNode] = [body]
+        stack: list[TSNode] = [node]
         while stack:
             node = stack.pop()
             if node.type == "throw_statement":
