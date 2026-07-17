@@ -395,7 +395,9 @@ class CAdapter(LanguageAdapter):
     def parse(self, source: bytes) -> TSNode:
         return self._parser.parse(source).root_node
 
-    def function_index_entries(self, root: TSNode, source: bytes):
+    def function_index_entries(
+        self, root: TSNode, source: bytes
+    ) -> Iterator[tuple[str, int, TSNode]]:
         stack: list[TSNode] = [root]
         while stack:
             node = stack.pop()

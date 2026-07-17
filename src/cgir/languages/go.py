@@ -18,6 +18,8 @@ Mapping decisions (documented in ``docs/languages.md``):
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import tree_sitter_go
 from tree_sitter import Language, Parser
 from tree_sitter import Node as TSNode
@@ -128,7 +130,9 @@ class GoAdapter(LanguageAdapter):
             stack.extend(node.children)
         return None
 
-    def function_index_entries(self, root: TSNode, source: bytes):
+    def function_index_entries(
+        self, root: TSNode, source: bytes
+    ) -> Iterator[tuple[str, int, TSNode]]:
         stack: list[TSNode] = [root]
         while stack:
             node = stack.pop()

@@ -203,7 +203,9 @@ class TypeScriptAdapter(LanguageAdapter):
             stack.extend(node.children)
         return None
 
-    def function_index_entries(self, root: TSNode, source: bytes):
+    def function_index_entries(
+        self, root: TSNode, source: bytes
+    ) -> Iterator[tuple[str, int, TSNode]]:
         stack: list[TSNode] = [root]
         while stack:
             node = stack.pop()

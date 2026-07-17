@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from tree_sitter import Node as TSNode
@@ -275,7 +276,9 @@ class LanguageAdapter(ABC):
     def describe_statement(self, node: TSNode, source: bytes) -> StatementDesc:
         """Classify one statement and extract its parts (see descriptors)."""
 
-    def function_index_entries(self, root: TSNode, source: bytes):
+    def function_index_entries(
+        self, root: TSNode, source: bytes
+    ) -> Iterator[tuple[str, int, TSNode]]:
         """Yield ``(name, start_row, node)`` for every function/method
         definition in one tree walk. Powers :meth:`SourceCache.locate`'s
         per-file index — O(tree) once instead of O(functions x tree)
