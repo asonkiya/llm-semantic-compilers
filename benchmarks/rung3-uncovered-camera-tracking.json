@@ -1,0 +1,499 @@
+{
+  "repo": "/Users/aryaman/Documents/Programming/camera-tracking",
+  "k": 3,
+  "models": {
+    "cheap": "claude-haiku-4-5-20251001",
+    "escalation": "claude-sonnet-4-6"
+  },
+  "prompt": "pack",
+  "filter": "contract-only",
+  "worklist": "uncovered",
+  "components": 24,
+  "arms": {
+    "translate": {
+      "n": 24,
+      "solved_cheap": 23,
+      "solved_escalation": 1,
+      "unsolved": 0,
+      "plug_in_rate": 1.0,
+      "cheap_only_rate": 0.958,
+      "mean_passing_similarity": 0.657
+    }
+  },
+  "cost_usd": {
+    "cheap": 0.3244,
+    "escalation": 0.0326,
+    "total": 0.357
+  },
+  "tokens": {
+    "claude-haiku-4-5-20251001": [
+      92808,
+      46320
+    ],
+    "claude-sonnet-4-6": [
+      4029,
+      1367
+    ]
+  },
+  "results": [
+    {
+      "component_id": "aspen.tracking.byte_tracker.update_byte_tracker",
+      "arm": "translate",
+      "solved_by": "escalation",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def update_byte_tracker(\n    state: ByteTrackerState,\n    frame_index: int,\n    bboxes: list[tuple[float, float, float, float]],\n    scores: list[float],\n    *,\n    high_thresh: float = 0.45,\n    new_track_thresh: float = 0.5,\n    match_iou_first: float = 0.2,\n    match_iou_second: float = 0.5,\n    max_age_frames: int = 30,\n) -> tuple[ByteTrackerState, list[int]]:\n    \"\"\"One ByteTrack step. Returns (new_state, ids aligned with bboxes).\n\n    id -1 means the detection was discarded (unmatched low-score det, or a\n    brand-new track still on probation).\n    \"\"\"\n    # Filter and predict live tracks\n    alive = []\n    for track in state.tracks:\n        if frame_index - track.last_seen_frame <= max_age_frames:\n            track.mean, track.cov = _kf_predict(track.mean, track.cov)\n            alive.append(track)\n\n    # Partition detections by confidence\n    high_confidence_indices = [\n        idx for idx, score in enumerate(scores) if score >= high_thresh\n    ]\n    low_confidence_indices = [\n        idx for idx, score in enumerate(scores) if score < high_thresh\n    ]\n\n    # Initialize result tracking\n    track_assignments = [-1] * len(bboxes)\n    track_predicted_boxes = [t.predicted_xyxy() for t in alive]\n\n    def _process_hit(track_obj: ByteTrack, detection_idx: int) -> None:\n        track_obj.mean, track_obj.cov = _kf_update(\n            track_obj.mean, track_obj.cov, _xyxy_to_cxcyah(bboxes[detection_idx])\n        )\n        track_obj.score = scores[detection_idx]\n        track_obj.last_seen_frame = frame_index\n        track_obj.hits += 1\n        if track_obj.hits >= 2:\n            track_obj.confirmed = True\n        if track_obj.confirmed:\n            track_assignments[detection_idx] = track_obj.track_id\n\n    # First matching stage: high-confidence detections\n    iou_matrix_1 = _iou_matrix(\n        track_predicted_boxes,\n        [bboxes[i] for i in high_confidence_indices]\n    )\n    matches_stage1, unmatched_tracks_1, unmatched_detections_1 = _assign(\n        iou_matrix_1, match_iou_first\n    )\n    for track_idx, det_idx in matches_stage1:\n        _process_hit(alive[track_idx], high_confidence_indices[det_idx])\n\n    # Second matching stage: low-confidence detections vs recently-seen tracks\n    active_track_indices = [\n        idx for idx in unmatched_tracks_1\n        if alive[idx].last_seen_frame == frame_index - 1\n    ]\n    iou_matrix_2 = _iou_matrix(\n        [track_predicted_boxes[idx] for idx in active_track_indices],\n        [bboxes[i] for i in low_confidence_indices]\n    )\n    matches_stage2, _, _ = _assign(iou_matrix_2, match_iou_second)\n    for active_idx, det_idx in matches_stage2:\n        _process_hit(alive[active_track_indices[active_idx]], low_confidence_indices[det_idx])\n\n    # Create new tracks from unmatched high-confidence detections\n    next_track_id = state.next_id\n    for det_idx in unmatched_detections_1:\n        detection_idx = high_confidence_indices[det_idx]\n        if scores[detection_idx] >= new_track_thresh:\n            mean, cov = _kf_initiate(_xyxy_to_cxcyah(bboxes[detection_idx]))\n            is_confirmed = (frame_index == 0)\n            new_track = ByteTrack(\n                track_id=next_track_id,\n                mean=mean,\n                cov=cov,\n                score=scores[detection_idx],\n                last_seen_frame=frame_index,\n                confirmed=is_confirmed,\n            )\n            alive.append(new_track)\n            if is_confirmed:\n                track_assignments[detection_idx] = next_track_id\n            next_track_id += 1\n\n    # Remove unconfirmed tracks that were not seen in this frame\n    alive = [\n        t for t in alive\n        if t.confirmed or t.last_seen_frame == frame_index\n    ]\n\n    return ByteTrackerState(next_id=next_track_id, tracks=alive), track_assignments",
+          "contract_ok": false,
+          "tests_ok": null,
+          "gate_ok": false,
+          "feedback": "contract drift: {'signature': {'old': 'update_byte_tracker(\\n    state: ByteTrackerState,\\n    frame_index: int,\\n    bboxes: list[tuple[float, float, float, float]],\\n    scores: list[float],\\n    *,\\n    # Defaults tuned for yolov8n-pose on indoor footage, which scores lower\\n    # than the YOLOX-X detector ByteTrack was published with (0.5/0.6 there).\\n    high_thresh: float = 0.45,\\n    new_track_thresh: float = 0.5,\\n    match_iou_first: float = 0.2,\\n    match_iou_second: float = 0.5,\\n    max_age_frames: int = 30,\\n) -> tuple[ByteTrackerState, list[int]]', 'new': 'update_byte_tracker(\\n    state: ByteTrackerState,\\n    frame_index: int,\\n    bboxes: list[tuple[float, float, float, float]],\\n    scores: list[float],\\n    *,\\n    high_thresh: float = 0.45,\\n    new_track_thresh: float = 0.5,\\n    match_iou_first: float = 0.2,\\n    match_iou_second: float = 0.5,\\n    max_age_frames: int = 30,\\n) -> tuple[ByteTrackerState, list[int]]'}} violations: []",
+          "similarity": 0.6414191748056608
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def update_byte_tracker(\n    state: ByteTrackerState,\n    frame_index: int,\n    bboxes: list[tuple[float, float, float, float]],\n    scores: list[float],\n    *,\n    high_thresh: float = 0.45,\n    new_track_thresh: float = 0.5,\n    match_iou_first: float = 0.2,\n    match_iou_second: float = 0.5,\n    max_age_frames: int = 30,\n) -> tuple[ByteTrackerState, list[int]]:\n    \"\"\"One ByteTrack step. Returns (new_state, ids aligned with bboxes).\n\n    id -1 means the detection was discarded (unmatched low-score det, or a\n    brand-new track still on probation).\n    \"\"\"\n    # Filter and predict live tracks\n    live_tracks = []\n    for track in state.tracks:\n        if frame_index - track.last_seen_frame <= max_age_frames:\n            track.mean, track.cov = _kf_predict(track.mean, track.cov)\n            live_tracks.append(track)\n\n    # Partition detections by confidence\n    high_confidence_indices = [i for i, s in enumerate(scores) if s >= high_thresh]\n    low_confidence_indices = [i for i, s in enumerate(scores) if s < high_thresh]\n\n    # Initialize assignment result\n    detection_assignments = [-1] * len(bboxes)\n    predicted_track_boxes = [t.predicted_xyxy() for t in live_tracks]\n\n    def _process_hit(track: ByteTrack, detection_idx: int) -> None:\n        \"\"\"Update track with a detection match.\"\"\"\n        track.mean, track.cov = _kf_update(\n            track.mean, track.cov, _xyxy_to_cxcyah(bboxes[detection_idx])\n        )\n        track.score = scores[detection_idx]\n        track.last_seen_frame = frame_index\n        track.hits += 1\n        if track.hits >= 2:\n            track.confirmed = True\n        if track.confirmed:\n            detection_assignments[detection_idx] = track.track_id\n\n    # First matching stage: high-confidence detections against all tracks\n    high_det_boxes = [bboxes[i] for i in high_confidence_indices]\n    iou_matrix_1 = _iou_matrix(predicted_track_boxes, high_det_boxes)\n    matches_stage1, unmatched_track_ids, unmatched_high_det_ids = _assign(iou_matrix_1, match_iou_first)\n    \n    for track_idx, det_idx in matches_stage1:\n        _process_hit(live_tracks[track_idx], high_confidence_indices[det_idx])\n\n    # Second matching stage: low-confidence detections against recently-seen tracks\n    recently_seen_track_indices = [\n        idx for idx in unmatched_track_ids\n        if live_tracks[idx].last_seen_frame == frame_index - 1\n    ]\n    recent_track_boxes = [predicted_track_boxes[idx] for idx in recently_seen_track_indices]\n    low_det_boxes = [bboxes[i] for i in low_confidence_indices]\n    \n    iou_matrix_2 = _iou_matrix(recent_track_boxes, low_det_boxes)\n    matches_stage2, _, _ = _assign(iou_matrix_2, match_iou_second)\n    \n    for recent_idx, det_idx in matches_stage2:\n        track_idx = recently_seen_track_indices[recent_idx]\n        _process_hit(live_tracks[track_idx], low_confidence_indices[det_idx])\n\n    # Create new tracks from unmatched high-confidence detections\n    next_track_id = state.next_id\n    for det_idx in unmatched_high_det_ids:\n        detection_position = high_confidence_indices[det_idx]\n        if scores[detection_position] < new_track_thresh:\n            continue\n        \n        init_mean, init_cov = _kf_initiate(_xyxy_to_cxcyah(bboxes[detection_position]))\n        is_immediately_confirmed = (frame_index == 0)\n        \n        new_track = ByteTrack(\n            track_id=next_track_id,\n            mean=init_mean,\n            cov=init_cov,\n            score=scores[detection_position],\n            last_seen_frame=frame_index,\n            confirmed=is_immediately_confirmed,\n        )\n        live_tracks.append(new_track)\n        \n        if is_immediately_confirmed:\n            detection_assignments[detection_position] = next_track_id\n        \n        next_track_id += 1\n\n    # Remove unconfirmed tracks that didn't appear this frame\n    surviving_tracks = [\n        t for t in live_tracks\n        if t.confirmed or t.last_seen_frame == frame_index\n    ]\n\n    return ByteTrackerState(next_id=next_track_id, tracks=surviving_tracks), detection_assignments",
+          "contract_ok": false,
+          "tests_ok": null,
+          "gate_ok": false,
+          "feedback": "contract drift: {'signature': {'old': 'update_byte_tracker(\\n    state: ByteTrackerState,\\n    frame_index: int,\\n    bboxes: list[tuple[float, float, float, float]],\\n    scores: list[float],\\n    *,\\n    # Defaults tuned for yolov8n-pose on indoor footage, which scores lower\\n    # than the YOLOX-X detector ByteTrack was published with (0.5/0.6 there).\\n    high_thresh: float = 0.45,\\n    new_track_thresh: float = 0.5,\\n    match_iou_first: float = 0.2,\\n    match_iou_second: float = 0.5,\\n    max_age_frames: int = 30,\\n) -> tuple[ByteTrackerState, list[int]]', 'new': 'update_byte_tracker(\\n    state: ByteTrackerState,\\n    frame_index: int,\\n    bboxes: list[tuple[float, float, float, float]],\\n    scores: list[float],\\n    *,\\n    high_thresh: float = 0.45,\\n    new_track_thresh: float = 0.5,\\n    match_iou_first: float = 0.2,\\n    match_iou_second: float = 0.5,\\n    max_age_frames: int = 30,\\n) -> tuple[ByteTrackerState, list[int]]'}} violations: []",
+          "similarity": 0.6422641509433962
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def update_byte_tracker(\n    state: ByteTrackerState,\n    frame_index: int,\n    bboxes: list[tuple[float, float, float, float]],\n    scores: list[float],\n    *,\n    high_thresh: float = 0.45,\n    new_track_thresh: float = 0.5,\n    match_iou_first: float = 0.2,\n    match_iou_second: float = 0.5,\n    max_age_frames: int = 30,\n) -> tuple[ByteTrackerState, list[int]]:\n    \"\"\"One ByteTrack step. Returns (new_state, ids aligned with bboxes).\n\n    id -1 means the detection was discarded (unmatched low-score det, or a\n    brand-new track still on probation).\n    \"\"\"\n    # Prune expired tracks and predict forward\n    surviving_tracks = []\n    for track in state.tracks:\n        age = frame_index - track.last_seen_frame\n        if age <= max_age_frames:\n            predicted_mean, predicted_cov = _kf_predict(track.mean, track.cov)\n            track.mean = predicted_mean\n            track.cov = predicted_cov\n            surviving_tracks.append(track)\n\n    # Partition detections by confidence threshold\n    high_conf_indices = [i for i, s in enumerate(scores) if s >= high_thresh]\n    low_conf_indices = [i for i, s in enumerate(scores) if s < high_thresh]\n\n    # Initialize output: -1 means unmatched/on probation\n    result_ids = [-1] * len(bboxes)\n    predicted_bboxes = [t.predicted_xyxy() for t in surviving_tracks]\n\n    def _update_track(track: ByteTrack, det_idx: int) -> None:\n        \"\"\"Update a track with a detection and potentially confirm it.\"\"\"\n        measurement = _xyxy_to_cxcyah(bboxes[det_idx])\n        new_mean, new_cov = _kf_update(track.mean, track.cov, measurement)\n        track.mean = new_mean\n        track.cov = new_cov\n        track.score = scores[det_idx]\n        track.last_seen_frame = frame_index\n        track.hits += 1\n        if track.hits >= 2:\n            track.confirmed = True\n        if track.confirmed:\n            result_ids[det_idx] = track.track_id\n\n    # Stage 1: Match high-confidence detections against all surviving tracks\n    iou_matrix_1 = _iou_matrix(predicted_bboxes, [bboxes[i] for i in high_conf_indices])\n    matched_pairs_1, unmatched_track_indices, unmatched_high_indices = _assign(\n        iou_matrix_1, match_iou_first\n    )\n    for track_idx, det_offset in matched_pairs_1:\n        _update_track(surviving_tracks[track_idx], high_conf_indices[det_offset])\n\n    # Stage 2: Match low-confidence detections only against recently-seen tracks\n    active_track_indices = [\n        idx for idx in unmatched_track_indices\n        if surviving_tracks[idx].last_seen_frame == frame_index - 1\n    ]\n    active_predicted_boxes = [predicted_bboxes[idx] for idx in active_track_indices]\n    low_conf_boxes = [bboxes[i] for i in low_conf_indices]\n    iou_matrix_2 = _iou_matrix(active_predicted_boxes, low_conf_boxes)\n    matched_pairs_2, _, _ = _assign(iou_matrix_2, match_iou_second)\n    for active_offset, det_offset in matched_pairs_2:\n        actual_track_idx = active_track_indices[active_offset]\n        _update_track(surviving_tracks[actual_track_idx], low_conf_indices[det_offset])\n\n    # Create new tracks from unmatched high-confidence detections\n    next_track_id = state.next_id\n    for det_offset in unmatched_high_indices:\n        det_idx = high_conf_indices[det_offset]\n        if scores[det_idx] < new_track_thresh:\n            continue\n        measurement = _xyxy_to_cxcyah(bboxes[det_idx])\n        init_mean, init_cov = _kf_initiate(measurement)\n        # Auto-confirm at stream start to avoid losing first frames\n        should_confirm = frame_index == 0\n        new_track = ByteTrack(\n            track_id=next_track_id,\n            mean=init_mean,\n            cov=init_cov,\n            score=scores[det_idx],\n            last_seen_frame=frame_index,\n            confirmed=should_confirm,\n        )\n        surviving_tracks.append(new_track)\n        if should_confirm:\n            result_ids[det_idx] = next_track_id\n        next_track_id += 1\n\n    # Remove unconfirmed tracks that didn't appear this frame (noise rejection)\n    final_tracks = [\n        t for t in surviving_tracks\n        if t.confirmed or t.last_seen_frame == frame_index\n    ]\n\n    return ByteTrackerState(next_id=next_track_id, tracks=final_tracks), result_ids",
+          "contract_ok": false,
+          "tests_ok": null,
+          "gate_ok": false,
+          "feedback": "contract drift: {'signature': {'old': 'update_byte_tracker(\\n    state: ByteTrackerState,\\n    frame_index: int,\\n    bboxes: list[tuple[float, float, float, float]],\\n    scores: list[float],\\n    *,\\n    # Defaults tuned for yolov8n-pose on indoor footage, which scores lower\\n    # than the YOLOX-X detector ByteTrack was published with (0.5/0.6 there).\\n    high_thresh: float = 0.45,\\n    new_track_thresh: float = 0.5,\\n    match_iou_first: float = 0.2,\\n    match_iou_second: float = 0.5,\\n    max_age_frames: int = 30,\\n) -> tuple[ByteTrackerState, list[int]]', 'new': 'update_byte_tracker(\\n    state: ByteTrackerState,\\n    frame_index: int,\\n    bboxes: list[tuple[float, float, float, float]],\\n    scores: list[float],\\n    *,\\n    high_thresh: float = 0.45,\\n    new_track_thresh: float = 0.5,\\n    match_iou_first: float = 0.2,\\n    match_iou_second: float = 0.5,\\n    max_age_frames: int = 30,\\n) -> tuple[ByteTrackerState, list[int]]'}} violations: []",
+          "similarity": 0.5851364063969896
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "def update_byte_tracker(\n    state: ByteTrackerState,\n    frame_index: int,\n    bboxes: list[tuple[float, float, float, float]],\n    scores: list[float],\n    *,\n    # Defaults tuned for yolov8n-pose on indoor footage, which scores lower\n    # than the YOLOX-X detector ByteTrack was published with (0.5/0.6 there).\n    high_thresh: float = 0.45,\n    new_track_thresh: float = 0.5,\n    match_iou_first: float = 0.2,\n    match_iou_second: float = 0.5,\n    max_age_frames: int = 30,\n) -> tuple[ByteTrackerState, list[int]]:\n    \"\"\"One ByteTrack step. Returns (new_state, ids aligned with bboxes).\n\n    id -1 means the detection was discarded (unmatched low-score det, or a\n    brand-new track still on probation).\n    \"\"\"\n    import copy\n\n    # Step 1: advance surviving tracks through the Kalman filter, discard stale ones.\n    active_tracks: list[ByteTrack] = []\n    for trk in state.tracks:\n        if frame_index - trk.last_seen_frame > max_age_frames:\n            continue\n        new_mean, new_cov = _kf_predict(trk.mean, trk.cov)\n        updated = ByteTrack(\n            track_id=trk.track_id,\n            mean=new_mean,\n            cov=new_cov,\n            score=trk.score,\n            last_seen_frame=trk.last_seen_frame,\n            hits=trk.hits,\n            confirmed=trk.confirmed,\n        )\n        active_tracks.append(updated)\n\n    # Partition detections into high-confidence and low-confidence groups.\n    hi_dets = [i for i, s in enumerate(scores) if s >= high_thresh]\n    lo_dets = [i for i, s in enumerate(scores) if s < high_thresh]\n\n    det_ids = [-1] * len(bboxes)\n    predicted_boxes = [t.predicted_xyxy() for t in active_tracks]\n\n    def absorb_detection(track: ByteTrack, det_index: int) -> None:\n        m, c = _kf_update(track.mean, track.cov, _xyxy_to_cxcyah(bboxes[det_index]))\n        track.mean = m\n        track.cov = c\n        track.score = scores[det_index]\n        track.last_seen_frame = frame_index\n        track.hits += 1\n        if track.hits >= 2:\n            track.confirmed = True\n        if track.confirmed:\n            det_ids[det_index] = track.track_id\n\n    # Stage 1: match high-confidence detections against all live tracks.\n    hi_boxes = [bboxes[i] for i in hi_dets]\n    iou_stage1 = _iou_matrix(predicted_boxes, hi_boxes)\n    matched1, leftover_tracks, leftover_hi = _assign(iou_stage1, match_iou_first)\n\n    for tr_idx, dc_idx in matched1:\n        absorb_detection(active_tracks[tr_idx], hi_dets[dc_idx])\n\n    # Stage 2: match low-confidence detections against tracks seen last frame only.\n    recent_track_indices = [\n        j for j in leftover_tracks\n        if active_tracks[j].last_seen_frame == frame_index - 1\n    ]\n    lo_boxes = [bboxes[i] for i in lo_dets]\n    recent_pred_boxes = [predicted_boxes[j] for j in recent_track_indices]\n    iou_stage2 = _iou_matrix(recent_pred_boxes, lo_boxes)\n    matched2, _, _ = _assign(iou_stage2, match_iou_second)\n\n    for rr, dc_idx in matched2:\n        absorb_detection(active_tracks[recent_track_indices[rr]], lo_dets[dc_idx])\n\n    # Spawn new tracks from unmatched high-confidence detections.\n    next_id = state.next_id\n    for dc_idx in leftover_hi:\n        det_i = hi_dets[dc_idx]\n        if scores[det_i] < new_track_thresh:\n            continue\n        init_mean, init_cov = _kf_initiate(_xyxy_to_cxcyah(bboxes[det_i]))\n        is_confirmed = frame_index == 0\n        new_trk = ByteTrack(\n            track_id=next_id,\n            mean=init_mean,\n            cov=init_cov,\n            score=scores[det_i],\n            last_seen_frame=frame_index,\n            confirmed=is_confirmed,\n        )\n        active_tracks.append(new_trk)\n        if is_confirmed:\n            det_ids[det_i] = next_id\n        next_id += 1\n\n    # Remove unconfirmed tracks that didn't get a detection this frame.\n    surviving = [\n        t for t in active_tracks\n        if t.confirmed or t.last_seen_frame == frame_index\n    ]\n\n    return ByteTrackerState(next_id=next_id, tracks=surviving), det_ids",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.5409209732555801
+        }
+      ],
+      "verify_seconds": 2.278099625138566,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate._extract_positions",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _extract_positions(\n    sampled_by_track: dict[int, list[dict[str, object]]],\n) -> dict[str, Any]:\n    \"\"\"Extract foot-position data from sampled tracks for auto-zone suggestion.\n\n    Returns a dict with frame dimensions and a list of position records,\n    each with a dwell weight (higher = more stationary).\n    \"\"\"\n    import math\n    \n    _STATIONARY_THRESHOLD = 20.0  # pixels \u2014 below this displacement = stationary\n\n    positions: list[dict[str, Any]] = []\n    frame_bounds = {\"max_x\": 0.0, \"max_y\": 0.0}\n\n    def process_track(track_id: int, samples: list[dict[str, object]]) -> None:\n        valid_samples = sorted(\n            [s for s in samples if isinstance(s.get(\"pose\"), dict)],\n            key=lambda s: int(s.get(\"frame_idx\", 0)),\n        )\n        \n        movement_state = {\"prev_x\": None, \"prev_y\": None, \"stationary_count\": 1}\n        \n        for sample in valid_samples:\n            pose_data = sample[\"pose\"]\n            bbox_coords = pose_data.get(\"bbox_xyxy\")\n            \n            if bbox_coords is None:\n                continue\n            \n            left, top, right, bottom = bbox_coords\n            center_x = (left + right) / 2.0\n            center_y = float(bottom)\n            \n            frame_bounds[\"max_x\"] = max(frame_bounds[\"max_x\"], center_x)\n            frame_bounds[\"max_y\"] = max(frame_bounds[\"max_y\"], center_y)\n            \n            if movement_state[\"prev_x\"] is not None:\n                dx = center_x - movement_state[\"prev_x\"]\n                dy = center_y - movement_state[\"prev_y\"]\n                displacement = math.hypot(dx, dy)\n                \n                if displacement < _STATIONARY_THRESHOLD:\n                    movement_state[\"stationary_count\"] += 1\n                else:\n                    movement_state[\"stationary_count\"] = 1\n            else:\n                movement_state[\"stationary_count\"] = 1\n            \n            positions.append({\n                \"track_id\": track_id,\n                \"frame_idx\": int(sample.get(\"frame_idx\", 0)),\n                \"x\": round(center_x, 1),\n                \"y\": round(center_y, 1),\n                \"dwell_frames\": movement_state[\"stationary_count\"],\n            })\n            \n            movement_state[\"prev_x\"] = center_x\n            movement_state[\"prev_y\"] = center_y\n    \n    for tid, track_samples in sampled_by_track.items():\n        process_track(tid, track_samples)\n    \n    def estimate_dimension(value: float) -> int:\n        return int(math.ceil(value / 16) * 16) if value > 0 else 0\n    \n    return {\n        \"frame_width\": estimate_dimension(frame_bounds[\"max_x\"]),\n        \"frame_height\": estimate_dimension(frame_bounds[\"max_y\"]),\n        \"positions\": positions,\n    }\n",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.5128511655708309
+        }
+      ],
+      "verify_seconds": 0.5859017921611667,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.utils.pose_draw.draw_pose_result",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def draw_pose_result(\n    frame_bgr: Any,\n    pose_result: dict | Any,\n    *,\n    kp_conf: float = 0.25,\n    draw_bbox: bool = True,\n) -> Any:\n    \"\"\"\n    Draw poses onto a BGR frame in-place and return it.\n\n    pose_result expected shape:\n      {\"poses\": [{\"keypoints\": {name: {\"x\":..,\"y\":..,\"c\":..}}, \"bbox_xyxy\": (...), ...}, ...]}\n    \"\"\"\n    import cv2\n\n    poses = pose_result.get(\"poses\", [])\n    if not isinstance(poses, list):\n        return frame_bgr\n\n    for pose_data in poses:\n        keypoints_dict = pose_data.get(\"keypoints\", {})\n        if not isinstance(keypoints_dict, dict):\n            continue\n\n        # Draw skeleton edges\n        for start_kp, end_kp in COCO_EDGES:\n            start_data = keypoints_dict.get(start_kp)\n            end_data = keypoints_dict.get(end_kp)\n            \n            if start_data is None or end_data is None:\n                continue\n            \n            start_conf = start_data.get(\"c\", 0.0)\n            end_conf = end_data.get(\"c\", 0.0)\n            \n            if start_conf < kp_conf or end_conf < kp_conf:\n                continue\n\n            pt1 = (int(start_data[\"x\"]), int(start_data[\"y\"]))\n            pt2 = (int(end_data[\"x\"]), int(end_data[\"y\"]))\n            cv2.line(frame_bgr, pt1, pt2, (180, 210, 200), 1)\n\n        # Draw individual keypoints\n        for keypoint_name in COCO_KP:\n            kp_data = keypoints_dict.get(keypoint_name)\n            if kp_data is None:\n                continue\n            \n            confidence = kp_data.get(\"c\", 0.0)\n            if confidence < kp_conf:\n                continue\n\n            center = (int(kp_data[\"x\"]), int(kp_data[\"y\"]))\n            cv2.circle(frame_bgr, center, 2, (200, 200, 200), -1)\n\n        # Draw bounding box if requested\n        if draw_bbox:\n            bbox_coords = pose_data.get(\"bbox_xyxy\")\n            if bbox_coords and len(bbox_coords) == 4:\n                x_min, y_min, x_max, y_max = bbox_coords\n                top_left = (int(x_min), int(y_min))\n                bottom_right = (int(x_max), int(y_max))\n                cv2.rectangle(frame_bgr, top_left, bottom_right, (170, 190, 210), 1)\n\n    return frame_bgr",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.6120178041543026
+        }
+      ],
+      "verify_seconds": 0.5839934581890702,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.rgb.reduce.reduce_kinetics_label",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def reduce_kinetics_label(\n    raw_label: str,\n    raw_score: float,\n    *,\n    min_raw_score: float = 0.20,\n) -> ReducedPrediction:\n    \"\"\"\n    Reduce a raw Kinetics-style label into a coarse retail label.\n\n    Design:\n    - Threshold low-confidence predictions to \"unknown\".\n    - Use keyword / substring matching for coarse categorization.\n    - Keep notes for debugging and later refinement.\n\n    Args:\n        raw_label: Model's top-1 label (e.g. \"walking the dog\")\n        raw_score: Model's top-1 probability/score (0..1-ish)\n        min_raw_score: If raw_score < this, return unknown.\n\n    Returns:\n        ReducedPrediction with a RetailLabel and confidence.\n    \"\"\"\n    normalized_label = (raw_label or \"\").strip().lower()\n    normalized_score = float(raw_score)\n\n    # Early exit: empty label\n    if not normalized_label:\n        return ReducedPrediction(\"unknown\", 0.0, \"empty_raw_label\")\n\n    # Early exit: low confidence\n    if normalized_score < min_raw_score:\n        return ReducedPrediction(\n            \"unknown\", normalized_score, f\"low_raw_score:{normalized_score:.3f}\"\n        )\n\n    # Rule 1: Pushing cart/wheelchair/stroller \u2192 moving\n    is_push_motion = \"pushing\" in normalized_label and any(\n        item in normalized_label for item in (\"cart\", \"wheelchair\", \"stroller\")\n    )\n    if is_push_motion:\n        confidence = min(0.95, 0.55 + 0.9 * normalized_score)\n        return ReducedPrediction(\n            \"moving\", confidence, f\"moving(push_cart)<-{raw_label}\"\n        )\n\n    # Rule 2: Bend/crouch actions \u2192 bend\n    if _contains_any(normalized_label, _BEND_HINTS):\n        confidence = min(0.95, 0.55 + 0.8 * normalized_score)\n        return ReducedPrediction(\"bend\", confidence, f\"bend<-{raw_label}\")\n\n    # Rule 3: Moving actions \u2192 moving\n    if _contains_any(normalized_label, _MOVING_HINTS):\n        confidence = min(0.95, 0.50 + 0.9 * normalized_score)\n        return ReducedPrediction(\"moving\", confidence, f\"moving<-{raw_label}\")\n\n    # Rule 4: Idle actions \u2192 idle\n    if _contains_any(normalized_label, _IDLE_HINTS):\n        confidence = min(0.95, 0.50 + 0.9 * normalized_score)\n        return ReducedPrediction(\"idle\", confidence, f\"idle<-{raw_label}\")\n\n    # Rule 5: Interaction actions \u2192 interaction\n    if _contains_any(normalized_label, _INTERACTION_HINTS):\n        confidence = min(0.95, 0.45 + 0.9 * normalized_score)\n        return ReducedPrediction(\n            \"interaction\", confidence, f\"interaction<-{raw_label}\"\n        )\n\n    # Fallback: no rule matched\n    fallback_confidence = min(0.60, normalized_score)\n    return ReducedPrediction(\n        \"unknown\", fallback_confidence, f\"no_rule_match<-{raw_label}\"\n    )\n",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.8517722878625135
+        }
+      ],
+      "verify_seconds": 0.5317790841218084,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.update.track_poses",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def track_poses(\n    state: AnyTrackerState,\n    frame_index: int,\n    pose_result: PoseResult,\n    *,\n    tracker: str = \"byte\",\n    iou_threshold: float = 0.3,\n    max_age_frames: int = 30,\n    high_thresh: float = 0.45,\n    new_track_thresh: float = 0.5,\n) -> tuple[AnyTrackerState, TrackedResult]:\n    all_poses = pose_result.get(\"poses\", [])\n    \n    # Extract bboxes and scores from valid poses\n    detection_data = []\n    for pose in all_poses:\n        bbox = pose.get(\"bbox_xyxy\")\n        if bbox is not None:\n            detection_data.append({\n                \"pose\": pose,\n                \"bbox\": bbox,\n                \"score\": float(pose.get(\"score\", 0.0))\n            })\n    \n    bboxes = [d[\"bbox\"] for d in detection_data]\n    scores = [d[\"score\"] for d in detection_data]\n    \n    # Run appropriate tracker\n    if tracker == \"iou\":\n        new_state, track_ids = update_iou_tracker(\n            state,\n            frame_index,\n            bboxes,\n            iou_threshold=iou_threshold,\n            max_age_frames=max_age_frames,\n        )\n    else:\n        from aspen.tracking.byte_tracker import update_byte_tracker\n        new_state, track_ids = update_byte_tracker(\n            state,\n            frame_index,\n            bboxes,\n            scores,\n            high_thresh=high_thresh,\n            new_track_thresh=new_track_thresh,\n            max_age_frames=max_age_frames,\n        )\n    \n    # Build tracked poses, filtering out unmatched detections\n    tracked_poses = []\n    for detection, track_id in zip(detection_data, track_ids):\n        if track_id != -1:\n            tracked_poses.append({\n                \"track_id\": track_id,\n                \"pose\": detection[\"pose\"]\n            })\n    \n    # Construct result with optional frame dimensions\n    result: TrackedResult = {\"tracked\": tracked_poses}\n    if \"frame_w\" in pose_result:\n        result[\"frame_w\"] = pose_result[\"frame_w\"]\n    if \"frame_h\" in pose_result:\n        result[\"frame_h\"] = pose_result[\"frame_h\"]\n    \n    return new_state, result",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.7596484524264425
+        }
+      ],
+      "verify_seconds": 0.5801634581293911,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.stgcn.train._run_epoch",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _run_epoch(\n    model: nn.Module,\n    loader: DataLoader,\n    criterion: nn.Module,\n    device: torch.device,\n    optimizer: torch.optim.Optimizer | None,\n    track_per_class: bool = False,\n) -> tuple[float, float] | tuple[float, float, dict[str, float]]:\n    from collections import defaultdict\n    \n    is_training = optimizer is not None\n    model.train(is_training)\n    \n    accumulated_loss = 0.0\n    num_correct = 0\n    num_samples = 0\n    class_hits: dict[int, int] = defaultdict(int)\n    class_counts: dict[int, int] = defaultdict(int)\n    \n    for batch_x, batch_y in loader:\n        batch_x = batch_x.to(device)\n        batch_y = batch_y.to(device)\n        batch_size = batch_x.size(0)\n        \n        grad_enabled = is_training\n        with torch.set_grad_enabled(grad_enabled):\n            predictions = model(batch_x)\n            batch_loss = criterion(predictions, batch_y)\n            \n            if is_training:\n                optimizer.zero_grad()\n                batch_loss.backward()\n                optimizer.step()\n        \n        accumulated_loss += batch_loss.item() * batch_size\n        num_samples += batch_size\n        \n        predicted_labels = predictions.argmax(dim=-1)\n        matches = (predicted_labels == batch_y)\n        num_correct += matches.sum().item()\n        \n        if track_per_class:\n            for idx in range(batch_size):\n                label = batch_y[idx].item()\n                class_counts[label] += 1\n                class_hits[label] += int(matches[idx].item())\n    \n    loss_avg = accumulated_loss / max(1, num_samples)\n    accuracy_avg = num_correct / max(1, num_samples)\n    \n    if not track_per_class:\n        return loss_avg, accuracy_avg\n    \n    per_class_accuracies = {\n        RETAIL_LABELS[label]: class_hits[label] / max(1, class_counts[label])\n        for label in class_counts\n    }\n    return loss_avg, accuracy_avg, per_class_accuracies",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.5902855024100853
+        }
+      ],
+      "verify_seconds": 0.5788652498740703,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.metrics.dsl._matches",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _matches(journey: dict, filters: dict) -> bool:\n    zones = set(journey.get(\"zone_sequence\") or [])\n    dwell = journey.get(\"zones_dwell_s\") or {}\n    actions = _track_actions(journey)\n    seq = journey.get(\"zone_sequence\") or []\n\n    # Check zone visit filters\n    for required_zones in [filters.get(\"visited_zones_all\")]:\n        if required_zones is not None and not set(required_zones) <= zones:\n            return False\n    \n    for any_zones in [filters.get(\"visited_zones_any\")]:\n        if any_zones is not None and not set(any_zones) & zones:\n            return False\n    \n    for excluded_zones in [filters.get(\"visited_zones_none\")]:\n        if excluded_zones is not None and set(excluded_zones) & zones:\n            return False\n\n    # Check action filters\n    if \"actions_any\" in filters:\n        if not any(actions.get(a) for a in filters[\"actions_any\"]):\n            return False\n    \n    if \"actions_none\" in filters:\n        if any(actions.get(a) for a in filters[\"actions_none\"]):\n            return False\n\n    # Check dwell time filter\n    if \"min_dwell_s\" in filters:\n        zone_constraint = filters[\"min_dwell_s\"]\n        zone_name = zone_constraint[\"zone\"]\n        min_seconds = float(zone_constraint[\"seconds\"])\n        actual_dwell = float(dwell.get(zone_name, 0.0))\n        if actual_dwell < min_seconds:\n            return False\n\n    # Check total duration filters\n    total_duration = float(journey.get(\"total_duration_s\", 0.0))\n    if \"min_total_duration_s\" in filters:\n        if total_duration < float(filters[\"min_total_duration_s\"]):\n            return False\n    \n    if \"max_total_duration_s\" in filters:\n        if total_duration > float(filters[\"max_total_duration_s\"]):\n            return False\n\n    # Check conversion filter\n    if \"converted\" in filters:\n        if bool(journey.get(\"converted\")) != filters[\"converted\"]:\n            return False\n\n    # Check sequence filters\n    if \"zone_sequence_contains\" in filters:\n        pos = 0\n        for wanted in filters[\"zone_sequence_contains\"]:\n            try:\n                pos = seq.index(wanted, pos) + 1\n            except ValueError:\n                return False\n    \n    if \"entered_first\" in filters:\n        if not seq or seq[0] != filters[\"entered_first\"]:\n            return False\n    \n    if \"exited_last\" in filters:\n        if not seq or seq[-1] != filters[\"exited_last\"]:\n            return False\n\n    # Check zone visit count filter\n    if \"min_zones_visited\" in filters:\n        if len(set(seq)) < float(filters[\"min_zones_visited\"]):\n            return False\n\n    # Check action count filter\n    if \"min_action_count\" in filters:\n        action_constraint = filters[\"min_action_count\"]\n        action_name = action_constraint[\"action\"]\n        min_count = float(action_constraint[\"count\"])\n        actual_count = actions.get(action_name, 0)\n        if actual_count < min_count:\n            return False\n\n    return True",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.5250811080608935
+        }
+      ],
+      "verify_seconds": 0.5586454158183187,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.templates.demo_full_pipeline",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def demo_full_pipeline() -> GraphSpec:\n    \"\"\"\n    Demo-only: complex production pipeline for cereal aisle analytics.\n    Single high-res feed \u2192 pose + tracking \u2192 zone filtering \u2192 ST-GCN actions\n    \u2192 report + annotated video + live preview.\n    \"\"\"\n    \n    # Define pipeline nodes\n    nodes = [\n        # Video ingestion layer\n        {\n            \"id\": \"feed\",\n            \"type\": \"live_video_source\",\n            \"params\": {\n                \"source_uri\": \"rtsp://192.168.1.64/cereal-aisle-cam\",\n                \"window_size\": 90,\n                \"max_windows\": -1,\n            },\n        },\n        # Computer vision processing chain\n        {\n            \"id\": \"pose\",\n            \"type\": \"pose_estimate\",\n            \"params\": {\"model\": \"models/yolov8n-pose.pt\", \"conf\": 0.30},\n        },\n        {\n            \"id\": \"tracker\",\n            \"type\": \"tracker\",\n            \"params\": {},\n        },\n        {\n            \"id\": \"zones\",\n            \"type\": \"zone_membership\",\n            \"params\": {\"zones_path\": \"config/zones/cereal-aisle.json\"},\n        },\n        # Sampling and analysis layer\n        {\n            \"id\": \"sampler\",\n            \"type\": \"sampler\",\n            \"params\": {\n                \"target_fps\": 30.0,\n                \"sample_fps\": 8.0,\n                \"out_dir\": \"outputs/cereal\",\n            },\n        },\n        {\n            \"id\": \"actions\",\n            \"type\": \"stgcn_actions\",\n            \"params\": {\n                \"out_dir\": \"outputs/cereal\",\n                \"target_fps\": 30.0,\n                \"weights_path\": \"models/stgcn_retail.pt\",\n            },\n        },\n        # Output generation layer\n        {\n            \"id\": \"report\",\n            \"type\": \"report\",\n            \"params\": {\"out_dir\": \"outputs/cereal\", \"target_fps\": 30.0},\n        },\n        {\n            \"id\": \"agg\",\n            \"type\": \"aggregation\",\n            \"params\": {\"out_dir\": \"outputs/cereal\", \"target_fps\": 30.0},\n        },\n        {\n            \"id\": \"viz\",\n            \"type\": \"visualization\",\n            \"params\": {\"out_dir\": \"outputs/cereal\", \"target_fps\": 30.0},\n        },\n        {\n            \"id\": \"preview\",\n            \"type\": \"live_preview\",\n            \"params\": {\"jpeg_quality\": 80, \"scale\": 0.75},\n        },\n    ]\n    \n    # Define pipeline edges\n    edges = [\n        # Feed distributes to multiple consumers\n        {\"from_node\": \"feed\", \"from_port\": \"frames\", \"to_node\": \"pose\", \"to_port\": \"frames\"},\n        {\"from_node\": \"feed\", \"from_port\": \"frames\", \"to_node\": \"sampler\", \"to_port\": \"frames\"},\n        {\"from_node\": \"feed\", \"from_port\": \"frames\", \"to_node\": \"viz\", \"to_port\": \"frames\"},\n        {\"from_node\": \"feed\", \"from_port\": \"frames\", \"to_node\": \"preview\", \"to_port\": \"frames\"},\n        # Main processing pipeline: pose detection \u2192 tracking \u2192 zone filtering\n        {\"from_node\": \"pose\", \"from_port\": \"pose_results\", \"to_node\": \"tracker\", \"to_port\": \"pose_results\"},\n        {\"from_node\": \"tracker\", \"from_port\": \"tracked_results\", \"to_node\": \"zones\", \"to_port\": \"tracked_results\"},\n        # Zone results fan out to downstream consumers\n        {\"from_node\": \"zones\", \"from_port\": \"zoned_results\", \"to_node\": \"sampler\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"zones\", \"from_port\": \"zoned_results\", \"to_node\": \"viz\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"zones\", \"from_port\": \"zoned_results\", \"to_node\": \"preview\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"zones\", \"from_port\": \"zoned_results\", \"to_node\": \"actions\", \"to_port\": \"zoned_results\"},\n        # Sampling and analysis feed final outputs\n        {\"from_node\": \"sampler\", \"from_port\": \"sampled_by_track\", \"to_node\": \"report\", \"to_port\": \"sampled_by_track\"},\n        {\"from_node\": \"sampler\", \"from_port\": \"sampled_by_track\", \"to_node\": \"agg\", \"to_port\": \"sampled_by_track\"},\n        {\"from_node\": \"actions\", \"from_port\": \"actions_jsonl_path\", \"to_node\": \"agg\", \"to_port\": \"actions_jsonl_path\"},\n    ]\n    \n    return {\"nodes\": nodes, \"edges\": edges}",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.9095694679451025
+        }
+      ],
+      "verify_seconds": 0.5445476251188666,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.stgcn.preprocess.poses_to_tensor",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def poses_to_tensor(\n    poses: Sequence[dict],\n    *,\n    normalize: bool = True,\n    frame_width: float = 704.0,\n    frame_height: float = 576.0,\n) -> torch.Tensor:\n    \"\"\"Convert a window of pose dicts to ST-GCN input tensor.\n\n    Args:\n        poses: List of Pose dicts, each with 'keypoints' mapping\n               joint names to {x, y, c}.\n        normalize: If True, normalize (x, y) to [0, 1] range.\n        frame_width: Frame width for normalization.\n        frame_height: Frame height for normalization.\n\n    Returns:\n        Tensor of shape (C=3, T=len(poses), V=17) with channels [x, y, conf].\n    \"\"\"\n    import torch\n    \n    num_frames = len(poses)\n    tensor = torch.zeros(3, num_frames, NUM_JOINTS, dtype=torch.float32)\n    \n    for frame_idx, pose_dict in enumerate(poses):\n        keypoints = pose_dict.get(\"keypoints\", {})\n        \n        for joint_idx, joint_name in enumerate(COCO_JOINTS):\n            keypoint_data = keypoints.get(joint_name)\n            if keypoint_data is None:\n                continue\n            \n            x_val = float(keypoint_data.get(\"x\", 0.0))\n            y_val = float(keypoint_data.get(\"y\", 0.0))\n            confidence_val = float(keypoint_data.get(\"c\", 0.0))\n            \n            if normalize:\n                x_val = x_val / frame_width\n                y_val = y_val / frame_height\n            \n            tensor[0, frame_idx, joint_idx] = x_val\n            tensor[1, frame_idx, joint_idx] = y_val\n            tensor[2, frame_idx, joint_idx] = confidence_val\n    \n    return tensor",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.8044692737430168
+        }
+      ],
+      "verify_seconds": 0.5564671659376472,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.templates.live_pipeline",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def live_pipeline(\n    source_uri: str = \"0\",\n    window_size: int = 60,\n    max_windows: int = -1,\n) -> GraphSpec:\n    \"\"\"\n    Live pipeline for RTSP/webcam: continuous windowed processing.\n    Use with run_live() from streaming_executor.py.\n\n    source_uri: webcam index (\"0\"), RTSP URL, or video file path\n    window_size: frames per window (60 = ~2s at 30fps)\n    max_windows: -1 = run forever, or set a limit for testing\n    \"\"\"\n    cfg = _cfg()\n    \n    node_specs = [\n        {\"id\": \"src\",     \"type\": \"live_video_source\", \"params\": {\"source_uri\": source_uri, \"window_size\": window_size, \"max_windows\": max_windows}},\n        {\"id\": \"pose\",    \"type\": \"pose_estimate\",     \"params\": {\"model\": cfg[\"model\"], \"conf\": 0.25}},\n        {\"id\": \"tracker\", \"type\": \"tracker\",           \"params\": {}},\n        {\"id\": \"zones\",   \"type\": \"zone_membership\",   \"params\": {\"zones_path\": cfg[\"zones\"]}},\n        {\"id\": \"sampler\", \"type\": \"sampler\",           \"params\": {\"target_fps\": 30.0, \"sample_fps\": 8.0, \"out_dir\": cfg[\"outputs\"]}},\n        {\"id\": \"actions\", \"type\": \"stgcn_actions\",     \"params\": {\"out_dir\": cfg[\"outputs\"], \"target_fps\": 30.0, \"device\": cfg[\"device\"], \"weights_path\": \"models/stgcn_retail.pt\"}},\n        {\"id\": \"report\",  \"type\": \"report\",            \"params\": {\"out_dir\": cfg[\"outputs\"], \"target_fps\": 30.0}},\n        {\"id\": \"preview\", \"type\": \"live_preview\",      \"params\": {\"jpeg_quality\": 75, \"scale\": 0.75}},\n    ]\n    \n    edge_specs = [\n        {\"from_node\": \"src\",     \"from_port\": \"frames\",           \"to_node\": \"pose\",    \"to_port\": \"frames\"},\n        {\"from_node\": \"src\",     \"from_port\": \"frames\",           \"to_node\": \"sampler\", \"to_port\": \"frames\"},\n        {\"from_node\": \"src\",     \"from_port\": \"frames\",           \"to_node\": \"preview\", \"to_port\": \"frames\"},\n        {\"from_node\": \"pose\",    \"from_port\": \"pose_results\",     \"to_node\": \"tracker\", \"to_port\": \"pose_results\"},\n        {\"from_node\": \"tracker\", \"from_port\": \"tracked_results\",  \"to_node\": \"zones\",   \"to_port\": \"tracked_results\"},\n        {\"from_node\": \"zones\",   \"from_port\": \"zoned_results\",    \"to_node\": \"sampler\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"zones\",   \"from_port\": \"zoned_results\",    \"to_node\": \"preview\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"zones\",   \"from_port\": \"zoned_results\",    \"to_node\": \"actions\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"sampler\", \"from_port\": \"sampled_by_track\", \"to_node\": \"report\",  \"to_port\": \"sampled_by_track\"},\n    ]\n    \n    return {\n        \"nodes\": node_specs,\n        \"edges\": edge_specs,\n    }",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.880600409370025
+        }
+      ],
+      "verify_seconds": 0.638729500118643,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.classify._check_picking_up",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _check_picking_up(\n    features: list[PoseFeatures], temporal: TemporalFeatures\n) -> PoseActionResult | None:\n    \"\"\"Picking up: bending in first half \u2192 upright in second half, wrist rises.\"\"\"\n    if len(features) < 6:\n        return None\n\n    split_point = len(features) // 2\n    \n    # Extract torso lean values from each half\n    first_half_leans = [f.torso_lean for f in features[:split_point] if f.torso_lean is not None]\n    second_half_leans = [f.torso_lean for f in features[split_point:] if f.torso_lean is not None]\n    \n    # Need sufficient data in both halves\n    if not first_half_leans or not second_half_leans:\n        return None\n    \n    # Compute average lean for each half\n    first_avg_lean = sum(first_half_leans) / len(first_half_leans)\n    second_avg_lean = sum(second_half_leans) / len(second_half_leans)\n    \n    # Measure straightening: positive value means went from bent to upright\n    straightening = first_avg_lean - second_avg_lean\n    \n    # Measure hand rise: more negative = hands going up\n    hand_rise = min(temporal.wrist_height_delta_left, temporal.wrist_height_delta_right)\n    \n    # Check if movement matches picking up pattern\n    if straightening <= _LEAN_DELTA_TRANSITION or hand_rise >= -_WRIST_HEIGHT_DELTA:\n        return None\n    \n    # Compute confidence based on magnitude of movements\n    confidence = min(0.9, 0.5 + straightening / 60.0 + abs(hand_rise) / 100.0)\n    \n    return PoseActionResult(\n        \"picking_up\",\n        confidence,\n        f\"lean_recovery={straightening:.1f} wrist_rise={hand_rise:.1f}\",\n    )\n",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.5761237312711455
+        }
+      ],
+      "verify_seconds": 0.5980284579563886,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.classify._check_reaching",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _check_reaching(features: list[PoseFeatures]) -> PoseActionResult | None:\n    \"\"\"Reaching: wrist above shoulder or arm fully extended.\"\"\"\n    total_frames = len(features)\n    if total_frames == 0:\n        return None\n    \n    wrist_above_count = 0\n    arm_extended_count = 0\n    \n    for pose_frame in features:\n        # Check if either wrist is positioned above shoulder\n        for wrist_height in [pose_frame.left_wrist_height, pose_frame.right_wrist_height]:\n            if wrist_height is not None and wrist_height < _WRIST_ABOVE_SHOULDER:\n                wrist_above_count += 1\n        \n        # Check if either arm is fully extended with wide shoulder angle\n        for elbow_angle, shoulder_angle in [\n            (pose_frame.left_elbow_angle, pose_frame.left_shoulder_angle),\n            (pose_frame.right_elbow_angle, pose_frame.right_shoulder_angle),\n        ]:\n            if (elbow_angle is not None and elbow_angle > _ELBOW_EXTENDED and\n                shoulder_angle is not None and shoulder_angle > 60):\n                arm_extended_count += 1\n    \n    total_wrist_observations = 2 * total_frames\n    wrist_fraction = wrist_above_count / total_wrist_observations\n    extended_fraction = arm_extended_count / total_wrist_observations\n    \n    # Priority: wrist above shoulder detection\n    if wrist_fraction > 0.2:\n        confidence = min(0.9, 0.5 + wrist_fraction)\n        return PoseActionResult(\"reaching\", confidence, f\"above_frac={wrist_fraction:.2f}\")\n    \n    # Secondary: arm fully extended detection\n    if extended_fraction > 0.25:\n        confidence = min(0.85, 0.45 + extended_fraction)\n        return PoseActionResult(\"reaching\", confidence, f\"extended_frac={extended_fraction:.2f}\")\n    \n    return None\n",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.5099030762747577
+        }
+      ],
+      "verify_seconds": 0.5824673329479992,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.templates.default_pipeline",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def default_pipeline(source_uri: str = \"data/videos/input.mp4\") -> GraphSpec:\n    \"\"\"\n    Full pipeline: video \u2192 pose \u2192 track \u2192 zones \u2192 sample \u2192 ST-GCN actions \u2192 report + aggregation \u2192 viz.\n    Falls back to random-init predictions if models/stgcn_retail.pt is missing \u2014\n    ship the weights with any deployment.\n    \"\"\"\n    cfg = _cfg()\n    \n    # Define all pipeline nodes with their configurations\n    node_specs = [\n        (\"video\", \"video_source\", {\"source_uri\": source_uri}),\n        (\"pose\", \"pose_estimate\", {\"model\": cfg[\"model\"], \"conf\": 0.25}),\n        (\"tracker\", \"tracker\", {}),\n        (\"zones\", \"zone_membership\", {\"zones_path\": cfg[\"zones\"]}),\n        (\"sampler\", \"sampler\", {\"target_fps\": 30.0, \"sample_fps\": 8.0, \"out_dir\": cfg[\"outputs\"]}),\n        (\"actions\", \"stgcn_actions\", {\"out_dir\": cfg[\"outputs\"], \"target_fps\": 30.0, \"device\": cfg[\"device\"], \"weights_path\": \"models/stgcn_retail.pt\"}),\n        (\"report\", \"report\", {\"out_dir\": cfg[\"outputs\"], \"target_fps\": 30.0}),\n        (\"agg\", \"aggregation\", {\"out_dir\": cfg[\"outputs\"], \"target_fps\": 30.0}),\n        (\"viz\", \"visualization\", {\"out_dir\": cfg[\"outputs\"], \"target_fps\": 30.0}),\n    ]\n    \n    nodes = [{\"id\": node_id, \"type\": node_type, \"params\": params} \n             for node_id, node_type, params in node_specs]\n    \n    # Define all data flow connections\n    edge_specs = [\n        (\"video\", \"frames\", \"pose\", \"frames\"),\n        (\"video\", \"frames\", \"sampler\", \"frames\"),\n        (\"video\", \"frames\", \"viz\", \"frames\"),\n        (\"pose\", \"pose_results\", \"tracker\", \"pose_results\"),\n        (\"tracker\", \"tracked_results\", \"zones\", \"tracked_results\"),\n        (\"zones\", \"zoned_results\", \"sampler\", \"zoned_results\"),\n        (\"zones\", \"zoned_results\", \"viz\", \"zoned_results\"),\n        (\"zones\", \"zoned_results\", \"actions\", \"zoned_results\"),\n        (\"sampler\", \"sampled_by_track\", \"report\", \"sampled_by_track\"),\n        (\"sampler\", \"sampled_by_track\", \"agg\", \"sampled_by_track\"),\n        (\"actions\", \"actions_jsonl_path\", \"agg\", \"actions_jsonl_path\"),\n    ]\n    \n    edges = [{\"from_node\": from_node, \"from_port\": from_port, \n              \"to_node\": to_node, \"to_port\": to_port}\n             for from_node, from_port, to_node, to_port in edge_specs]\n    \n    return {\"nodes\": nodes, \"edges\": edges}",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.46710837671557026
+        }
+      ],
+      "verify_seconds": 0.5618359998334199,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.classify._check_putting_down",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _check_putting_down(\n    features: list[PoseFeatures], temporal: TemporalFeatures\n) -> PoseActionResult | None:\n    \"\"\"Putting down: upright in first half \u2192 bending in second half, wrist drops.\"\"\"\n    if len(features) < 6:\n        return None\n\n    split_point = len(features) // 2\n    \n    first_half_leans = [\n        f.torso_lean for f in features[:split_point] \n        if f.torso_lean is not None\n    ]\n    second_half_leans = [\n        f.torso_lean for f in features[split_point:] \n        if f.torso_lean is not None\n    ]\n    \n    if not first_half_leans or not second_half_leans:\n        return None\n    \n    first_avg_lean = sum(first_half_leans) / len(first_half_leans)\n    second_avg_lean = sum(second_half_leans) / len(second_half_leans)\n    \n    lean_change = second_avg_lean - first_avg_lean\n    wrist_drop = max(temporal.wrist_height_delta_left, temporal.wrist_height_delta_right)\n    \n    meets_lean_threshold = lean_change > _LEAN_DELTA_TRANSITION\n    meets_wrist_threshold = wrist_drop > _WRIST_HEIGHT_DELTA\n    \n    if meets_lean_threshold and meets_wrist_threshold:\n        confidence = min(0.9, 0.5 + lean_change / 60.0 + wrist_drop / 100.0)\n        return PoseActionResult(\n            \"putting_down\",\n            confidence,\n            f\"lean_increase={lean_change:.1f} wrist_drop={wrist_drop:.1f}\",\n        )\n    \n    return None\n",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.6518928901200369
+        }
+      ],
+      "verify_seconds": 0.5669622081331909,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.templates.stgcn_pipeline",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def stgcn_pipeline(source_uri: str = \"data/videos/input.mp4\") -> GraphSpec:\n    \"\"\"\n    ST-GCN pipeline: video \u2192 pose \u2192 track \u2192 zones \u2192 sample \u2192 ST-GCN actions \u2192 report + aggregation \u2192 viz.\n    Uses trained skeleton-based action classifier (~55 FPS on MPS).\n    \"\"\"\n    cfg = _cfg()\n    \n    # Define all pipeline nodes\n    pipeline_nodes = [\n        {\"id\": \"video\",   \"type\": \"video_source\",    \"params\": {\"source_uri\": source_uri}},\n        {\"id\": \"pose\",    \"type\": \"pose_estimate\",   \"params\": {\"model\": cfg[\"model\"], \"conf\": 0.25}},\n        {\"id\": \"tracker\", \"type\": \"tracker\",         \"params\": {}},\n        {\"id\": \"zones\",   \"type\": \"zone_membership\", \"params\": {\"zones_path\": cfg[\"zones\"]}},\n        {\"id\": \"sampler\", \"type\": \"sampler\",         \"params\": {\"target_fps\": 30.0, \"sample_fps\": 8.0, \"out_dir\": cfg[\"outputs\"]}},\n        {\"id\": \"actions\", \"type\": \"stgcn_actions\",   \"params\": {\"out_dir\": cfg[\"outputs\"], \"target_fps\": 30.0, \"weights_path\": \"models/stgcn_retail.pt\"}},\n        {\"id\": \"report\",  \"type\": \"report\",          \"params\": {\"out_dir\": cfg[\"outputs\"], \"target_fps\": 30.0}},\n        {\"id\": \"agg\",     \"type\": \"aggregation\",     \"params\": {\"out_dir\": cfg[\"outputs\"], \"target_fps\": 30.0}},\n        {\"id\": \"viz\",     \"type\": \"visualization\",   \"params\": {\"out_dir\": cfg[\"outputs\"], \"target_fps\": 30.0}},\n    ]\n    \n    # Define all pipeline connections\n    pipeline_edges = [\n        {\"from_node\": \"video\",   \"from_port\": \"frames\",           \"to_node\": \"pose\",    \"to_port\": \"frames\"},\n        {\"from_node\": \"video\",   \"from_port\": \"frames\",           \"to_node\": \"sampler\", \"to_port\": \"frames\"},\n        {\"from_node\": \"video\",   \"from_port\": \"frames\",           \"to_node\": \"viz\",     \"to_port\": \"frames\"},\n        {\"from_node\": \"pose\",    \"from_port\": \"pose_results\",     \"to_node\": \"tracker\", \"to_port\": \"pose_results\"},\n        {\"from_node\": \"tracker\", \"from_port\": \"tracked_results\",  \"to_node\": \"zones\",   \"to_port\": \"tracked_results\"},\n        {\"from_node\": \"zones\",   \"from_port\": \"zoned_results\",    \"to_node\": \"sampler\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"zones\",   \"from_port\": \"zoned_results\",    \"to_node\": \"viz\",     \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"zones\",   \"from_port\": \"zoned_results\",    \"to_node\": \"actions\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"sampler\", \"from_port\": \"sampled_by_track\", \"to_node\": \"report\",  \"to_port\": \"sampled_by_track\"},\n        {\"from_node\": \"sampler\", \"from_port\": \"sampled_by_track\", \"to_node\": \"agg\",     \"to_port\": \"sampled_by_track\"},\n        {\"from_node\": \"actions\", \"from_port\": \"actions_jsonl_path\",\"to_node\": \"agg\",     \"to_port\": \"actions_jsonl_path\"},\n    ]\n    \n    return {\n        \"nodes\": pipeline_nodes,\n        \"edges\": pipeline_edges,\n    }",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.9694589877835951
+        }
+      ],
+      "verify_seconds": 0.5277721248567104,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.report._sorted_samples",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _sorted_samples(\n    samples: list[dict[str, object]],\n    *,\n    target_fps: float,\n) -> list[dict[str, object]]:\n    fps = 30.0 if target_fps <= 0 else float(target_fps)\n    result = []\n    \n    for sample in samples:\n        if not isinstance(sample, dict):\n            continue\n        \n        frame_idx_key = \"frame_idx\"\n        if frame_idx_key not in sample:\n            continue\n        \n        try:\n            frame_number = int(sample[frame_idx_key])\n        except (ValueError, TypeError, KeyError):\n            continue\n        \n        zone_data = sample.get(\"aisles\") or sample.get(\"zones\") or []\n        zone_strings = [str(zone) for zone in zone_data] if isinstance(zone_data, list) else []\n        \n        time_seconds = frame_number / fps\n        result.append({\n            \"frame_idx\": frame_number,\n            \"t_s\": time_seconds,\n            \"zones\": zone_strings,\n        })\n    \n    result.sort(key=lambda entry: int(entry[\"frame_idx\"]))\n    return result",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.31176470588235294
+        }
+      ],
+      "verify_seconds": 0.5765407921280712,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.report._compute_traffic_series",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _compute_traffic_series(\n    intervals: list[tuple[float, float, int]],\n    *,\n    traffic_bin_s: float,\n) -> list[dict[str, object]]:\n    if not intervals:\n        return []\n\n    bin_size = traffic_bin_s if traffic_bin_s > 0 else 5.0\n    start_time = min(a for a, _, _ in intervals)\n    end_time = max(b for _, b, _ in intervals)\n\n    result = []\n    current_t = start_time\n    epsilon = 1e-6\n\n    while current_t < end_time + epsilon:\n        window_start = current_t\n        window_end = current_t + bin_size\n        \n        overlapping_count = sum(\n            1 for a, b, _ in intervals\n            if a < window_end and b > window_start\n        )\n        \n        result.append({\n            \"t0_s\": round(window_start, 3),\n            \"t1_s\": round(window_end, 3),\n            \"active_tracks\": overlapping_count\n        })\n        \n        current_t = window_end\n\n    return result\n",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.35691318327974275
+        }
+      ],
+      "verify_seconds": 0.5260779580567032,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.edge.agent.build_edge_graph",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def build_edge_graph() -> dict:\n    \"\"\"Live graph without viz/preview/sampler-crops \u2014 headless edge profile.\"\"\"\n    window = int(_env(\"EDGE_WINDOW_SIZE\", \"60\"))\n    max_windows = int(_env(\"EDGE_MAX_WINDOWS\", \"-1\"))\n    out_dir = _env(\"ASPEN_OUTPUTS_DIR\", \"outputs\")\n    device = _env(\"ASPEN_DEVICE\", \"cpu\")\n    \n    source_uri = _env(\"SOURCE_URI\", \"0\")\n    pose_model = _env(\"ASPEN_MODEL_PATH\", \"models/yolov8n-pose.pt\")\n    zones_config = _env(\"ASPEN_ZONES_PATH\", \"config/zones.json\")\n    stgcn_weights = _env(\"ASPEN_STGCN_WEIGHTS\", \"models/stgcn_retail.pt\")\n    \n    graph_nodes = [\n        {\"id\": \"src\",     \"type\": \"live_video_source\", \"params\": {\"source_uri\": source_uri, \"window_size\": window, \"max_windows\": max_windows}},\n        {\"id\": \"pose\",    \"type\": \"pose_estimate\",     \"params\": {\"model\": pose_model, \"conf\": 0.25}},\n        {\"id\": \"tracker\", \"type\": \"tracker\",           \"params\": {}},\n        {\"id\": \"zones\",   \"type\": \"zone_membership\",   \"params\": {\"zones_path\": zones_config}},\n        {\"id\": \"sampler\", \"type\": \"sampler\",           \"params\": {\"target_fps\": 30.0, \"sample_fps\": 8.0, \"out_dir\": out_dir}},\n        {\"id\": \"actions\", \"type\": \"stgcn_actions\",     \"params\": {\"out_dir\": out_dir, \"target_fps\": 30.0, \"device\": device, \"weights_path\": stgcn_weights}},\n        {\"id\": \"agg\",     \"type\": \"aggregation\",       \"params\": {\"out_dir\": out_dir, \"target_fps\": 30.0}},\n    ]\n    \n    graph_edges = [\n        {\"from_node\": \"src\",     \"from_port\": \"frames\",           \"to_node\": \"pose\",    \"to_port\": \"frames\"},\n        {\"from_node\": \"src\",     \"from_port\": \"frames\",           \"to_node\": \"sampler\", \"to_port\": \"frames\"},\n        {\"from_node\": \"pose\",    \"from_port\": \"pose_results\",     \"to_node\": \"tracker\", \"to_port\": \"pose_results\"},\n        {\"from_node\": \"tracker\", \"from_port\": \"tracked_results\",  \"to_node\": \"zones\",   \"to_port\": \"tracked_results\"},\n        {\"from_node\": \"zones\",   \"from_port\": \"zoned_results\",    \"to_node\": \"sampler\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"zones\",   \"from_port\": \"zoned_results\",    \"to_node\": \"actions\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"sampler\", \"from_port\": \"sampled_by_track\", \"to_node\": \"agg\",     \"to_port\": \"sampled_by_track\"},\n        {\"from_node\": \"actions\", \"from_port\": \"actions_jsonl_path\",\"to_node\": \"agg\",    \"to_port\": \"actions_jsonl_path\"},\n    ]\n    \n    return {\n        \"nodes\": graph_nodes,\n        \"edges\": graph_edges,\n    }",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.6480392156862745
+        }
+      ],
+      "verify_seconds": 0.5097379998769611,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.edge.batch_ingest.build_batch_graph",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def build_batch_graph(source_uri: str, out_dir: str) -> dict:\n    \"\"\"Headless batch graph \u2014 like the default template minus visualization.\"\"\"\n    device = _env(\"ASPEN_DEVICE\", \"mps\")\n    model_path = _env(\"ASPEN_MODEL_PATH\", \"models/yolov8n-pose.pt\")\n    zones_path = _env(\"ASPEN_ZONES_PATH\", \"config/zones.json\")\n    stgcn_weights = _env(\"ASPEN_STGCN_WEIGHTS\", \"models/stgcn_retail.pt\")\n    \n    nodes = [\n        {\"id\": \"video\",   \"type\": \"video_source\",    \"params\": {\"source_uri\": source_uri}},\n        {\"id\": \"pose\",    \"type\": \"pose_estimate\",   \"params\": {\"model\": model_path, \"conf\": 0.25}},\n        {\"id\": \"tracker\", \"type\": \"tracker\",         \"params\": {}},\n        {\"id\": \"zones\",   \"type\": \"zone_membership\", \"params\": {\"zones_path\": zones_path}},\n        {\"id\": \"sampler\", \"type\": \"sampler\",         \"params\": {\"target_fps\": 30.0, \"sample_fps\": 8.0, \"out_dir\": out_dir}},\n        {\"id\": \"actions\", \"type\": \"stgcn_actions\",   \"params\": {\"out_dir\": out_dir, \"target_fps\": 30.0, \"device\": device, \"weights_path\": stgcn_weights}},\n        {\"id\": \"report\",  \"type\": \"report\",          \"params\": {\"out_dir\": out_dir, \"target_fps\": 30.0}},\n        {\"id\": \"agg\",     \"type\": \"aggregation\",     \"params\": {\"out_dir\": out_dir, \"target_fps\": 30.0}},\n    ]\n    \n    edges = [\n        {\"from_node\": \"video\",   \"from_port\": \"frames\",           \"to_node\": \"pose\",    \"to_port\": \"frames\"},\n        {\"from_node\": \"video\",   \"from_port\": \"frames\",           \"to_node\": \"sampler\", \"to_port\": \"frames\"},\n        {\"from_node\": \"pose\",    \"from_port\": \"pose_results\",     \"to_node\": \"tracker\", \"to_port\": \"pose_results\"},\n        {\"from_node\": \"tracker\", \"from_port\": \"tracked_results\",  \"to_node\": \"zones\",   \"to_port\": \"tracked_results\"},\n        {\"from_node\": \"zones\",   \"from_port\": \"zoned_results\",    \"to_node\": \"sampler\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"zones\",   \"from_port\": \"zoned_results\",    \"to_node\": \"actions\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"sampler\", \"from_port\": \"sampled_by_track\", \"to_node\": \"report\",  \"to_port\": \"sampled_by_track\"},\n        {\"from_node\": \"sampler\", \"from_port\": \"sampled_by_track\", \"to_node\": \"agg\",     \"to_port\": \"sampled_by_track\"},\n        {\"from_node\": \"actions\", \"from_port\": \"actions_jsonl_path\",\"to_node\": \"agg\",    \"to_port\": \"actions_jsonl_path\"},\n    ]\n    \n    return {\n        \"nodes\": nodes,\n        \"edges\": edges,\n    }",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.6702649656526006
+        }
+      ],
+      "verify_seconds": 0.610665624961257,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.templates.llmanal_pipeline",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def llmanal_pipeline(source_uri: str = \"data/videos/input.mp4\") -> GraphSpec:\n    \"\"\"\n    LLM analysis pipeline: video \u2192 pose \u2192 track \u2192 zones \u2192 sample \u2192 LLM analysis \u2192 viz.\n    Equivalent to the original main.py with --llmanal.\n    \"\"\"\n    config = _cfg()\n    \n    node_specs = [\n        {\"id\": \"video\",   \"type\": \"video_source\",    \"params\": {\"source_uri\": source_uri}},\n        {\"id\": \"pose\",    \"type\": \"pose_estimate\",   \"params\": {\"model\": config[\"model\"], \"conf\": 0.25}},\n        {\"id\": \"tracker\", \"type\": \"tracker\",         \"params\": {}},\n        {\"id\": \"sampler\", \"type\": \"sampler\",         \"params\": {\"target_fps\": 30.0, \"sample_fps\": 8.0, \"out_dir\": config[\"outputs\"]}},\n        {\"id\": \"llm\",     \"type\": \"llm_analysis\",    \"params\": {\"out_dir\": config[\"outputs\"], \"target_fps\": 30.0}},\n        {\"id\": \"viz\",     \"type\": \"visualization\",   \"params\": {\"out_dir\": config[\"outputs\"], \"target_fps\": 30.0}},\n    ]\n    \n    edge_specs = [\n        {\"from_node\": \"video\",   \"from_port\": \"frames\",           \"to_node\": \"pose\",    \"to_port\": \"frames\"},\n        {\"from_node\": \"video\",   \"from_port\": \"frames\",           \"to_node\": \"sampler\", \"to_port\": \"frames\"},\n        {\"from_node\": \"video\",   \"from_port\": \"frames\",           \"to_node\": \"viz\",     \"to_port\": \"frames\"},\n        {\"from_node\": \"pose\",    \"from_port\": \"pose_results\",     \"to_node\": \"tracker\", \"to_port\": \"pose_results\"},\n        {\"from_node\": \"tracker\", \"from_port\": \"tracked_results\",  \"to_node\": \"sampler\", \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"tracker\", \"from_port\": \"tracked_results\",  \"to_node\": \"viz\",     \"to_port\": \"zoned_results\"},\n        {\"from_node\": \"sampler\", \"from_port\": \"sampled_by_track\", \"to_node\": \"llm\",     \"to_port\": \"sampled_by_track\"},\n    ]\n    \n    return {\"nodes\": node_specs, \"edges\": edge_specs}",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.8600592690154758
+        }
+      ],
+      "verify_seconds": 0.5665985001251101,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.rgb.run._reduce_from_topk",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _reduce_from_topk(\n    labels: Sequence[str],\n    scores: Sequence[float],\n    *,\n    min_raw_score: float,\n) -> ReducedPrediction:\n    \"\"\"\n    Prefer the first top-k label that maps to a non-unknown retail bucket.\n    Falls back to top-1 with min_raw_score thresholding.\n    \"\"\"\n    # Try each label in rank order with lenient scoring to find interpretable result\n    for label, score in zip(labels, scores):\n        result = reduce_kinetics_label(label, float(score), min_raw_score=0.0)\n        if result.retail_label != \"unknown\":\n            return result\n\n    # No interpretable label found in top-k; use top-1 with strict threshold\n    if labels and scores:\n        top_label = labels[0]\n        top_score = float(scores[0])\n        return reduce_kinetics_label(top_label, top_score, min_raw_score=min_raw_score)\n    \n    # Handle empty input gracefully\n    return ReducedPrediction(\"unknown\", 0.0, \"empty_topk\")\n",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.8723051409618574
+        }
+      ],
+      "verify_seconds": 0.5161280841566622,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.byte_tracker._assign",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _assign(\n    iou: np.ndarray, min_iou: float\n) -> tuple[list[tuple[int, int]], set[int], set[int]]:\n    \"\"\"Hungarian assignment gated by min_iou.\n\n    Returns (matches, unmatched_rows, unmatched_cols).\"\"\"\n    from scipy.optimize import linear_sum_assignment\n    \n    num_rows, num_cols = iou.shape\n    \n    if iou.size == 0:\n        return [], set(range(num_rows)), set(range(num_cols))\n    \n    row_indices, col_indices = linear_sum_assignment(-iou)\n    \n    matches = []\n    matched_rows = set()\n    matched_cols = set()\n    \n    for row_idx, col_idx in zip(row_indices, col_indices):\n        cost = iou[row_idx, col_idx]\n        if cost >= min_iou:\n            matches.append((row_idx, col_idx))\n            matched_rows.add(row_idx)\n            matched_cols.add(col_idx)\n    \n    all_rows = set(range(num_rows))\n    all_cols = set(range(num_cols))\n    \n    return matches, all_rows - matched_rows, all_cols - matched_cols",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.45545977011494254
+        }
+      ],
+      "verify_seconds": 0.5557540000882,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.classify._check_bending",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _check_bending(\n    features: list[PoseFeatures], temporal: TemporalFeatures\n) -> PoseActionResult | None:\n    \"\"\"Bending/crouching: sustained torso lean or knee bend.\"\"\"\n    # Extract valid measurements\n    valid_leans = [f.torso_lean for f in features if f.torso_lean is not None]\n    valid_knees = [f.knee_bend for f in features if f.knee_bend is not None]\n    \n    # Calculate fraction of frames exceeding thresholds\n    lean_count = sum(1 for lean in valid_leans if lean > _TORSO_LEAN_BEND)\n    knee_count = sum(1 for knee in valid_knees if knee < _KNEE_BEND_CROUCH)\n    \n    lean_prevalence = lean_count / len(valid_leans) if valid_leans else 0.0\n    knee_prevalence = knee_count / len(valid_knees) if valid_knees else 0.0\n    \n    # Check torso lean bending\n    if lean_prevalence > 0.5:\n        bent_leans = [l for l in valid_leans if l > _TORSO_LEAN_BEND]\n        mean_lean_angle = sum(bent_leans) / len(bent_leans) if bent_leans else _TORSO_LEAN_BEND\n        \n        # Confidence based on prevalence and magnitude of lean\n        lean_magnitude_factor = (mean_lean_angle - _TORSO_LEAN_BEND) / 90.0\n        confidence = min(0.9, 0.4 + lean_prevalence * 0.4 + lean_magnitude_factor)\n        \n        return PoseActionResult(\n            \"bending\",\n            confidence,\n            f\"lean_frac={lean_prevalence:.2f} avg={mean_lean_angle:.1f}\"\n        )\n    \n    # Check knee bending/crouching\n    if knee_prevalence > 0.5:\n        confidence = min(0.85, 0.4 + knee_prevalence * 0.4)\n        return PoseActionResult(\n            \"bending\",\n            confidence,\n            f\"knee_frac={knee_prevalence:.2f}\"\n        )\n    \n    return None\n",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.6384579219558063
+        }
+      ],
+      "verify_seconds": 0.5014513749629259,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.classify._check_browsing",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _check_browsing(\n    temporal: TemporalFeatures,\n    zones: Sequence[str],\n    walkway_zones: set[str],\n) -> PoseActionResult | None:\n    \"\"\"Browsing: stationary in a non-walkway zone.\"\"\"\n    velocity = temporal.com_velocity\n    \n    if velocity > _COM_WALK_THRESHOLD:\n        return None\n    \n    non_walkway_zones = [zone for zone in zones if zone not in walkway_zones]\n    if len(non_walkway_zones) == 0:\n        return None\n    \n    normalized_velocity = min(velocity / _COM_WALK_THRESHOLD, 1.0)\n    stillness_score = 1.0 - normalized_velocity\n    confidence = min(0.8, 0.45 + stillness_score * 0.3)\n    \n    return PoseActionResult(\n        \"browsing\",\n        confidence,\n        f\"zones={non_walkway_zones} com_vel={velocity:.4f}\",\n    )",
+          "contract_ok": true,
+          "tests_ok": null,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.7888040712468194
+        }
+      ],
+      "verify_seconds": 0.505209167022258,
+      "error": ""
+    }
+  ]
+}

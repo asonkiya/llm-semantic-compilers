@@ -1,0 +1,210 @@
+{
+  "summary": {
+    "n_checked": 24,
+    "verdicts": {
+      "unsynthesizable": 7,
+      "equivalent": 16,
+      "mismatch": 1
+    },
+    "trials_per_component": 300
+  },
+  "rows": [
+    {
+      "component_id": "aspen.tracking.byte_tracker.update_byte_tracker",
+      "status": "unsynthesizable: <class 'numpy.ndarray'>",
+      "trials": 0,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "escalation"
+    },
+    {
+      "component_id": "aspen.analytics.aggregate._extract_positions",
+      "status": "unsynthesizable: <class 'object'>",
+      "trials": 0,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.utils.pose_draw.draw_pose_result",
+      "status": "unsynthesizable: typing.Any",
+      "trials": 0,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.actions.rgb.reduce.reduce_kinetics_label",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.tracking.update.track_poses",
+      "status": "unsynthesizable: typing.Any",
+      "trials": 0,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.actions.stgcn.train._run_epoch",
+      "status": "unsynthesizable: <class 'torch.nn.modules.module.Module'>",
+      "trials": 0,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.metrics.dsl._matches",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.pipeline.templates.demo_full_pipeline",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.actions.stgcn.preprocess.poses_to_tensor",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.pipeline.templates.live_pipeline",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.actions.pose.classify._check_picking_up",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.actions.pose.classify._check_reaching",
+      "status": "mismatch",
+      "trials": 300,
+      "mismatches": 42,
+      "example": {
+        "args": "[[]]",
+        "original": "exc: 'ZeroDivisionError'",
+        "candidate": "ok: None"
+      },
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.pipeline.templates.default_pipeline",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.actions.pose.classify._check_putting_down",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.pipeline.templates.stgcn_pipeline",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.analytics.report._sorted_samples",
+      "status": "unsynthesizable: <class 'object'>",
+      "trials": 0,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.analytics.report._compute_traffic_series",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.edge.agent.build_edge_graph",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.edge.batch_ingest.build_batch_graph",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.pipeline.templates.llmanal_pipeline",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.actions.rgb.run._reduce_from_topk",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.tracking.byte_tracker._assign",
+      "status": "unsynthesizable: <class 'numpy.ndarray'>",
+      "trials": 0,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.actions.pose.classify._check_bending",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    },
+    {
+      "component_id": "aspen.actions.pose.classify._check_browsing",
+      "status": "equivalent",
+      "trials": 300,
+      "mismatches": 0,
+      "arm": "translate",
+      "solved_by": "cheap"
+    }
+  ]
+}

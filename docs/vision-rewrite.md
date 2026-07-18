@@ -63,10 +63,14 @@ useful — and it funds the credibility of the flagship.
    source in context (the rung-4 shape): 17/17 plug-in at ~$0.014 per
    component, all Haiku, genuinely restructured (mean similarity 0.49).**
    From the contract alone: 12/17 (71%) — the gap is docstring-
-   underdetermined semantics. Post-run audit: the tests were the real
-   oracle; all 7 contract-stage kills were lexical `raise`-visibility
-   artifacts (0 demonstrated saves, ~3 likely false rejections) — raise
-   drift needs confidence tiers before it may kill candidates. Harness:
+   underdetermined semantics. Post-run audit + ablation (experiment-log
+   "Rung 3b"): the tests were the real oracle on covered code — the
+   contract stage's raise-drift kills produced 2 *measured* false
+   rejections and 0 saves (fix: raise drift inherits confidence tiers);
+   pack context beat whole-file on cost (~2x cheaper input, half the
+   escalations) at yield parity. On 24 *uncovered* functions the
+   contract-only gate passed 24/24 and differential replay showed a ~6%
+   false-pass rate — pre-filter, not oracle. Harness:
    `benchmarks/rung3_rewrite.py`.
 4. **Cross-language regeneration (C → Rust)** — light up the spec's
    dormant `REGENERATED_AS` / `TRACE_OF` edges: language-agnostic pack →
@@ -76,7 +80,10 @@ useful — and it funds the credibility of the flagship.
 5. **Differential harness** — contract equivalence ≠ behavioral
    equivalence. Capture/replay at the component boundary: record real
    inputs/outputs of the old implementation, replay against the new one.
-   The one genuinely new subsystem.
+   The one genuinely new subsystem. *Seed exists and works:*
+   `benchmarks/differential_check.py` (random-input replay from type
+   annotations) caught a real crash→None behavior change that
+   contract-only gating passed.
 6. **Scale backend** — persistent/incremental graph (the P2 Neo4j-or-
    sqlite thread) once targets exceed in-memory comfort (~1M LOC).
 

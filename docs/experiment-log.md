@@ -280,3 +280,75 @@ per component when the model can see the source (the C→Rust shape), 71%
 from the contract alone. Model quality affected yield, not correctness —
 nothing wrong ever got through; it just cost one escalation or stayed
 unsolved.
+
+## Rung 3b: ablation, uncovered components, and the differential seed
+
+Three follow-ups to the audit's open questions (2026-07-18; all artifacts
+in `benchmarks/`).
+
+### A. The no-cgir ablation (whole-file prompts, tests-only gate)
+
+Same 17 components, same k=3 + escalation; the contract verdict was
+*recorded* on every attempt but never enforced.
+
+| condition | translate | spec | Haiku input tok | escalations | run cost |
+|---|---|---|---|---|---|
+| cgir (pack + contract→tests) | 17/17 | 12/17 | 116k | 2 | $0.49 |
+| ablation (file + tests-only) | 17/17 | 13/17 | 214k | 4 | $0.61 |
+
+- **Yield: parity.** Translate is identical; spec is 12 vs 13 with
+  different misses (pack's type closure solved the two
+  PoseFeatures-heavy components file-context missed; file-context solved
+  two DSL/stats components whose semantics live in sibling code, plus
+  topo_sort — see below). No honest yield claim for cgir here.
+- **Cost: pack wins.** ~46% fewer Haiku input tokens, half the
+  escalations, 20% cheaper overall — same shape as the earlier
+  pack-vs-file rounds, now at Haiku prices.
+- **The audit's false rejections are now measured, not suspected.** With
+  the contract not gating, *test-passing* winners appeared for exactly
+  `topo_sort` and `registry.get` — both of which the recorded contract
+  verdict would have rejected for raise-visibility drift. 2 confirmed
+  false rejections; still 0 demonstrated contract saves on tested code.
+- Contract-pass-but-tests-fail: 30 attempts — the other direction
+  (contract ≠ semantics) at full strength, as expected.
+
+### B. Uncovered components (contract-only gate) + differential check
+
+The terrain rung 3 excluded: 24 uncovered pure Python functions
+(computational modules only, largest-first; API/frontend/ML-backend
+excluded — their `pure_function` labels are a separate precision
+question). Translate arm, contract as the only gate: **24/24 passed**
+(23 Haiku, 1 escalation, $0.36).
+
+Then `benchmarks/differential_check.py` — the rung-5 seed: winning
+candidate vs original on 300 random inputs synthesized from type
+annotations (deep-copied args, NaN-aware compares, exception-type
+matching, nondeterminism self-check):
+
+| verdict | n |
+|---|---|
+| equivalent | 16 |
+| **mismatch** | **1** |
+| unsynthesizable (ndarray/Any/object/torch) | 7 |
+
+The mismatch is the whole argument in one function:
+`_check_reaching`'s rewrite returns `None` where the original raises
+`ZeroDivisionError` on an empty pose window — a silent crash→no-signal
+behavior change, invisible to the contract, caught in seconds by
+differential replay. **Contract-only false-pass rate on checkable
+winners: 1/17 (~6%).**
+
+### Verdict on "does this justify cgir?"
+
+- **Justified:** the worklist/enumeration layer (nothing else finds
+  pure+covered candidates), pack economy (≈2x cheaper input, fewer
+  escalations, same yield), the verify/splice plumbing, and — new —
+  differential replay as the oracle for untested code (one real catch
+  on its first outing).
+- **Not justified as tuned:** raise-effect drift as a hard kill. On
+  tested code it produced 2 measured false rejections and 0 saves.
+  Fix before rung 4: raise drift inherits confidence tiers (lexical
+  raise ≠ verified raise), or downgrades to report-only in verify.
+- **Quantified honestly:** contract-only gating on untested code lets
+  ~6% wrong rewrites through — usable as a *pre-filter*, not an oracle.
+  The rung-5 differential harness is no longer speculative; it works.

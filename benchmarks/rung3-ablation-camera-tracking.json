@@ -1,0 +1,895 @@
+{
+  "repo": "/Users/aryaman/Documents/Programming/camera-tracking",
+  "k": 3,
+  "models": {
+    "cheap": "claude-haiku-4-5-20251001",
+    "escalation": "claude-sonnet-4-6"
+  },
+  "prompt": "file",
+  "filter": "tests-only",
+  "worklist": "covered",
+  "components": 17,
+  "arms": {
+    "spec": {
+      "n": 17,
+      "solved_cheap": 9,
+      "solved_escalation": 4,
+      "unsolved": 4,
+      "plug_in_rate": 0.765,
+      "cheap_only_rate": 0.529,
+      "mean_passing_similarity": null
+    },
+    "translate": {
+      "n": 17,
+      "solved_cheap": 17,
+      "solved_escalation": 0,
+      "unsolved": 0,
+      "plug_in_rate": 1.0,
+      "cheap_only_rate": 1.0,
+      "mean_passing_similarity": 0.478
+    }
+  },
+  "cost_usd": {
+    "cheap": 0.5024,
+    "escalation": 0.108,
+    "total": 0.6104
+  },
+  "tokens": {
+    "claude-haiku-4-5-20251001": [
+      214365,
+      57616
+    ],
+    "claude-sonnet-4-6": [
+      14079,
+      4383
+    ]
+  },
+  "results": [
+    {
+      "component_id": "aspen.actions.pose.classify.classify_window",
+      "arm": "spec",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def classify_window(\n    poses: Sequence[Pose],\n    zones: Sequence[str],\n    *,\n    walkway_zones: set[str] | None = None,\n) -> PoseActionResult:\n    \"\"\"Classify a window of poses into a retail action.\n\n    Args:\n        poses: One Pose per frame in the window.\n        zones: Zone names the person was in during this window.\n        walkway_zones: Zone names considered walkways (not engagement areas).\"\"\"\n    \n    if walkway_zones is None:\n        walkway_zones = _WALKWAY_ZONES\n    \n    # Handle empty or insufficient data\n    if not poses or len(poses) == 0:\n        return PoseActionResult(\"idle\", 0.0, \"No poses provided\")\n    \n    # Filter poses with minimum visible keypoints\n    valid_poses = [p for p in poses if p.num_visible_keypoints() >= _MIN_VISIBLE]\n    \n    if not valid_poses:\n        return PoseActionResult(\"idle\", 0.0, \"Insufficient keypoint visibility\")\n    \n    # Compute pose and temporal features\n    features = [compute_pose_features(p) for p in valid_poses]\n    temporal = compute_temporal_features(valid_poses)\n    \n    # Try action classifiers in priority order\n    # Pick-up and put-down are motion-specific, check first\n    result = _check_picking_up(features, temporal)\n    if result is not None:\n        return result\n    \n    result = _check_putting_down(features, temporal)\n    if result is not None:\n        return result\n    \n    # Bending (sustained pose)\n    result = _check_bending(features, temporal)\n    if result is not None:\n        return result\n    \n    # Reaching (arm position)\n    result = _check_reaching(features)\n    if result is not None:\n        return result\n    \n    # Walking (motion)\n    result = _check_walking(temporal)\n    if result is not None:\n        return result\n    \n    # Interacting (hand activity)\n    result = _check_interacting(features, temporal)\n    if result is not None:\n        return result\n    \n    # Browsing (stationary in non-walkway)\n    result = _check_browsing(temporal, zones, walkway_zones)\n    if result is not None:\n        return result\n    \n    # Default to idle (stationary, no specific action detected)\n    return PoseActionResult(\n        \"idle\", 0.5,\n        f\"com_vel={temporal.com_velocity:.4f} torso_lean={temporal.torso_lean_mean:.1f}\",\n    )",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31maspen/actions/pose/classify.py\u001b[0m:75: AttributeError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pose_classify.py::\u001b[1mtest_standing_idle\u001b[0m - AttributeError: 'dict' object has no attribute 'num_visible_keypoints'\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m\u001b[31m in 0.06s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def classify_window(\n    poses: Sequence[Pose],\n    zones: Sequence[str],\n    *,\n    walkway_zones: set[str] | None = None,\n) -> PoseActionResult:\n    \"\"\"Classify a window of poses into a retail action.\n\n    Args:\n        poses: One Pose per frame in the window.\n        zones: Zone names the person was in during this window.\n        walkway_zones: Zone names considered walkways (not engagement areas).\"\"\"\n    if walkway_zones is None:\n        walkway_zones = _WALKWAY_ZONES\n    \n    # Edge case: empty or single frame\n    if not poses:\n        return PoseActionResult(\"idle\", 0.0, \"no poses\")\n    \n    # Filter poses to only those with minimum visible keypoints\n    valid_features = []\n    for pose in poses:\n        features = compute_pose_features(pose)\n        if features is not None:\n            valid_features.append(features)\n    \n    if not valid_features:\n        return PoseActionResult(\"idle\", 0.0, \"no valid pose features\")\n    \n    # Compute temporal features\n    temporal = compute_temporal_features(valid_features)\n    \n    # Check actions in priority order (most specific to most general)\n    # Picking up and putting down are mutually exclusive and take priority\n    result = _check_picking_up(valid_features, temporal)\n    if result is not None:\n        return result\n    \n    result = _check_putting_down(valid_features, temporal)\n    if result is not None:\n        return result\n    \n    # Bending/crouching\n    result = _check_bending(valid_features, temporal)\n    if result is not None:\n        return result\n    \n    # Reaching (arm extension, high reaches)\n    result = _check_reaching(valid_features)\n    if result is not None:\n        return result\n    \n    # Walking (motion-based)\n    result = _check_walking(temporal)\n    if result is not None:\n        return result\n    \n    # Interacting (hand activity while stationary)\n    result = _check_interacting(valid_features, temporal)\n    if result is not None:\n        return result\n    \n    # Browsing (stationary in non-walkway zone)\n    result = _check_browsing(temporal, zones, walkway_zones)\n    if result is not None:\n        return result\n    \n    # Default: idle (stationary, no special activity)\n    stillness = 1.0 - min(temporal.com_velocity / _COM_WALK_THRESHOLD, 1.0) if _COM_WALK_THRESHOLD > 0 else 1.0\n    conf = min(0.7, 0.3 + stillness * 0.4)\n    return PoseActionResult(\"idle\", conf, f\"com_vel={temporal.com_velocity:.4f}\")\n",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_pose_classify.py\u001b[0m:145: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pose_classify.py::\u001b[1mtest_insufficient_keypoints\u001b[0m - AssertionError: assert 0.7 <= 0.3\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m6 passed\u001b[0m\u001b[31m in 0.08s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def classify_window(\n    poses: Sequence[Pose],\n    zones: Sequence[str],\n    *,\n    walkway_zones: set[str] | None = None,\n) -> PoseActionResult:\n    \"\"\"Classify a window of poses into a retail action.\n\n    Args:\n        poses: One Pose per frame in the window.\n        zones: Zone names the person was in during this window.\n        walkway_zones: Zone names considered walkways (not engagement areas).\"\"\"\n    \n    if walkway_zones is None:\n        walkway_zones = _WALKWAY_ZONES\n    \n    # Handle empty or insufficient data\n    if not poses:\n        return PoseActionResult(\"idle\", 0.0, \"no poses provided\")\n    \n    # Filter poses with minimum visible keypoints\n    valid_poses = [p for p in poses if p.count_visible() >= _MIN_VISIBLE]\n    \n    if not valid_poses:\n        return PoseActionResult(\"idle\", 0.0, \"insufficient visible keypoints\")\n    \n    # Compute features for all valid poses\n    features = [compute_pose_features(p) for p in valid_poses]\n    temporal = compute_temporal_features(features)\n    \n    # Check high-confidence actions in order of specificity\n    # Picking up and putting down are most specific\n    result = _check_picking_up(features, temporal)\n    if result is not None:\n        return result\n    \n    result = _check_putting_down(features, temporal)\n    if result is not None:\n        return result\n    \n    # Check other moderately specific actions\n    result = _check_reaching(features)\n    if result is not None:\n        return result\n    \n    result = _check_bending(features, temporal)\n    if result is not None:\n        return result\n    \n    # Check movement-based actions\n    result = _check_walking(temporal)\n    if result is not None:\n        return result\n    \n    result = _check_interacting(features, temporal)\n    if result is not None:\n        return result\n    \n    # Check stationary action (browsing)\n    result = _check_browsing(temporal, zones, walkway_zones)\n    if result is not None:\n        return result\n    \n    # Default to idle if no other action matches\n    return PoseActionResult(\n        \"idle\", 0.6,\n        f\"com_vel={temporal.com_velocity:.4f} torso_lean={temporal.torso_lean_mean:.1f}\",\n    )\n",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31maspen/actions/pose/classify.py\u001b[0m:75: AttributeError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pose_classify.py::\u001b[1mtest_standing_idle\u001b[0m - AttributeError: 'dict' object has no attribute 'count_visible'\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m\u001b[31m in 0.06s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "def classify_window(\n    poses: Sequence[Pose],\n    zones: Sequence[str],\n    *,\n    walkway_zones: set[str] | None = None,\n) -> PoseActionResult:\n    \"\"\"Classify a window of poses into a retail action.\n\n    Args:\n        poses: One Pose per frame in the window.\n        zones: Zone names the person was in during this window.\n        walkway_zones: Zone names considered walkways (not engagement areas).\"\"\"\n    if walkway_zones is None:\n        walkway_zones = _WALKWAY_ZONES\n\n    if not poses:\n        return PoseActionResult(\"idle\", 0.5, \"no poses\")\n\n    # Compute per-frame features\n    features: list[PoseFeatures] = [compute_pose_features(p) for p in poses]\n\n    # Filter frames with enough visible keypoints\n    valid_features = [f for f in features if f.num_visible_keypoints >= _MIN_VISIBLE]\n\n    if not valid_features:\n        return PoseActionResult(\"idle\", 0.4, \"insufficient keypoints\")\n\n    # Compute temporal features over valid frames\n    temporal: TemporalFeatures = compute_temporal_features(valid_features)\n\n    # Try picking_up first (specific transition)\n    result = _check_picking_up(valid_features, temporal)\n    if result is not None:\n        return result\n\n    # Try putting_down (specific transition)\n    result = _check_putting_down(valid_features, temporal)\n    if result is not None:\n        return result\n\n    # Try bending (sustained posture)\n    result = _check_bending(valid_features, temporal)\n    if result is not None:\n        return result\n\n    # Try reaching (arm extension)\n    result = _check_reaching(valid_features)\n    if result is not None:\n        return result\n\n    # Try interacting (hand activity while still)\n    result = _check_interacting(valid_features, temporal)\n    if result is not None:\n        return result\n\n    # Try walking (COM displacement)\n    result = _check_walking(temporal)\n    if result is not None:\n        return result\n\n    # Try browsing (stationary in non-walkway zone)\n    result = _check_browsing(temporal, zones, walkway_zones)\n    if result is not None:\n        return result\n\n    # Default: idle\n    return PoseActionResult(\n        \"idle\",\n        0.6,\n        f\"com_vel={temporal.com_velocity:.4f} lean={temporal.torso_lean_mean:.1f}\",\n    )",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31maspen/actions/pose/classify.py\u001b[0m:76: AttributeError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pose_classify.py::\u001b[1mtest_standing_idle\u001b[0m - AttributeError: 'PoseFeatures' object has no attribute 'num_visible_keypoints'\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m\u001b[31m in 0.06s\u001b[0m\u001b[0m",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 11.964346334105358,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.classify.classify_window",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def classify_window(\n    poses: Sequence[Pose],\n    zones: Sequence[str],\n    *,\n    walkway_zones: set[str] | None = None,\n) -> PoseActionResult:\n    \"\"\"Classify a window of poses into a retail action.\n\n    Args:\n        poses: One Pose per frame in the window.\n        zones: Zone names the person was in during this window.\n        walkway_zones: Zone names considered walkways (not engagement areas).\n    \"\"\"\n    if walkway_zones is None:\n        walkway_zones = _WALKWAY_ZONES\n\n    # Extract per-frame features and filter by visibility\n    all_features = [compute_pose_features(p) for p in poses]\n    valid_features = [f for f in all_features if f.visible_count >= _MIN_VISIBLE]\n\n    # Check minimum data quality\n    if len(valid_features) < 3:\n        return PoseActionResult(\"idle\", 0.3, \"insufficient_keypoints\")\n\n    temporal_data = compute_temporal_features(valid_features)\n\n    # Build ordered list of action checkers with their priority\n    action_checkers = [\n        lambda: _check_picking_up(valid_features, temporal_data),\n        lambda: _check_putting_down(valid_features, temporal_data),\n        lambda: _check_bending(valid_features, temporal_data),\n        lambda: _check_reaching(valid_features),\n        lambda: _check_walking(temporal_data),\n        lambda: _check_interacting(valid_features, temporal_data),\n        lambda: _check_browsing(temporal_data, zones, walkway_zones),\n    ]\n\n    # Try each checker in order of priority\n    for checker in action_checkers:\n        classification = checker()\n        if classification is not None:\n            return classification\n\n    # Fallback to idle with confidence based on stillness\n    idle_confidence = 0.5 + 0.3 * (1.0 - min(temporal_data.com_velocity / _COM_IDLE_THRESHOLD, 1.0))\n    return PoseActionResult(\n        \"idle\",\n        idle_confidence,\n        f\"default_idle com_vel={temporal_data.com_velocity:.4f}\",\n    )",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.5717391304347826
+        }
+      ],
+      "verify_seconds": 3.1117739588953555,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.features.compute_pose_features",
+      "arm": "spec",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def compute_pose_features(pose: Pose) -> PoseFeatures:\n    \"\"\"Extract geometric features from a single Pose.\"\"\"\n    kps = pose[\"keypoints\"]\n    \n    # Get keypoints with confidence check\n    l_shoulder = _kp(pose, \"left_shoulder\")\n    r_shoulder = _kp(pose, \"right_shoulder\")\n    l_hip = _kp(pose, \"left_hip\")\n    r_hip = _kp(pose, \"right_hip\")\n    l_wrist = _kp(pose, \"left_wrist\")\n    r_wrist = _kp(pose, \"right_wrist\")\n    l_elbow = _kp(pose, \"left_elbow\")\n    r_elbow = _kp(pose, \"right_elbow\")\n    l_knee = _kp(pose, \"left_knee\")\n    r_knee = _kp(pose, \"right_knee\")\n    l_ankle = _kp(pose, \"left_ankle\")\n    r_ankle = _kp(pose, \"right_ankle\")\n    \n    # Count visible core keypoints\n    visible_count = sum(1 for kp in [l_shoulder, r_shoulder, l_hip, r_hip, l_wrist, r_wrist] if kp is not None)\n    \n    # Torso lean: angle from vertical of line from hip midpoint to shoulder midpoint\n    torso_lean = None\n    if l_hip and r_hip and l_shoulder and r_shoulder:\n        hip_mid = _midpoint(l_hip, r_hip)\n        shoulder_mid = _midpoint(l_shoulder, r_shoulder)\n        dx = shoulder_mid[0] - hip_mid[0]\n        dy = shoulder_mid[1] - hip_mid[1]\n        torso_lean = _angle_from_vertical(dx, dy)\n    \n    # Elbow angles\n    left_elbow_angle = joint_angle(l_shoulder, l_elbow, l_wrist)\n    right_elbow_angle = joint_angle(r_shoulder, r_elbow, r_wrist)\n    \n    # Shoulder angles (elbow-shoulder-hip)\n    left_shoulder_angle = joint_angle(l_elbow, l_shoulder, l_hip)\n    right_shoulder_angle = joint_angle(r_elbow, r_shoulder, r_hip)\n    \n    # Wrist heights relative to shoulders\n    left_wrist_height = None\n    if l_wrist and l_shoulder:\n        left_wrist_height = l_wrist[\"y\"] - l_shoulder[\"y\"]\n    \n    right_wrist_height = None\n    if r_wrist and r_shoulder:\n        right_wrist_height = r_wrist[\"y\"] - r_shoulder[\"y\"]\n    \n    # Knee bend: average of left and right knee angles\n    knee_bend = None\n    left_knee_angle = joint_angle(l_hip, l_knee, l_ankle)\n    right_knee_angle = joint_angle(r_hip, r_knee, r_ankle)\n    if left_knee_angle is not None and right_knee_angle is not None:\n        knee_bend = (left_knee_angle + right_knee_angle) / 2\n    elif left_knee_angle is not None:\n        knee_bend = left_knee_angle\n    elif right_knee_angle is not None:\n        knee_bend = right_knee_angle\n    \n    # Center (hip midpoint) in bbox-relative coordinates\n    center_x = None\n    center_y = None\n    center_img_x = None\n    center_img_y = None\n    if l_hip and r_hip:\n        center_img_x, center_img_y = _midpoint(l_hip, r_hip)\n        # Convert to bbox-relative if bbox exists\n        if \"bbox\" in pose:\n            bbox = pose[\"bbox\"]\n            center_x = (center_img_x - bbox[0]) / bbox[2] if bbox[2] > 0 else None\n            center_y = (center_img_y - bbox[1]) / bbox[3] if bbox[3] > 0 else None\n    \n    # Wrist heights in image coordinates\n    left_wrist_img_y = l_wrist[\"y\"] if l_wrist else None\n    right_wrist_img_y = r_wrist[\"y\"] if r_wrist else None\n    \n    # Bounding box aspect ratio (height / width)\n    bbox_aspect_ratio = None\n    if \"bbox\" in pose:\n        bbox = pose[\"bbox\"]\n        if bbox[2] > 0 and bbox[3] > 0:\n            bbox_aspect_ratio = bbox[3] / bbox[2]\n    \n    return PoseFeatures(\n        torso_lean=torso_lean,\n        left_elbow_angle=left_elbow_angle,\n        right_elbow_angle=right_elbow_angle,\n        left_shoulder_angle=left_shoulder_angle,\n        right_shoulder_angle=right_shoulder_angle,\n        left_wrist_height=left_wrist_height,\n        right_wrist_height=right_wrist_height,\n        knee_bend=knee_bend,\n        center_x=center_x,\n        center_y=center_y,\n        center_img_x=center_img_x,\n        center_img_y=center_img_y,\n        left_wrist_img_y=left_wrist_img_y,\n        right_wrist_img_y=right_wrist_img_y,\n        bbox_aspect_ratio=bbox_aspect_ratio,\n        visible_count=visible_count,\n    )",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_pose_features.py\u001b[0m:92: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pose_features.py::\u001b[1mtest_standing_pose_features\u001b[0m - assert 180.0 < 15\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def compute_pose_features(pose: Pose) -> PoseFeatures:\n    \"\"\"Extract geometric features from a single Pose.\"\"\"\n    # Get keypoints\n    kp_ls = _kp(pose, \"left_shoulder\")\n    kp_rs = _kp(pose, \"right_shoulder\")\n    kp_lh = _kp(pose, \"left_hip\")\n    kp_rh = _kp(pose, \"right_hip\")\n    kp_lw = _kp(pose, \"left_wrist\")\n    kp_rw = _kp(pose, \"right_wrist\")\n    kp_le = _kp(pose, \"left_elbow\")\n    kp_re = _kp(pose, \"right_elbow\")\n    kp_lk = _kp(pose, \"left_knee\")\n    kp_rk = _kp(pose, \"right_knee\")\n\n    # Count visible core keypoints\n    visible_count = sum([\n        kp_ls is not None,\n        kp_rs is not None,\n        kp_lh is not None,\n        kp_rh is not None,\n        kp_lw is not None,\n        kp_rw is not None,\n    ])\n\n    # Torso lean: angle from vertical of line from hip midpoint to shoulder midpoint\n    torso_lean = None\n    if kp_ls is not None and kp_rs is not None and kp_lh is not None and kp_rh is not None:\n        hip_mid = _midpoint(kp_lh, kp_rh)\n        shoulder_mid = _midpoint(kp_ls, kp_rs)\n        dx = shoulder_mid[0] - hip_mid[0]\n        dy = shoulder_mid[1] - hip_mid[1]\n        torso_lean = _angle_from_vertical(dx, dy)\n\n    # Elbow angles\n    left_elbow_angle = joint_angle(kp_lw, kp_le, kp_ls)\n    right_elbow_angle = joint_angle(kp_rw, kp_re, kp_rs)\n\n    # Shoulder angles (elbow-shoulder-hip)\n    left_shoulder_angle = joint_angle(kp_le, kp_ls, kp_lh)\n    right_shoulder_angle = joint_angle(kp_re, kp_rs, kp_rh)\n\n    # Wrist heights relative to shoulders\n    left_wrist_height = None\n    if kp_lw is not None and kp_ls is not None:\n        left_wrist_height = kp_lw[\"y\"] - kp_ls[\"y\"]\n\n    right_wrist_height = None\n    if kp_rw is not None and kp_rs is not None:\n        right_wrist_height = kp_rw[\"y\"] - kp_rs[\"y\"]\n\n    # Knee bend (average of left and right knee angles)\n    knee_bend = None\n    left_knee = joint_angle(kp_lh, kp_lk, _kp(pose, \"left_ankle\"))\n    right_knee = joint_angle(kp_rh, kp_rk, _kp(pose, \"right_ankle\"))\n    if left_knee is not None and right_knee is not None:\n        knee_bend = (left_knee + right_knee) / 2\n    elif left_knee is not None:\n        knee_bend = left_knee\n    elif right_knee is not None:\n        knee_bend = right_knee\n\n    # Center (hip midpoint) in bbox-relative coordinates (0-1)\n    center_x = None\n    center_y = None\n    if kp_lh is not None and kp_rh is not None:\n        hip_mid = _midpoint(kp_lh, kp_rh)\n        # Get image dimensions from pose metadata\n        if \"bbox\" in pose:\n            bbox = pose[\"bbox\"]\n            center_x = (hip_mid[0] - bbox[0]) / bbox[2] if bbox[2] > 0 else None\n            center_y = (hip_mid[1] - bbox[1]) / bbox[3] if bbox[3] > 0 else None\n\n    # Center in image coordinates\n    center_img_x = None\n    center_img_y = None\n    if kp_lh is not None and kp_rh is not None:\n        hip_mid = _midpoint(kp_lh, kp_rh)\n        center_img_x = hip_mid[0]\n        center_img_y = hip_mid[1]\n\n    # Wrist heights in image coordinates\n    left_wrist_img_y = kp_lw[\"y\"] if kp_lw is not None else None\n    right_wrist_img_y = kp_rw[\"y\"] if kp_rw is not None else None\n\n    # Bounding box aspect ratio (height / width)\n    bbox_aspect_ratio = None\n    if \"bbox\" in pose:\n        bbox = pose[\"bbox\"]\n        if bbox[2] > 0 and bbox[3] > 0:\n            bbox_aspect_ratio = bbox[3] / bbox[2]\n\n    return PoseFeatures(\n        torso_lean=torso_lean,\n        left_elbow_angle=left_elbow_angle,\n        right_elbow_angle=right_elbow_angle,\n        left_shoulder_angle=left_shoulder_angle,\n        right_shoulder_angle=right_shoulder_angle,\n        left_wrist_height=left_wrist_height,\n        right_wrist_height=right_wrist_height,\n        knee_bend=knee_bend,\n        center_x=center_x,\n        center_y=center_y,\n        center_img_x=center_img_x,\n        center_img_y=center_img_y,\n        left_wrist_img_y=left_wrist_img_y,\n        right_wrist_img_y=right_wrist_img_y,\n        bbox_aspect_ratio=bbox_aspect_ratio,\n        visible_count=visible_count,\n    )",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_pose_features.py\u001b[0m:92: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pose_features.py::\u001b[1mtest_standing_pose_features\u001b[0m - assert 180.0 < 15\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.06s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def compute_pose_features(pose: Pose) -> PoseFeatures:\n    \"\"\"Extract geometric features from a single Pose.\"\"\"\n    kpts = pose[\"keypoints\"]\n    \n    # Get keypoints with confidence check\n    left_shoulder = _kp(pose, \"left_shoulder\")\n    right_shoulder = _kp(pose, \"right_shoulder\")\n    left_hip = _kp(pose, \"left_hip\")\n    right_hip = _kp(pose, \"right_hip\")\n    left_elbow = _kp(pose, \"left_elbow\")\n    right_elbow = _kp(pose, \"right_elbow\")\n    left_wrist = _kp(pose, \"left_wrist\")\n    right_wrist = _kp(pose, \"right_wrist\")\n    left_knee = _kp(pose, \"left_knee\")\n    right_knee = _kp(pose, \"right_knee\")\n    \n    # Count visible core keypoints\n    visible_count = sum(1 for kp in [left_shoulder, right_shoulder, left_hip, right_hip, left_wrist, right_wrist] if kp is not None)\n    \n    # Torso lean: angle from vertical of line from hip midpoint to shoulder midpoint\n    torso_lean = None\n    if left_hip and right_hip and left_shoulder and right_shoulder:\n        hip_mid = _midpoint(left_hip, right_hip)\n        shoulder_mid = _midpoint(left_shoulder, right_shoulder)\n        dx = shoulder_mid[0] - hip_mid[0]\n        dy = shoulder_mid[1] - hip_mid[1]\n        torso_lean = _angle_from_vertical(dx, dy)\n    \n    # Elbow angles (angle at elbow joint)\n    left_elbow_angle = joint_angle(left_shoulder, left_elbow, left_wrist)\n    right_elbow_angle = joint_angle(right_shoulder, right_elbow, right_wrist)\n    \n    # Shoulder angles (angle at shoulder)\n    left_shoulder_angle = joint_angle(left_elbow, left_shoulder, left_hip)\n    right_shoulder_angle = joint_angle(right_elbow, right_shoulder, right_hip)\n    \n    # Wrist heights (relative to shoulder)\n    left_wrist_height = None\n    if left_wrist and left_shoulder:\n        left_wrist_height = left_wrist[\"y\"] - left_shoulder[\"y\"]\n    \n    right_wrist_height = None\n    if right_wrist and right_shoulder:\n        right_wrist_height = right_wrist[\"y\"] - right_shoulder[\"y\"]\n    \n    # Knee bend (average of knee angles)\n    knee_bend = None\n    left_knee_angle = joint_angle(left_hip, left_knee, left_wrist)\n    right_knee_angle = joint_angle(right_hip, right_knee, right_wrist)\n    if left_knee_angle is not None and right_knee_angle is not None:\n        knee_bend = (left_knee_angle + right_knee_angle) / 2\n    elif left_knee_angle is not None:\n        knee_bend = left_knee_angle\n    elif right_knee_angle is not None:\n        knee_bend = right_knee_angle\n    \n    # Center (hip midpoint) in bbox-relative coords (0-1)\n    center_x = None\n    center_y = None\n    if left_hip and right_hip:\n        hip_mid = _midpoint(left_hip, right_hip)\n        # Normalize to bbox if available\n        bbox = pose.get(\"bbox\")\n        if bbox:\n            center_x = (hip_mid[0] - bbox[0]) / bbox[2]\n            center_y = (hip_mid[1] - bbox[1]) / bbox[3]\n    \n    # Center in image coords\n    center_img_x = None\n    center_img_y = None\n    if left_hip and right_hip:\n        hip_mid = _midpoint(left_hip, right_hip)\n        center_img_x = hip_mid[0]\n        center_img_y = hip_mid[1]\n    \n    # Wrist heights in image coords\n    left_wrist_img_y = left_wrist[\"y\"] if left_wrist else None\n    right_wrist_img_y = right_wrist[\"y\"] if right_wrist else None\n    \n    # Bounding box aspect ratio\n    bbox_aspect_ratio = None\n    bbox = pose.get(\"bbox\")\n    if bbox and bbox[3] > 0:  # bbox[3] is height, bbox[2] is width\n        bbox_aspect_ratio = bbox[3] / bbox[2]\n    \n    return PoseFeatures(\n        torso_lean=torso_lean,\n        left_elbow_angle=left_elbow_angle,\n        right_elbow_angle=right_elbow_angle,\n        left_shoulder_angle=left_shoulder_angle,\n        right_shoulder_angle=right_shoulder_angle,\n        left_wrist_height=left_wrist_height,\n        right_wrist_height=right_wrist_height,\n        knee_bend=knee_bend,\n        center_x=center_x,\n        center_y=center_y,\n        center_img_x=center_img_x,\n        center_img_y=center_img_y,\n        left_wrist_img_y=left_wrist_img_y,\n        right_wrist_img_y=right_wrist_img_y,\n        bbox_aspect_ratio=bbox_aspect_ratio,\n        visible_count=visible_count,\n    )",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_pose_features.py\u001b[0m:92: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pose_features.py::\u001b[1mtest_standing_pose_features\u001b[0m - assert 180.0 < 15\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.06s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "def compute_pose_features(pose: Pose) -> PoseFeatures:\n    \"\"\"Extract geometric features from a single Pose.\"\"\"\n    kp = lambda name: _kp(pose, name)\n\n    l_shoulder = kp(\"left_shoulder\")\n    r_shoulder = kp(\"right_shoulder\")\n    l_hip = kp(\"left_hip\")\n    r_hip = kp(\"right_hip\")\n    l_elbow = kp(\"left_elbow\")\n    r_elbow = kp(\"right_elbow\")\n    l_wrist = kp(\"left_wrist\")\n    r_wrist = kp(\"right_wrist\")\n    l_knee = kp(\"left_knee\")\n    r_knee = kp(\"right_knee\")\n    l_ankle = kp(\"left_ankle\")\n    r_ankle = kp(\"right_ankle\")\n\n    # Torso lean: angle of vector from shoulder midpoint to hip midpoint from vertical\n    torso_lean = None\n    if l_shoulder and r_shoulder and l_hip and r_hip:\n        sx, sy = _midpoint(l_shoulder, r_shoulder)\n        hx, hy = _midpoint(l_hip, r_hip)\n        dx = hx - sx\n        dy = hy - sy\n        torso_lean = _angle_from_vertical(dx, dy)\n\n    # Elbow angles\n    left_elbow_angle = joint_angle(l_shoulder, l_elbow, l_wrist)\n    right_elbow_angle = joint_angle(r_shoulder, r_elbow, r_wrist)\n\n    # Shoulder angles: elbow-shoulder-hip\n    left_shoulder_angle = joint_angle(l_elbow, l_shoulder, l_hip)\n    right_shoulder_angle = joint_angle(r_elbow, r_shoulder, r_hip)\n\n    # Wrist height: wrist y - shoulder y (negative = above shoulder)\n    left_wrist_height = None\n    if l_wrist and l_shoulder:\n        left_wrist_height = l_wrist[\"y\"] - l_shoulder[\"y\"]\n\n    right_wrist_height = None\n    if r_wrist and r_shoulder:\n        right_wrist_height = r_wrist[\"y\"] - r_shoulder[\"y\"]\n\n    # Knee bend: average knee angle\n    left_knee_angle = joint_angle(l_hip, l_knee, l_ankle)\n    right_knee_angle = joint_angle(r_hip, r_knee, r_ankle)\n    knee_angles = [a for a in [left_knee_angle, right_knee_angle] if a is not None]\n    knee_bend = sum(knee_angles) / len(knee_angles) if knee_angles else None\n\n    # Hip midpoint\n    center_x = center_y = center_img_x = center_img_y = None\n    if l_hip and r_hip:\n        hx, hy = _midpoint(l_hip, r_hip)\n        center_img_x = hx\n        center_img_y = hy\n        bbox = pose.get(\"bbox\")\n        if bbox:\n            bx, by, bw, bh = bbox[\"x\"], bbox[\"y\"], bbox[\"w\"], bbox[\"h\"]\n            if bw > 0 and bh > 0:\n                center_x = (hx - bx) / bw\n                center_y = (hy - by) / bh\n\n    # Wrist image coords\n    left_wrist_img_y = l_wrist[\"y\"] if l_wrist else None\n    right_wrist_img_y = r_wrist[\"y\"] if r_wrist else None\n\n    # Bbox aspect ratio\n    bbox_aspect_ratio = None\n    bbox = pose.get(\"bbox\")\n    if bbox and bbox[\"w\"] > 0:\n        bbox_aspect_ratio = bbox[\"h\"] / bbox[\"w\"]\n\n    # Visible core keypoints\n    visible_count = sum(1 for name in _CORE_KEYPOINTS if _kp(pose, name) is not None)\n\n    return PoseFeatures(\n        torso_lean=torso_lean,\n        left_elbow_angle=left_elbow_angle,\n        right_elbow_angle=right_elbow_angle,\n        left_shoulder_angle=left_shoulder_angle,\n        right_shoulder_angle=right_shoulder_angle,\n        left_wrist_height=left_wrist_height,\n        right_wrist_height=right_wrist_height,\n        knee_bend=knee_bend,\n        center_x=center_x,\n        center_y=center_y,\n        center_img_x=center_img_x,\n        center_img_y=center_img_y,\n        left_wrist_img_y=left_wrist_img_y,\n        right_wrist_img_y=right_wrist_img_y,\n        bbox_aspect_ratio=bbox_aspect_ratio,\n        visible_count=visible_count,\n    )",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_pose_features.py\u001b[0m:102: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pose_features.py::\u001b[1mtest_standing_pose_features\u001b[0m - assert None is not None\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.06s\u001b[0m\u001b[0m",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 10.905325584113598,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.features.compute_pose_features",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def compute_pose_features(pose: Pose) -> PoseFeatures:\n    \"\"\"Extract geometric features from a single Pose.\"\"\"\n    \n    # Gather all keypoints\n    keypoints = {\n        \"ls\": _kp(pose, \"left_shoulder\"),\n        \"rs\": _kp(pose, \"right_shoulder\"),\n        \"lh\": _kp(pose, \"left_hip\"),\n        \"rh\": _kp(pose, \"right_hip\"),\n        \"le\": _kp(pose, \"left_elbow\"),\n        \"re\": _kp(pose, \"right_elbow\"),\n        \"lw\": _kp(pose, \"left_wrist\"),\n        \"rw\": _kp(pose, \"right_wrist\"),\n        \"lk\": _kp(pose, \"left_knee\"),\n        \"rk\": _kp(pose, \"right_knee\"),\n        \"la\": _kp(pose, \"left_ankle\"),\n        \"ra\": _kp(pose, \"right_ankle\"),\n    }\n    \n    # Count visible core keypoints\n    core_visible = sum(1 for name in _CORE_KEYPOINTS if _kp(pose, name) is not None)\n    \n    # Extract bbox info early\n    bbox = pose.get(\"bbox_xyxy\")\n    bbox_w, bbox_h = None, None\n    bbox_x1, bbox_y1 = None, None\n    if bbox:\n        bbox_x1, bbox_y1, bbox_x2, bbox_y2 = bbox\n        bbox_w = bbox_x2 - bbox_x1\n        bbox_h = bbox_y2 - bbox_y1\n    \n    # Compute torso lean\n    torso_lean = None\n    if all(keypoints[k] for k in [\"ls\", \"rs\", \"lh\", \"rh\"]):\n        shoulder_mid = _midpoint(keypoints[\"ls\"], keypoints[\"rs\"])\n        hip_mid = _midpoint(keypoints[\"lh\"], keypoints[\"rh\"])\n        dx = hip_mid[0] - shoulder_mid[0]\n        dy = hip_mid[1] - shoulder_mid[1]\n        torso_lean = _angle_from_vertical(dx, dy)\n    \n    # Compute joint angles\n    elbow_angles = (\n        joint_angle(keypoints[\"ls\"], keypoints[\"le\"], keypoints[\"lw\"]),\n        joint_angle(keypoints[\"rs\"], keypoints[\"re\"], keypoints[\"rw\"]),\n    )\n    \n    shoulder_angles = (\n        joint_angle(keypoints[\"le\"], keypoints[\"ls\"], keypoints[\"lh\"]),\n        joint_angle(keypoints[\"re\"], keypoints[\"rs\"], keypoints[\"rh\"]),\n    )\n    \n    # Compute wrist heights relative to shoulders\n    wrist_heights = (\n        (keypoints[\"lw\"][\"y\"] - keypoints[\"ls\"][\"y\"]) if (keypoints[\"lw\"] and keypoints[\"ls\"]) else None,\n        (keypoints[\"rw\"][\"y\"] - keypoints[\"rs\"][\"y\"]) if (keypoints[\"rw\"] and keypoints[\"rs\"]) else None,\n    )\n    \n    # Compute absolute wrist y positions\n    wrist_img_y = (\n        keypoints[\"lw\"][\"y\"] if keypoints[\"lw\"] else None,\n        keypoints[\"rw\"][\"y\"] if keypoints[\"rw\"] else None,\n    )\n    \n    # Compute knee bend as average of left and right\n    left_knee = joint_angle(keypoints[\"lh\"], keypoints[\"lk\"], keypoints[\"la\"])\n    right_knee = joint_angle(keypoints[\"rh\"], keypoints[\"rk\"], keypoints[\"ra\"])\n    \n    knee_bend = None\n    if left_knee is not None and right_knee is not None:\n        knee_bend = (left_knee + right_knee) / 2\n    else:\n        knee_bend = left_knee or right_knee\n    \n    # Compute center of mass (hip midpoint) and normalize to bbox\n    center_x, center_y = None, None\n    center_img_x, center_img_y = None, None\n    \n    if keypoints[\"lh\"] and keypoints[\"rh\"]:\n        hip_mid = _midpoint(keypoints[\"lh\"], keypoints[\"rh\"])\n        center_img_x, center_img_y = hip_mid[0], hip_mid[1]\n        \n        if bbox_w and bbox_h and bbox_w > 0 and bbox_h > 0:\n            center_x = (hip_mid[0] - bbox_x1) / bbox_w\n            center_y = (hip_mid[1] - bbox_y1) / bbox_h\n    \n    # Compute bbox aspect ratio\n    bbox_aspect = None\n    if bbox_w and bbox_h and bbox_w > 0:\n        bbox_aspect = bbox_h / bbox_w\n    \n    return PoseFeatures(\n        torso_lean=torso_lean,\n        left_elbow_angle=elbow_angles[0],\n        right_elbow_angle=elbow_angles[1],\n        left_shoulder_angle=shoulder_angles[0],\n        right_shoulder_angle=shoulder_angles[1],\n        left_wrist_height=wrist_heights[0],\n        right_wrist_height=wrist_heights[1],\n        knee_bend=knee_bend,\n        center_x=center_x,\n        center_y=center_y,\n        center_img_x=center_img_x,\n        center_img_y=center_img_y,\n        left_wrist_img_y=wrist_img_y[0],\n        right_wrist_img_y=wrist_img_y[1],\n        bbox_aspect_ratio=bbox_aspect,\n        visible_count=core_visible,\n    )",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.33924239596939726
+        }
+      ],
+      "verify_seconds": 3.152201541000977,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.features.joint_angle",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def joint_angle(\n    a: Keypoint | None, b: Keypoint | None, c: Keypoint | None\n) -> float | None:\n    \"\"\"Angle at point b formed by vectors b->a and b->c, in degrees.\"\"\"\n    if a is None or b is None or c is None:\n        return None\n    \n    # Vectors from b to a and from b to c\n    ba_x = a[\"x\"] - b[\"x\"]\n    ba_y = a[\"y\"] - b[\"y\"]\n    bc_x = c[\"x\"] - b[\"x\"]\n    bc_y = c[\"y\"] - b[\"y\"]\n    \n    # Magnitudes\n    mag_ba = math.hypot(ba_x, ba_y)\n    mag_bc = math.hypot(bc_x, bc_y)\n    \n    if mag_ba < 1e-6 or mag_bc < 1e-6:\n        return None\n    \n    # Dot product and angle\n    dot_product = ba_x * bc_x + ba_y * bc_y\n    cos_angle = dot_product / (mag_ba * mag_bc)\n    cos_angle = max(-1.0, min(1.0, cos_angle))\n    \n    return math.degrees(math.acos(cos_angle))",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.134451166028157,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.actions.pose.features.joint_angle",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def joint_angle(\n    a: Keypoint | None, b: Keypoint | None, c: Keypoint | None\n) -> float | None:\n    \"\"\"Angle at point b formed by vectors b->a and b->c, in degrees.\"\"\"\n    if any(kp is None for kp in (a, b, c)):\n        return None\n    \n    vector_ba = (a[\"x\"] - b[\"x\"], a[\"y\"] - b[\"y\"])\n    vector_bc = (c[\"x\"] - b[\"x\"], c[\"y\"] - b[\"y\"])\n    \n    dot_product = vector_ba[0] * vector_bc[0] + vector_ba[1] * vector_bc[1]\n    magnitude_ba = math.hypot(vector_ba[0], vector_ba[1])\n    magnitude_bc = math.hypot(vector_bc[0], vector_bc[1])\n    \n    if magnitude_ba < 1e-6 or magnitude_bc < 1e-6:\n        return None\n    \n    cosine = dot_product / (magnitude_ba * magnitude_bc)\n    cosine = max(-1.0, min(1.0, cosine))\n    \n    return math.degrees(math.acos(cosine))",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.6179775280898876
+        }
+      ],
+      "verify_seconds": 2.7425509998574853,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_customer_journeys",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def compute_customer_journeys(\n    sampled_by_track: dict[int, list[dict[str, object]]],\n    action_records: list[dict[str, Any]],\n    target_fps: float,\n) -> list[CustomerJourney]:\n    \"\"\"Compute per-customer journey through the store.\n\n    Each journey: zone sequence, dwell per zone, actions per zone, conversion flag.\"\"\"\n    fps = max(target_fps, 1e-6)\n\n    # Index actions by track_id\n    actions_by_track: dict[int, list[dict]] = defaultdict(list)\n    for rec in action_records:\n        tid = int(rec.get(\"track_id\", -1))\n        actions_by_track[tid].append(rec)\n\n    journeys: list[CustomerJourney] = []\n\n    for tid, samples in sampled_by_track.items():\n        timeline = _track_zones_timeline(samples, fps)\n        if not timeline:\n            continue\n\n        # Build zone sequence with consecutive deduplication\n        zone_seq: list[str] = []\n        for t_s, zones in timeline:\n            zone_seq.extend(zones)\n        zone_sequence = _dedup_consecutive(zone_seq)\n\n        # Compute dwell time per zone\n        zone_enter: dict[str, float] = {}\n        zones_dwell: dict[str, float] = defaultdict(float)\n        prev_zones: list[str] = []\n\n        for t_s, zones in timeline:\n            # Enter new zones\n            for z in zones:\n                if z not in prev_zones:\n                    zone_enter[z] = t_s\n\n            # Exit zones\n            for z in prev_zones:\n                if z not in zones and z in zone_enter:\n                    dwell = t_s - zone_enter[z]\n                    zones_dwell[z] += dwell\n                    del zone_enter[z]\n\n            prev_zones = zones\n\n        # Close still-open zones at last timestamp\n        last_t = timeline[-1][0] if timeline else 0.0\n        for z, enter_t in zone_enter.items():\n            dwell = last_t - enter_t\n            zones_dwell[z] += dwell\n\n        # Compute total duration\n        start_s, end_s = _track_time_range(samples, fps)\n        total_duration_s = end_s - start_s\n\n        # Count actions per zone\n        actions_by_zone: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))\n        for rec in actions_by_track.get(tid, []):\n            label = str(rec.get(\"label\", \"unknown\"))\n            rec_zones = rec.get(\"zones\", [])\n            for z in rec_zones:\n                actions_by_zone[str(z)][label] += 1\n\n        # Check for conversion (picking_up action)\n        converted = any(\n            \"picking_up\" in actions_by_zone.get(z, {})\n            for z in zone_sequence\n        )\n\n        journey = CustomerJourney(\n            track_id=tid,\n            zone_sequence=zone_sequence,\n            total_duration_s=total_duration_s,\n            zones_dwell_s=dict(zones_dwell),\n            actions_by_zone={k: dict(v) for k, v in actions_by_zone.items()},\n            converted=converted,\n        )\n        journeys.append(journey)\n\n    return journeys",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 2.7382737500593066,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_customer_journeys",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def compute_customer_journeys(\n    sampled_by_track: dict[int, list[dict[str, object]]],\n    action_records: list[dict[str, Any]],\n    target_fps: float,\n) -> list[CustomerJourney]:\n    \"\"\"Compute per-customer journey through the store.\n\n    Each journey: zone sequence, dwell per zone, actions per zone, conversion flag.\n    \"\"\"\n    fps = max(target_fps, 1e-6)\n\n    # Index actions by track\n    action_map: dict[int, list[dict]] = defaultdict(list)\n    for action in action_records:\n        track_id = int(action.get(\"track_id\", -1))\n        action_map[track_id].append(action)\n\n    journeys: list[CustomerJourney] = []\n\n    for track_id, sample_list in sampled_by_track.items():\n        timeline = _track_zones_timeline(sample_list, fps)\n        if not timeline:\n            continue\n\n        # Extract time bounds and total duration\n        start_time = timeline[0][0]\n        end_time = timeline[-1][0]\n        duration = max(0.0, end_time - start_time)\n\n        # Build deduplicated zone sequence\n        all_zones_in_order: list[str] = []\n        for _, zone_list in timeline:\n            all_zones_in_order.extend(zone_list)\n        deduplicated_zones = _dedup_consecutive(all_zones_in_order)\n\n        # Calculate dwell time per zone by interpolating between frames\n        zone_dwell_accumulator: dict[str, float] = defaultdict(float)\n        for frame_idx in range(len(timeline)):\n            current_time = timeline[frame_idx][0]\n            next_time = timeline[frame_idx + 1][0] if frame_idx + 1 < len(timeline) else current_time\n            time_delta = next_time - current_time\n            current_zones = timeline[frame_idx][1]\n            \n            if current_zones:\n                time_per_zone = time_delta / len(current_zones)\n                for zone in current_zones:\n                    zone_dwell_accumulator[zone] += time_per_zone\n\n        # Aggregate actions by zone\n        zone_action_tallies: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))\n        for action_rec in action_map.get(track_id, []):\n            action_label = str(action_rec.get(\"label\", \"unknown\"))\n            action_zones = action_rec.get(\"zones\", [])\n            for action_zone in action_zones:\n                zone_action_tallies[str(action_zone)][action_label] += 1\n\n        # Determine if customer made a purchase\n        has_purchase = any(\n            str(act.get(\"label\", \"\")) == \"picking_up\"\n            for act in action_map.get(track_id, [])\n        )\n\n        # Prepare dwell dict sorted by descending duration\n        sorted_dwell = sorted(zone_dwell_accumulator.items(), key=lambda kv: -kv[1])\n        dwell_dict = {k: round(v, 3) for k, v in sorted_dwell}\n\n        journeys.append(CustomerJourney(\n            track_id=track_id,\n            zone_sequence=deduplicated_zones,\n            total_duration_s=round(duration, 3),\n            zones_dwell_s=dwell_dict,\n            actions_by_zone={k: dict(v) for k, v in zone_action_tallies.items()},\n            converted=has_purchase,\n        ))\n\n    return sorted(journeys, key=lambda j: -j.total_duration_s)",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.328928046989721
+        }
+      ],
+      "verify_seconds": 3.01534133288078,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_daily_rollup",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def compute_daily_rollup(\n    zone_stats: list[ZoneHourlyStat],\n    journeys: list[CustomerJourney],\n    walkway_zones: set[str] | None = None,\n) -> DailyRollup:\n    \"\"\"Compute a single-day rollup from zone stats and journeys.\"\"\"\n    if walkway_zones is None:\n        walkway_zones = _WALKWAY_ZONES\n\n    # Total and engaged visitors\n    all_visitor_ids: set[int] = set()\n    engaged_visitor_ids: set[int] = set()\n    zone_dwell_map: dict[str, list[float]] = defaultdict(list)\n    zone_traffic: dict[str, set[int]] = defaultdict(set)\n\n    for stat in zone_stats:\n        zone_traffic[stat.zone_name].update(\n            journeys[i].track_id for i in range(len(journeys))\n            if stat.zone_name in journeys[i].zone_sequence\n        )\n        if stat.avg_dwell_s > 0:\n            zone_dwell_map[stat.zone_name].append(stat.avg_dwell_s)\n\n    for journey in journeys:\n        all_visitor_ids.add(journey.track_id)\n        for zone in journey.zone_sequence:\n            zone_traffic[zone].add(journey.track_id)\n            if zone not in walkway_zones and journey.zones_dwell_s.get(zone, 0) > 3.0:\n                engaged_visitor_ids.add(journey.track_id)\n\n    total_visitors = len(all_visitor_ids)\n    engaged_visitors = len(engaged_visitor_ids)\n\n    # Conversion rate\n    converted_count = sum(1 for j in journeys if j.converted)\n    conversion_rate = converted_count / total_visitors if total_visitors > 0 else 0.0\n\n    # Average dwell across all journeys\n    all_dwells = [j.total_duration_s for j in journeys]\n    avg_dwell_s = sum(all_dwells) / len(all_dwells) if all_dwells else 0.0\n\n    # Zone transitions\n    zone_transitions: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))\n    for journey in journeys:\n        for i in range(len(journey.zone_sequence) - 1):\n            from_zone = journey.zone_sequence[i]\n            to_zone = journey.zone_sequence[i + 1]\n            zone_transitions[from_zone][to_zone] += 1\n\n    # Action totals\n    action_totals: dict[str, int] = defaultdict(int)\n    for stat in zone_stats:\n        for label, count in stat.action_counts.items():\n            action_totals[label] += count\n\n    # Top zones by traffic (visitor count)\n    top_zones_traffic = sorted(\n        [(zone, len(visitors)) for zone, visitors in zone_traffic.items()],\n        key=lambda x: -x[1]\n    )\n\n    # Top zones by dwell (average dwell time)\n    top_zones_dwell = sorted(\n        [(zone, sum(dwells) / len(dwells)) for zone, dwells in zone_dwell_map.items()],\n        key=lambda x: -x[1]\n    )\n\n    return DailyRollup(\n        total_visitors=total_visitors,\n        engaged_visitors=engaged_visitors,\n        avg_dwell_s=round(avg_dwell_s, 3),\n        conversion_rate=conversion_rate,\n        zone_transitions=dict(zone_transitions),\n        action_totals=dict(action_totals),\n        top_zones_by_traffic=top_zones_traffic,\n        top_zones_by_dwell=top_zones_dwell,\n    )",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 2.8720827910583466,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_daily_rollup",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def compute_daily_rollup(\n    zone_stats: list[ZoneHourlyStat],\n    journeys: list[CustomerJourney],\n    walkway_zones: set[str] | None = None,\n) -> DailyRollup:\n    \"\"\"Compute a single-day rollup from zone stats and journeys.\"\"\"\n    if walkway_zones is None:\n        walkway_zones = _WALKWAY_ZONES\n\n    # Count totals and engagement\n    num_journeys = len(journeys)\n    num_engaged = 0\n    durations_for_avg = []\n    num_conversions = 0\n\n    for journey in journeys:\n        if journey.total_duration_s > 0:\n            durations_for_avg.append(journey.total_duration_s)\n        \n        is_engaged = False\n        for zone_name, dwell_time in journey.zones_dwell_s.items():\n            if zone_name not in walkway_zones and dwell_time > 3.0:\n                is_engaged = True\n                break\n        \n        if is_engaged:\n            num_engaged += 1\n        \n        if journey.converted:\n            num_conversions += 1\n\n    # Compute averages\n    avg_duration = (\n        sum(durations_for_avg) / len(durations_for_avg)\n        if durations_for_avg\n        else 0.0\n    )\n    conv_rate = (\n        num_conversions / num_journeys\n        if num_journeys > 0\n        else 0.0\n    )\n\n    # Build zone transition graph\n    transition_graph: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))\n    for journey in journeys:\n        seq = journey.zone_sequence\n        for idx in range(len(seq) - 1):\n            from_zone = seq[idx]\n            to_zone = seq[idx + 1]\n            transition_graph[from_zone][to_zone] += 1\n\n    # Aggregate actions across all hourly buckets\n    all_actions: dict[str, int] = defaultdict(int)\n    for stat in zone_stats:\n        for action_label, count in stat.action_counts.items():\n            all_actions[action_label] += count\n\n    # Accumulate zone metrics\n    zone_traffic: dict[str, int] = defaultdict(int)\n    zone_dwell_samples: dict[str, list[float]] = defaultdict(list)\n    \n    for stat in zone_stats:\n        zone_traffic[stat.zone_name] += stat.visitor_count\n        if stat.avg_dwell_s > 0:\n            zone_dwell_samples[stat.zone_name].append(stat.avg_dwell_s)\n\n    # Rank zones\n    traffic_ranking = sorted(zone_traffic.items(), key=lambda item: -item[1])[:10]\n    \n    dwell_ranking = []\n    for zone_name, dwell_vals in zone_dwell_samples.items():\n        if dwell_vals:\n            avg = sum(dwell_vals) / len(dwell_vals)\n            dwell_ranking.append((zone_name, avg))\n    dwell_ranking.sort(key=lambda item: -item[1])\n    dwell_ranking = dwell_ranking[:10]\n\n    return DailyRollup(\n        total_visitors=num_journeys,\n        engaged_visitors=num_engaged,\n        avg_dwell_s=round(avg_duration, 2),\n        conversion_rate=round(conv_rate, 4),\n        zone_transitions={k: dict(v) for k, v in transition_graph.items()},\n        action_totals=dict(sorted(all_actions.items(), key=lambda item: -item[1])),\n        top_zones_by_traffic=traffic_ranking,\n        top_zones_by_dwell=[(z, round(d, 2)) for z, d in dwell_ranking],\n    )",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.25281842168385704
+        }
+      ],
+      "verify_seconds": 3.0791335420217365,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_zone_hourly_stats",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def compute_zone_hourly_stats(\n    sampled_by_track: dict[int, list[dict[str, object]]],\n    action_records: list[dict[str, Any]],\n    target_fps: float,\n) -> list[ZoneHourlyStat]:\n    \"\"\"Compute per-zone, per-hour-bucket statistics.\n\n    Groups visitors by zone \u00d7 hour, counts actions, computes dwell times.\"\"\"\n    fps = max(target_fps, 1e-6)\n    \n    # Index actions by (zone, hour_bucket)\n    actions_by_zone_hour: dict[tuple[str, int], dict[str, int]] = defaultdict(\n        lambda: defaultdict(int)\n    )\n    for rec in action_records:\n        label = str(rec.get(\"label\", \"unknown\"))\n        zones = rec.get(\"zones\", [])\n        hour_bucket = int(float(rec.get(\"time_s\", 0.0)) // _HOUR_BUCKET_S)\n        for z in zones:\n            zone_str = str(z)\n            actions_by_zone_hour[(zone_str, hour_bucket)][label] += 1\n    \n    # Track visitor presence and dwell per (zone, hour_bucket)\n    zone_hour_visitors: dict[tuple[str, int], set[int]] = defaultdict(set)\n    zone_hour_dwell: dict[tuple[str, int], float] = defaultdict(float)\n    \n    for tid, samples in sampled_by_track.items():\n        timeline = _track_zones_timeline(samples, fps)\n        if not timeline:\n            continue\n        \n        for i in range(len(timeline)):\n            t_now = timeline[i][0]\n            t_next = timeline[i + 1][0] if i + 1 < len(timeline) else t_now\n            dt = t_next - t_now\n            zones = timeline[i][1]\n            \n            hour_bucket = int(t_now // _HOUR_BUCKET_S)\n            \n            if zones:\n                share = dt / len(zones)\n                for z in zones:\n                    zone_str = str(z)\n                    zone_hour_visitors[(zone_str, hour_bucket)].add(tid)\n                    zone_hour_dwell[(zone_str, hour_bucket)] += share\n    \n    # Build results\n    results: list[ZoneHourlyStat] = []\n    \n    for (zone_name, hour_bucket), visitor_ids in zone_hour_visitors.items():\n        visitor_count = len(visitor_ids)\n        total_dwell_s = zone_hour_dwell[(zone_name, hour_bucket)]\n        avg_dwell_s = total_dwell_s / max(1, visitor_count)\n        \n        action_counts = dict(actions_by_zone_hour[(zone_name, hour_bucket)])\n        \n        # Count specific actions\n        browse_count = action_counts.get(\"browsing\", 0)\n        reach_count = action_counts.get(\"reaching\", 0)\n        pickup_count = action_counts.get(\"picking_up\", 0)\n        \n        hour_start_s = hour_bucket * _HOUR_BUCKET_S\n        \n        results.append(ZoneHourlyStat(\n            zone_name=zone_name,\n            hour_start_s=hour_start_s,\n            visitor_count=visitor_count,\n            avg_dwell_s=round(avg_dwell_s, 2),\n            total_dwell_s=round(total_dwell_s, 2),\n            action_counts=action_counts,\n            browse_count=browse_count,\n            reach_count=reach_count,\n            pickup_count=pickup_count,\n        ))\n    \n    return sorted(results, key=lambda zs: (zs.hour_start_s, zs.zone_name))\n",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.1948115420527756,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.analytics.aggregate.compute_zone_hourly_stats",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def compute_zone_hourly_stats(\n    sampled_by_track: dict[int, list[dict[str, object]]],\n    action_records: list[dict[str, Any]],\n    target_fps: float,\n) -> list[ZoneHourlyStat]:\n    \"\"\"Compute per-zone, per-hour-bucket statistics.\n\n    Groups visitors by zone \u00d7 hour, counts actions, computes dwell times.\n    \"\"\"\n    fps = max(target_fps, 1e-6)\n\n    # Build action index\n    actions_by_tid: dict[int, list[dict]] = defaultdict(list)\n    for action in action_records:\n        tid = int(action.get(\"track_id\", -1))\n        actions_by_tid[tid].append(action)\n\n    # Storage for bucket aggregation\n    BucketKey = tuple[str, float]\n    bucket_visitors: dict[BucketKey, set[int]] = defaultdict(set)\n    bucket_dwells: dict[BucketKey, list[float]] = defaultdict(list)\n    bucket_actions: dict[BucketKey, dict[str, int]] = defaultdict(lambda: defaultdict(int))\n\n    # Process each track\n    for track_id, track_samples in sampled_by_track.items():\n        timeline = _track_zones_timeline(track_samples, fps)\n        if len(timeline) < 2:\n            continue\n\n        # Walk timeline and track zone entry/exit\n        zone_start_times: dict[str, float] = {}\n        current_zones: list[str] = []\n\n        for timestamp, zones_at_t in timeline:\n            # Detect zone exits and record dwells\n            for prev_zone in current_zones:\n                if prev_zone not in zones_at_t and prev_zone in zone_start_times:\n                    exit_time = timestamp\n                    entry_time = zone_start_times[prev_zone]\n                    dwell_duration = exit_time - entry_time\n                    hour_key = math.floor(entry_time / _HOUR_BUCKET_S) * _HOUR_BUCKET_S\n                    bucket_key: BucketKey = (prev_zone, hour_key)\n                    \n                    bucket_visitors[bucket_key].add(track_id)\n                    bucket_dwells[bucket_key].append(dwell_duration)\n                    del zone_start_times[prev_zone]\n\n            # Detect zone entries\n            for new_zone in zones_at_t:\n                if new_zone not in zone_start_times:\n                    zone_start_times[new_zone] = timestamp\n\n            current_zones = zones_at_t\n\n        # Handle zones still open at track end\n        final_time = timeline[-1][0] if timeline else 0.0\n        for still_open_zone, start_time in zone_start_times.items():\n            final_dwell = final_time - start_time\n            hour_key = math.floor(start_time / _HOUR_BUCKET_S) * _HOUR_BUCKET_S\n            bucket_key = (still_open_zone, hour_key)\n            \n            bucket_visitors[bucket_key].add(track_id)\n            bucket_dwells[bucket_key].append(final_dwell)\n\n        # Process actions for this track\n        for action in actions_by_tid.get(track_id, []):\n            action_label = str(action.get(\"label\", \"unknown\"))\n            action_time = (float(action.get(\"start_t\", 0)) + float(action.get(\"end_t\", 0))) / 2\n            action_zones = action.get(\"zones\", [])\n            hour_key = math.floor(action_time / _HOUR_BUCKET_S) * _HOUR_BUCKET_S\n            \n            for zone in action_zones:\n                bucket_key = (str(zone), hour_key)\n                bucket_actions[bucket_key][action_label] += 1\n\n    # Synthesize results from buckets\n    all_bucket_keys = set(bucket_visitors.keys()) | set(bucket_actions.keys())\n    stats_list: list[ZoneHourlyStat] = []\n\n    for zone_name, hour_start in sorted(all_bucket_keys):\n        bucket_key: BucketKey = (zone_name, hour_start)\n        \n        dwell_samples = bucket_dwells.get(bucket_key, [])\n        avg_dwell = sum(dwell_samples) / len(dwell_samples) if dwell_samples else 0.0\n        total_dwell = sum(dwell_samples)\n        \n        action_dict = dict(bucket_actions.get(bucket_key, {}))\n        \n        stat = ZoneHourlyStat(\n            zone_name=zone_name,\n            hour_start_s=hour_start,\n            visitor_count=len(bucket_visitors.get(bucket_key, set())),\n            avg_dwell_s=avg_dwell,\n            total_dwell_s=total_dwell,\n            action_counts=action_dict,\n            browse_count=action_dict.get(\"browsing\", 0),\n            reach_count=action_dict.get(\"reaching\", 0),\n            pickup_count=action_dict.get(\"picking_up\", 0),\n        )\n        stats_list.append(stat)\n\n    return stats_list",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.595928661502432
+        }
+      ],
+      "verify_seconds": 3.044265666976571,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.metrics.dsl.evaluate",
+      "arm": "spec",
+      "solved_by": "escalation",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def evaluate(spec: dict, journeys: list[dict]) -> dict[str, Any]:\n    \"\"\"Evaluate a validated spec against journeys.\n\n    Returns {\"name\", \"value\", \"matched\", \"total\", \"matched_track_ids\"}.\"\"\"\n    name = spec.get(\"name\", \"\")\n    aggregation = spec.get(\"aggregation\", \"count_tracks\")\n    filters = spec.get(\"filters\", {})\n\n    matched_journeys = []\n    matched_track_ids = []\n\n    for journey in journeys:\n        if _matches(journey, filters):\n            matched_journeys.append(journey)\n            track_id = journey.get(\"track_id\")\n            if track_id is not None:\n                matched_track_ids.append(track_id)\n\n    matched_count = len(matched_journeys)\n    total_count = len(journeys)\n\n    if aggregation == \"count_tracks\":\n        value = matched_count\n    elif aggregation == \"rate\":\n        value = matched_count / total_count if total_count > 0 else 0.0\n    elif aggregation == \"avg_duration_s\":\n        if matched_count > 0:\n            total_duration = sum(\n                float(j.get(\"total_duration_s\", 0.0)) for j in matched_journeys\n            )\n            value = total_duration / matched_count\n        else:\n            value = 0.0\n    else:\n        value = None\n\n    return {\n        \"name\": name,\n        \"value\": value,\n        \"matched\": matched_count,\n        \"total\": total_count,\n        \"matched_track_ids\": matched_track_ids,\n    }",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:73: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_evaluate_empty_journeys\u001b[0m - assert (0.0 is None)\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m5 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def evaluate(spec: dict, journeys: list[dict]) -> dict[str, Any]:\n    \"\"\"Evaluate a validated spec against journeys.\n\n    Returns {\"name\", \"value\", \"matched\", \"total\", \"matched_track_ids\"}.\"\"\"\n    filters = spec.get(\"filters\", {})\n    aggregation = spec.get(\"aggregation\")\n    \n    matched_journeys = []\n    matched_track_ids = []\n    total_duration = 0.0\n    \n    for journey in journeys:\n        if _matches(journey, filters):\n            matched_journeys.append(journey)\n            track_id = journey.get(\"track_id\")\n            if track_id is not None:\n                matched_track_ids.append(track_id)\n            total_duration += float(journey.get(\"total_duration_s\", 0.0))\n    \n    matched_count = len(matched_journeys)\n    total_count = len(journeys)\n    \n    if aggregation == \"count_tracks\":\n        value = matched_count\n    elif aggregation == \"rate\":\n        value = matched_count / total_count if total_count > 0 else 0.0\n    elif aggregation == \"avg_duration_s\":\n        value = total_duration / matched_count if matched_count > 0 else 0.0\n    else:\n        value = None\n    \n    return {\n        \"name\": spec.get(\"name\"),\n        \"value\": value,\n        \"matched\": matched_count,\n        \"total\": total_count,\n        \"matched_track_ids\": matched_track_ids,\n    }",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:73: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_evaluate_empty_journeys\u001b[0m - assert (0.0 is None)\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m5 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def evaluate(spec: dict, journeys: list[dict]) -> dict[str, Any]:\n    \"\"\"Evaluate a validated spec against journeys.\n\n    Returns {\"name\", \"value\", \"matched\", \"total\", \"matched_track_ids\"}.\"\"\"\n    filters = spec.get(\"filters\", {})\n    aggregation = spec.get(\"aggregation\")\n    \n    matched_journeys = []\n    matched_track_ids = []\n    total_duration = 0.0\n    \n    for journey in journeys:\n        if _matches(journey, filters):\n            matched_journeys.append(journey)\n            track_id = journey.get(\"track_id\")\n            if track_id is not None:\n                matched_track_ids.append(track_id)\n            total_duration += float(journey.get(\"total_duration_s\", 0.0))\n    \n    matched_count = len(matched_journeys)\n    total_count = len(journeys)\n    \n    if aggregation == \"count_tracks\":\n        value = matched_count\n    elif aggregation == \"rate\":\n        value = matched_count / total_count if total_count > 0 else 0.0\n    elif aggregation == \"avg_duration_s\":\n        value = total_duration / matched_count if matched_count > 0 else 0.0\n    else:\n        value = None\n    \n    return {\n        \"name\": spec.get(\"name\"),\n        \"value\": value,\n        \"matched\": matched_count,\n        \"total\": total_count,\n        \"matched_track_ids\": matched_track_ids,\n    }",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:73: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_evaluate_empty_journeys\u001b[0m - assert (0.0 is None)\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m5 passed\u001b[0m\u001b[31m in 0.11s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "def evaluate(spec: dict, journeys: list[dict]) -> dict[str, Any]:\n    \"\"\"Evaluate a validated spec against journeys.\n\n    Returns {\"name\", \"value\", \"matched\", \"total\", \"matched_track_ids\"}.\"\"\"\n    filters = spec.get(\"filters\", {})\n    aggregation = spec.get(\"aggregation\", \"count_tracks\")\n    name = spec.get(\"name\", \"\")\n\n    total = len(journeys)\n    matched_journeys = [j for j in journeys if _matches(j, filters)]\n    matched = len(matched_journeys)\n    matched_track_ids = [j.get(\"track_id\") for j in matched_journeys if \"track_id\" in j]\n\n    if total == 0:\n        value = None\n    elif aggregation == \"count_tracks\":\n        value = matched\n    elif aggregation == \"rate\":\n        value = matched / total\n    elif aggregation == \"avg_duration_s\":\n        if matched == 0:\n            value = None\n        else:\n            value = sum(\n                float(j.get(\"total_duration_s\", 0.0)) for j in matched_journeys\n            ) / matched\n    else:\n        value = None\n\n    return {\n        \"name\": name,\n        \"value\": value,\n        \"matched\": matched,\n        \"total\": total,\n        \"matched_track_ids\": matched_track_ids,\n    }",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 11.554642416769639,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.metrics.dsl.evaluate",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def evaluate(spec: dict, journeys: list[dict]) -> dict[str, Any]:\n    \"\"\"Evaluate a validated spec against journeys.\n\n    Returns {\"name\", \"value\", \"matched\", \"total\", \"matched_track_ids\"}.\n    \"\"\"\n    filters = spec.get(\"filters\", {})\n    aggregation_type = spec[\"aggregation\"]\n    \n    matched_journeys = []\n    for journey in journeys:\n        if _matches(journey, filters):\n            matched_journeys.append(journey)\n    \n    num_matched = len(matched_journeys)\n    num_total = len(journeys)\n    \n    computed_value: float | int | None = None\n    if aggregation_type == \"count_tracks\":\n        computed_value = num_matched\n    elif aggregation_type == \"rate\":\n        computed_value = round(num_matched / num_total, 4) if num_total > 0 else None\n    elif aggregation_type == \"avg_duration_s\":\n        if num_matched > 0:\n            total_duration = sum(float(j.get(\"total_duration_s\", 0)) for j in matched_journeys)\n            computed_value = round(total_duration / num_matched, 2)\n        else:\n            computed_value = None\n    \n    track_ids = [j.get(\"track_id\") for j in matched_journeys][:50]\n    \n    return {\n        \"name\": spec[\"name\"],\n        \"value\": computed_value,\n        \"matched\": num_matched,\n        \"total\": num_total,\n        \"matched_track_ids\": track_ids,\n    }",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.41863013698630136
+        }
+      ],
+      "verify_seconds": 3.4411774170584977,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.metrics.dsl.validate_spec",
+      "arm": "spec",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def validate_spec(spec: Any) -> list[str]:\n    \"\"\"Returns a list of human-readable errors; empty list = valid.\"\"\"\n    errors: list[str] = []\n    \n    # Must be a dict\n    if not isinstance(spec, dict):\n        return [\"Spec must be a dictionary\"]\n    \n    # Must have 'name' and 'aggregation'\n    if \"name\" not in spec:\n        errors.append(\"Missing required field: 'name'\")\n    elif not isinstance(spec[\"name\"], str):\n        errors.append(\"'name' must be a string\")\n    \n    if \"aggregation\" not in spec:\n        errors.append(\"Missing required field: 'aggregation'\")\n    elif spec[\"aggregation\"] not in AGGREGATIONS:\n        errors.append(f\"'aggregation' must be one of {AGGREGATIONS}\")\n    \n    # Validate filters if present\n    if \"filters\" in spec:\n        if not isinstance(spec[\"filters\"], dict):\n            errors.append(\"'filters' must be a dictionary\")\n        else:\n            filters = spec[\"filters\"]\n            for key, value in filters.items():\n                if key not in _FILTER_KEYS:\n                    errors.append(f\"Unknown filter key: '{key}'\")\n                    continue\n                \n                expected_type = _FILTER_KEYS[key]\n                \n                # Handle union types (tuples)\n                if isinstance(expected_type, tuple):\n                    if not isinstance(value, expected_type):\n                        type_names = \" or \".join(t.__name__ for t in expected_type)\n                        errors.append(f\"Filter '{key}' must be {type_names}, got {type(value).__name__}\")\n                else:\n                    # Handle specific types\n                    if expected_type is list:\n                        if not isinstance(value, list):\n                            errors.append(f\"Filter '{key}' must be a list\")\n                        elif key == \"zone_sequence_contains\" and value:\n                            # All elements should be strings\n                            if not all(isinstance(z, str) for z in value):\n                                errors.append(f\"Filter '{key}' must contain only strings\")\n                        elif key in (\"visited_zones_all\", \"visited_zones_any\", \"visited_zones_none\", \"actions_any\", \"actions_none\"):\n                            if not all(isinstance(item, str) for item in value):\n                                errors.append(f\"Filter '{key}' must contain only strings\")\n                    elif expected_type is dict:\n                        if not isinstance(value, dict):\n                            errors.append(f\"Filter '{key}' must be a dictionary\")\n                        else:\n                            # Validate dict structure based on key\n                            if key == \"min_dwell_s\":\n                                if \"zone\" not in value or \"seconds\" not in value:\n                                    errors.append(f\"Filter '{key}' must have 'zone' and 'seconds' keys\")\n                                elif not isinstance(value[\"zone\"], str):\n                                    errors.append(f\"Filter '{key}' 'zone' must be a string\")\n                                elif not isinstance(value[\"seconds\"], (int, float)):\n                                    errors.append(f\"Filter '{key}' 'seconds' must be a number\")\n                            elif key == \"min_action_count\":\n                                if \"action\" not in value or \"count\" not in value:\n                                    errors.append(f\"Filter '{key}' must have 'action' and 'count' keys\")\n                                elif not isinstance(value[\"action\"], str):\n                                    errors.append(f\"Filter '{key}' 'action' must be a string\")\n                                elif not isinstance(value[\"count\"], (int, float)):\n                                    errors.append(f\"Filter '{key}' 'count' must be a number\")\n                    elif expected_type is bool:\n                        if not isinstance(value, bool):\n                            errors.append(f\"Filter '{key}' must be a boolean\")\n                    elif expected_type is str:\n                        if not isinstance(value, str):\n                            errors.append(f\"Filter '{key}' must be a string\")\n    \n    return errors",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:40: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_validate_rejects_bad_specs\u001b[0m - assert False\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m1 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def validate_spec(spec: Any) -> list[str]:\n    \"\"\"Returns a list of human-readable errors; empty list = valid.\"\"\"\n    errors = []\n    \n    # Must be a dict\n    if not isinstance(spec, dict):\n        return [\"spec must be a dictionary\"]\n    \n    # Required keys\n    if \"name\" not in spec:\n        errors.append(\"missing required key: 'name'\")\n    elif not isinstance(spec[\"name\"], str):\n        errors.append(\"'name' must be a string\")\n    \n    if \"aggregation\" not in spec:\n        errors.append(\"missing required key: 'aggregation'\")\n    elif spec[\"aggregation\"] not in AGGREGATIONS:\n        errors.append(f\"'aggregation' must be one of {AGGREGATIONS}, got {spec['aggregation']!r}\")\n    \n    # Validate filters if present\n    if \"filters\" in spec:\n        filters = spec[\"filters\"]\n        if not isinstance(filters, dict):\n            errors.append(\"'filters' must be a dictionary\")\n        else:\n            for key, value in filters.items():\n                if key not in _FILTER_KEYS:\n                    errors.append(f\"unknown filter key: {key!r}\")\n                    continue\n                \n                expected_type = _FILTER_KEYS[key]\n                \n                # Check type\n                if isinstance(expected_type, tuple):\n                    if not isinstance(value, expected_type):\n                        type_names = \" or \".join(t.__name__ for t in expected_type)\n                        errors.append(f\"filter '{key}' must be {type_names}, got {type(value).__name__}\")\n                else:\n                    if not isinstance(value, expected_type):\n                        errors.append(f\"filter '{key}' must be {expected_type.__name__}, got {type(value).__name__}\")\n                \n                # Type-specific validation\n                if key in (\"visited_zones_all\", \"visited_zones_any\", \"visited_zones_none\", \"actions_any\", \"actions_none\"):\n                    if isinstance(value, list):\n                        if not all(isinstance(item, str) for item in value):\n                            errors.append(f\"filter '{key}' list items must all be strings\")\n                        if not value:\n                            errors.append(f\"filter '{key}' list cannot be empty\")\n                \n                elif key == \"zone_sequence_contains\":\n                    if isinstance(value, list):\n                        if not all(isinstance(item, str) for item in value):\n                            errors.append(f\"filter '{key}' list items must all be strings\")\n                        if not value:\n                            errors.append(f\"filter '{key}' list cannot be empty\")\n                \n                elif key == \"min_dwell_s\":\n                    if isinstance(value, dict):\n                        if \"zone\" not in value or \"seconds\" not in value:\n                            errors.append(f\"filter '{key}' must have 'zone' and 'seconds' keys\")\n                        elif not isinstance(value.get(\"zone\"), str):\n                            errors.append(f\"filter '{key}' 'zone' must be a string\")\n                        elif not isinstance(value.get(\"seconds\"), (int, float)):\n                            errors.append(f\"filter '{key}' 'seconds' must be a number\")\n                \n                elif key == \"min_action_count\":\n                    if isinstance(value, dict):\n                        if \"action\" not in value or \"count\" not in value:\n                            errors.append(f\"filter '{key}' must have 'action' and 'count' keys\")\n                        elif not isinstance(value.get(\"action\"), str):\n                            errors.append(f\"filter '{key}' 'action' must be a string\")\n                        elif not isinstance(value.get(\"count\"), (int, float)):\n                            errors.append(f\"filter '{key}' 'count' must be a number\")\n    \n    return errors",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:42: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_validate_rejects_bad_specs\u001b[0m - assert False\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m1 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def validate_spec(spec: Any) -> list[str]:\n    \"\"\"Returns a list of human-readable errors; empty list = valid.\"\"\"\n    errors = []\n    \n    # Must be a dict\n    if not isinstance(spec, dict):\n        return [\"Spec must be a dictionary\"]\n    \n    # Must have 'name' field (string)\n    if \"name\" not in spec:\n        errors.append(\"Missing required field: 'name'\")\n    elif not isinstance(spec[\"name\"], str):\n        errors.append(\"Field 'name' must be a string\")\n    \n    # Must have 'aggregation' field with valid value\n    if \"aggregation\" not in spec:\n        errors.append(\"Missing required field: 'aggregation'\")\n    elif spec[\"aggregation\"] not in AGGREGATIONS:\n        errors.append(f\"Field 'aggregation' must be one of {AGGREGATIONS}, got {spec['aggregation']!r}\")\n    \n    # Validate 'filters' if present\n    if \"filters\" in spec:\n        filters = spec[\"filters\"]\n        if not isinstance(filters, dict):\n            errors.append(\"Field 'filters' must be a dictionary\")\n        else:\n            # Check each filter key\n            for key, value in filters.items():\n                if key not in _FILTER_KEYS:\n                    errors.append(f\"Unknown filter key: {key!r}\")\n                    continue\n                \n                expected_type = _FILTER_KEYS[key]\n                \n                # Check type\n                if isinstance(expected_type, tuple):\n                    # Multiple allowed types\n                    if not isinstance(value, expected_type):\n                        type_names = \" or \".join(t.__name__ for t in expected_type)\n                        errors.append(f\"Filter '{key}' must be {type_names}, got {type(value).__name__}\")\n                else:\n                    # Single expected type\n                    if not isinstance(value, expected_type):\n                        errors.append(f\"Filter '{key}' must be {expected_type.__name__}, got {type(value).__name__}\")\n                \n                # Additional validation for specific filters\n                if key == \"min_dwell_s\" and isinstance(value, dict):\n                    if \"zone\" not in value:\n                        errors.append(\"Filter 'min_dwell_s' must have 'zone' key\")\n                    if \"seconds\" not in value:\n                        errors.append(\"Filter 'min_dwell_s' must have 'seconds' key\")\n                \n                if key == \"min_action_count\" and isinstance(value, dict):\n                    if \"action\" not in value:\n                        errors.append(\"Filter 'min_action_count' must have 'action' key\")\n                    if \"count\" not in value:\n                        errors.append(\"Filter 'min_action_count' must have 'count' key\")\n    \n    return errors",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:40: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_validate_rejects_bad_specs\u001b[0m - assert False\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m1 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "def validate_spec(spec: Any) -> list[str]:\n    \"\"\"Returns a list of human-readable errors; empty list = valid.\"\"\"\n    errors: list[str] = []\n\n    if not isinstance(spec, dict):\n        return [\"spec must be a dict\"]\n\n    # Validate name\n    if \"name\" not in spec:\n        errors.append(\"missing required field: 'name'\")\n    elif not isinstance(spec[\"name\"], str):\n        errors.append(\"'name' must be a string\")\n\n    # Validate aggregation\n    if \"aggregation\" not in spec:\n        errors.append(\"missing required field: 'aggregation'\")\n    elif spec[\"aggregation\"] not in AGGREGATIONS:\n        errors.append(\n            f\"'aggregation' must be one of {AGGREGATIONS}, got {spec['aggregation']!r}\"\n        )\n\n    # Validate filters\n    if \"filters\" in spec:\n        filters = spec[\"filters\"]\n        if not isinstance(filters, dict):\n            errors.append(\"'filters' must be a dict\")\n        else:\n            for key, value in filters.items():\n                if key not in _FILTER_KEYS:\n                    errors.append(f\"unknown filter key: {key!r}\")\n                    continue\n\n                expected_type = _FILTER_KEYS[key]\n                # bool must be checked before int since bool is subclass of int\n                if expected_type is bool or (isinstance(expected_type, tuple) and bool in expected_type):\n                    if not isinstance(value, expected_type):\n                        errors.append(\n                            f\"filter '{key}' must be of type {expected_type}, got {type(value).__name__}\"\n                        )\n                elif not isinstance(value, expected_type):\n                    errors.append(\n                        f\"filter '{key}' must be of type {expected_type}, got {type(value).__name__}\"\n                    )\n                else:\n                    # Additional structural validation for dict filters\n                    if key == \"min_dwell_s\":\n                        if not isinstance(value.get(\"zone\"), str):\n                            errors.append(\"filter 'min_dwell_s' must have 'zone' as a string\")\n                        if not isinstance(value.get(\"seconds\"), (int, float)) or isinstance(value.get(\"seconds\"), bool):\n                            errors.append(\"filter 'min_dwell_s' must have 'seconds' as a number\")\n                    elif key == \"min_action_count\":\n                        if not isinstance(value.get(\"action\"), str):\n                            errors.append(\"filter 'min_action_count' must have 'action' as a string\")\n                        if not isinstance(value.get(\"count\"), (int, float)) or isinstance(value.get(\"count\"), bool):\n                            errors.append(\"filter 'min_action_count' must have 'count' as a number\")\n\n    return errors\n",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_custom_metrics.py\u001b[0m:42: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_custom_metrics.py::\u001b[1mtest_validate_rejects_bad_specs\u001b[0m - assert False\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m1 passed\u001b[0m\u001b[31m in 0.05s\u001b[0m\u001b[0m",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 11.134820292005315,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.metrics.dsl.validate_spec",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def validate_spec(spec: Any) -> list[str]:\n    \"\"\"Returns a list of human-readable errors; empty list = valid.\"\"\"\n    errors: list[str] = []\n    \n    if not isinstance(spec, dict):\n        return [\"spec must be an object\"]\n\n    # Validate name field\n    name = spec.get(\"name\")\n    name_valid = isinstance(name, str) and name.strip()\n    if not name_valid:\n        errors.append(\"'name' is required and must be a non-empty string\")\n    elif len(name) > 80:\n        errors.append(\"'name' must be 80 characters or fewer\")\n\n    # Validate aggregation field\n    agg = spec.get(\"aggregation\")\n    if agg not in AGGREGATIONS:\n        errors.append(f\"'aggregation' must be one of {list(AGGREGATIONS)}\")\n\n    # Validate filters field\n    filters = spec.get(\"filters\", {})\n    if not isinstance(filters, dict):\n        errors.append(\"'filters' must be an object\")\n        return errors\n\n    for filter_key, filter_value in filters.items():\n        expected_type = _FILTER_KEYS.get(filter_key)\n        \n        # Check for unknown filter keys\n        if expected_type is None:\n            errors.append(f\"unknown filter '{filter_key}' \u2014 allowed: {sorted(_FILTER_KEYS)}\")\n            continue\n        \n        # Check type mismatch\n        if not isinstance(filter_value, expected_type):\n            errors.append(f\"filter '{filter_key}' has wrong type (expected {expected_type})\")\n            continue\n        \n        # Validate specific filter structures\n        if filter_key == \"min_dwell_s\":\n            zone_val = filter_value.get(\"zone\")\n            seconds_val = filter_value.get(\"seconds\")\n            if not isinstance(zone_val, str) or not isinstance(seconds_val, (int, float)):\n                errors.append(\"'min_dwell_s' needs {\\\"zone\\\": str, \\\"seconds\\\": number}\")\n        \n        elif filter_key == \"min_action_count\":\n            action_val = filter_value.get(\"action\")\n            count_val = filter_value.get(\"count\")\n            if not isinstance(action_val, str) or not isinstance(count_val, (int, float)):\n                errors.append(\"'min_action_count' needs {\\\"action\\\": str, \\\"count\\\": number}\")\n        \n        elif expected_type is list:\n            if not all(isinstance(item, str) for item in filter_value):\n                errors.append(f\"filter '{filter_key}' must be a list of strings\")\n\n    # Check for unknown top-level keys\n    allowed_keys = {\"name\", \"filters\", \"aggregation\", \"explanation\"}\n    unexpected = set(spec) - allowed_keys\n    if unexpected:\n        errors.append(f\"unknown top-level keys: {sorted(unexpected)}\")\n    \n    return errors",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.7538332868692501
+        }
+      ],
+      "verify_seconds": 3.5359757079277188,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.graph.topo_sort",
+      "arm": "spec",
+      "solved_by": "escalation",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def topo_sort(spec: GraphSpec) -> list[str]:\n    \"\"\"Return node IDs in topological execution order.\"\"\"\n    nodes = {n[\"id\"]: n for n in spec.get(\"nodes\", [])}\n    sorter = TopologicalSorter()\n    \n    # Add all nodes to the sorter\n    for node_id in nodes:\n        sorter.add(node_id)\n    \n    # Add edges to establish dependencies\n    # An edge from node A to node B means A must execute before B\n    for edge in spec.get(\"edges\", []):\n        from_node = edge.get(\"from_node\")\n        to_node = edge.get(\"to_node\")\n        if from_node and to_node:\n            sorter.add(to_node, from_node)\n    \n    # Perform topological sort; raises CycleError if a cycle exists\n    return list(sorter.static_order())",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_pipeline_graph.py\u001b[0m:93: Failed\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pipeline_graph.py::\u001b[1mtest_validate_bad_node_ref\u001b[0m - Failed: DID NOT RAISE <class 'KeyError'>\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m7 passed\u001b[0m\u001b[31m in 0.09s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def topo_sort(spec: GraphSpec) -> list[str]:\n    \"\"\"Return node IDs in topological execution order.\"\"\"\n    nodes = {n[\"id\"]: n for n in spec.get(\"nodes\", [])}\n    \n    sorter = TopologicalSorter()\n    \n    # Add all nodes to the sorter\n    for node_id in nodes:\n        sorter.add(node_id)\n    \n    # Add edges as dependencies: if there's an edge from A to B,\n    # then B depends on A (A must execute before B)\n    for edge in spec.get(\"edges\", []):\n        from_node = edge.get(\"from_node\")\n        to_node = edge.get(\"to_node\")\n        if from_node and to_node:\n            sorter.add(to_node, from_node)\n    \n    # This will raise CycleError if there's a cycle\n    return list(sorter.static_order())",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_pipeline_graph.py\u001b[0m:93: Failed\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pipeline_graph.py::\u001b[1mtest_validate_bad_node_ref\u001b[0m - Failed: DID NOT RAISE <class 'KeyError'>\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m7 passed\u001b[0m\u001b[31m in 0.12s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def topo_sort(spec: GraphSpec) -> list[str]:\n    \"\"\"Return node IDs in topological execution order.\"\"\"\n    nodes = {n[\"id\"]: n for n in spec.get(\"nodes\", [])}\n    \n    sorter = TopologicalSorter()\n    \n    # Add all nodes to the sorter\n    for node_id in nodes:\n        sorter.add(node_id)\n    \n    # Add edges as dependencies\n    for edge in spec.get(\"edges\", []):\n        from_node = edge.get(\"from_node\")\n        to_node = edge.get(\"to_node\")\n        if from_node and to_node:\n            # to_node depends on from_node\n            sorter.add(to_node, from_node)\n    \n    # Get the topologically sorted order\n    return list(sorter.static_order())",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_pipeline_graph.py\u001b[0m:93: Failed\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pipeline_graph.py::\u001b[1mtest_validate_bad_node_ref\u001b[0m - Failed: DID NOT RAISE <class 'KeyError'>\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m7 passed\u001b[0m\u001b[31m in 0.09s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "def topo_sort(spec: GraphSpec) -> list[str]:\n    \"\"\"Return node IDs in topological execution order.\"\"\"\n    nodes = {n[\"id\"] for n in spec.get(\"nodes\", [])}\n    edges = spec.get(\"edges\", [])\n\n    deps: dict[str, set[str]] = {n: set() for n in nodes}\n\n    for edge in edges:\n        fn = edge.get(\"from_node\")\n        tn = edge.get(\"to_node\")\n        if fn not in nodes:\n            raise KeyError(f\"Edge references unknown source node: {fn!r}\")\n        if tn not in nodes:\n            raise KeyError(f\"Edge references unknown target node: {tn!r}\")\n        deps[tn].add(fn)\n\n    sorter = TopologicalSorter(deps)\n    return list(sorter.static_order())",
+          "contract_ok": false,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 11.659517332911491,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.graph.topo_sort",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def topo_sort(spec: GraphSpec) -> list[str]:\n    \"\"\"Return node IDs in topological execution order.\"\"\"\n    graph_nodes = spec.get(\"nodes\", [])\n    graph_edges = spec.get(\"edges\", [])\n    \n    # Initialize dependency map with all nodes having empty dependencies\n    node_dependencies = {}\n    for node in graph_nodes:\n        node_id = node[\"id\"]\n        node_dependencies[node_id] = set()\n    \n    # Populate dependencies from edges\n    for edge in graph_edges:\n        target = edge[\"to_node\"]\n        source = edge[\"from_node\"]\n        node_dependencies[target].add(source)\n    \n    # Sort topologically and return as list\n    sorter = TopologicalSorter(node_dependencies)\n    return list(sorter.static_order())",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.2706185567010309
+        }
+      ],
+      "verify_seconds": 3.1146245419513434,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.graph.validate",
+      "arm": "spec",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def validate(spec: GraphSpec) -> list[str]:\n    \"\"\"Return a list of validation errors. Empty list means the graph is valid.\"\"\"\n    errors = []\n    \n    # Check if spec is a dict\n    if not isinstance(spec, dict):\n        errors.append(\"spec must be a dictionary\")\n        return errors\n    \n    # Check nodes and edges exist\n    nodes = spec.get(\"nodes\", [])\n    edges = spec.get(\"edges\", [])\n    \n    if not isinstance(nodes, list):\n        errors.append(\"nodes must be a list\")\n    \n    if not isinstance(edges, list):\n        errors.append(\"edges must be a list\")\n    \n    # Build a set of valid node IDs\n    node_ids = set()\n    node_id_to_type = {}\n    \n    for i, node in enumerate(nodes):\n        if not isinstance(node, dict):\n            errors.append(f\"node at index {i} must be a dictionary\")\n            continue\n        \n        # Check required fields\n        if \"id\" not in node:\n            errors.append(f\"node at index {i} is missing 'id'\")\n        elif not isinstance(node[\"id\"], str):\n            errors.append(f\"node at index {i} has non-string 'id'\")\n        else:\n            node_id = node[\"id\"]\n            if node_id in node_ids:\n                errors.append(f\"duplicate node id: {node_id}\")\n            else:\n                node_ids.add(node_id)\n                node_id_to_type[node_id] = node.get(\"type\")\n        \n        if \"type\" not in node:\n            errors.append(f\"node at index {i} is missing 'type'\")\n        elif not isinstance(node[\"type\"], str):\n            errors.append(f\"node at index {i} has non-string 'type'\")\n        else:\n            # Check if type is registered\n            node_type = node[\"type\"]\n            if not registry.has(node_type):\n                errors.append(f\"node type '{node_type}' is not registered\")\n        \n        if \"params\" not in node:\n            errors.append(f\"node at index {i} is missing 'params'\")\n        elif not isinstance(node[\"params\"], dict):\n            errors.append(f\"node at index {i} has non-dict 'params'\")\n    \n    # Validate edges\n    for i, edge in enumerate(edges):\n        if not isinstance(edge, dict):\n            errors.append(f\"edge at index {i} must be a dictionary\")\n            continue\n        \n        # Check required fields\n        if \"from_node\" not in edge:\n            errors.append(f\"edge at index {i} is missing 'from_node'\")\n        elif edge[\"from_node\"] not in node_ids:\n            errors.append(f\"edge at index {i} references unknown from_node: {edge['from_node']}\")\n        \n        if \"from_port\" not in edge:\n            errors.append(f\"edge at index {i} is missing 'from_port'\")\n        elif not isinstance(edge[\"from_port\"], str):\n            errors.append(f\"edge at index {i} has non-string 'from_port'\")\n        \n        if \"to_node\" not in edge:\n            errors.append(f\"edge at index {i} is missing 'to_node'\")\n        elif edge[\"to_node\"] not in node_ids:\n            errors.append(f\"edge at index {i} references unknown to_node: {edge['to_node']}\")\n        \n        if \"to_port\" not in edge:\n            errors.append(f\"edge at index {i} is missing 'to_port'\")\n        elif not isinstance(edge[\"to_port\"], str):\n            errors.append(f\"edge at index {i} has non-string 'to_port'\")\n    \n    # Check for cycles\n    deps: dict[str, set[str]] = {node_id: set() for node_id in node_ids}\n    for edge in edges:\n        if \"to_node\" in edge and \"from_node\" in edge:\n            deps[edge[\"to_node\"]].add(edge[\"from_node\"])\n    \n    try:\n        from graphlib import TopologicalSorter\n        list(TopologicalSorter(deps).static_order())\n    except CycleError as e:\n        errors.append(f\"cycle detected in graph: {str(e)}\")\n    \n    return errors",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_api.py::\u001b[1mtest_pipeline_validate_bad\u001b[0m - AttributeError: module 'aspen.pipeline.registry' has no attribute 'has'\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m, \u001b[33m2 warnings\u001b[0m\u001b[31m in 0.44s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def validate(spec: GraphSpec) -> list[str]:\n    \"\"\"Return a list of validation errors. Empty list means the graph is valid.\"\"\"\n    errors = []\n    \n    # Check that spec is a dict with required keys\n    if not isinstance(spec, dict):\n        errors.append(\"Graph spec must be a dictionary\")\n        return errors\n    \n    nodes_list = spec.get(\"nodes\", [])\n    edges_list = spec.get(\"edges\", [])\n    \n    # Validate nodes\n    if not isinstance(nodes_list, list):\n        errors.append(\"'nodes' must be a list\")\n    else:\n        node_ids = set()\n        for i, node in enumerate(nodes_list):\n            if not isinstance(node, dict):\n                errors.append(f\"Node at index {i} must be a dictionary\")\n                continue\n            \n            # Check required fields\n            if \"id\" not in node:\n                errors.append(f\"Node at index {i} is missing 'id'\")\n            elif not isinstance(node[\"id\"], str):\n                errors.append(f\"Node at index {i} has non-string 'id'\")\n            else:\n                node_id = node[\"id\"]\n                if node_id in node_ids:\n                    errors.append(f\"Duplicate node id: '{node_id}'\")\n                node_ids.add(node_id)\n            \n            if \"type\" not in node:\n                errors.append(f\"Node at index {i} is missing 'type'\")\n            elif not isinstance(node[\"type\"], str):\n                errors.append(f\"Node at index {i} has non-string 'type'\")\n            else:\n                # Check if node type is registered\n                if node[\"type\"] not in registry.node_types:\n                    errors.append(f\"Unknown node type: '{node['type']}'\")\n            \n            if \"params\" not in node:\n                errors.append(f\"Node at index {i} is missing 'params'\")\n            elif not isinstance(node[\"params\"], dict):\n                errors.append(f\"Node at index {i} has non-dict 'params'\")\n    \n    # Validate edges\n    if not isinstance(edges_list, list):\n        errors.append(\"'edges' must be a list\")\n    else:\n        node_ids = {n[\"id\"] for n in nodes_list if isinstance(n, dict) and \"id\" in n}\n        \n        for i, edge in enumerate(edges_list):\n            if not isinstance(edge, dict):\n                errors.append(f\"Edge at index {i} must be a dictionary\")\n                continue\n            \n            # Check required fields\n            required_fields = [\"from_node\", \"from_port\", \"to_node\", \"to_port\"]\n            for field in required_fields:\n                if field not in edge:\n                    errors.append(f\"Edge at index {i} is missing '{field}'\")\n                elif not isinstance(edge[field], str):\n                    errors.append(f\"Edge at index {i} has non-string '{field}'\")\n            \n            # Check that nodes exist\n            if \"from_node\" in edge and isinstance(edge[\"from_node\"], str):\n                if edge[\"from_node\"] not in node_ids:\n                    errors.append(f\"Edge at index {i} references undefined 'from_node': '{edge['from_node']}'\")\n            \n            if \"to_node\" in edge and isinstance(edge[\"to_node\"], str):\n                if edge[\"to_node\"] not in node_ids:\n                    errors.append(f\"Edge at index {i} references undefined 'to_node': '{edge['to_node']}'\")\n    \n    # Check for cycles\n    try:\n        deps: dict[str, set[str]] = {n[\"id\"]: set() for n in nodes_list if isinstance(n, dict) and \"id\" in n}\n        for edge in edges_list:\n            if isinstance(edge, dict) and \"from_node\" in edge and \"to_node\" in edge:\n                if isinstance(edge[\"from_node\"], str) and isinstance(edge[\"to_node\"], str):\n                    if edge[\"to_node\"] in deps:\n                        deps[edge[\"to_node\"]].add(edge[\"from_node\"])\n        list(TopologicalSorter(deps).static_order())\n    except CycleError:\n        errors.append(\"Graph contains a cycle\")\n    \n    return errors",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_api.py::\u001b[1mtest_pipeline_validate_bad\u001b[0m - AttributeError: module 'aspen.pipeline.registry' has no attribute 'node_types'\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m, \u001b[33m2 warnings\u001b[0m\u001b[31m in 0.41s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def validate(spec: GraphSpec) -> list[str]:\n    \"\"\"Return a list of validation errors. Empty list means the graph is valid.\"\"\"\n    errors = []\n    \n    # Check if spec is a dict with required keys\n    if not isinstance(spec, dict):\n        errors.append(\"spec must be a dictionary\")\n        return errors\n    \n    nodes = spec.get(\"nodes\", [])\n    edges = spec.get(\"edges\", [])\n    \n    # Validate nodes structure\n    if not isinstance(nodes, list):\n        errors.append(\"nodes must be a list\")\n    else:\n        node_ids = set()\n        for i, node in enumerate(nodes):\n            if not isinstance(node, dict):\n                errors.append(f\"node at index {i} must be a dictionary\")\n                continue\n            \n            # Check required fields\n            if \"id\" not in node:\n                errors.append(f\"node at index {i} is missing 'id'\")\n            elif not isinstance(node[\"id\"], str):\n                errors.append(f\"node at index {i} has non-string 'id'\")\n            else:\n                node_id = node[\"id\"]\n                if node_id in node_ids:\n                    errors.append(f\"duplicate node id: {node_id}\")\n                else:\n                    node_ids.add(node_id)\n            \n            if \"type\" not in node:\n                errors.append(f\"node at index {i} is missing 'type'\")\n            elif not isinstance(node[\"type\"], str):\n                errors.append(f\"node at index {i} has non-string 'type'\")\n            elif node.get(\"type\") and not registry.has(node[\"type\"]):\n                errors.append(f\"node at index {i} has unknown type: {node['type']}\")\n            \n            if \"params\" in node and not isinstance(node[\"params\"], dict):\n                errors.append(f\"node at index {i} has non-dict 'params'\")\n    \n    # Validate edges structure\n    if not isinstance(edges, list):\n        errors.append(\"edges must be a list\")\n    else:\n        node_ids = {n[\"id\"] for n in nodes if isinstance(n, dict) and \"id\" in n and isinstance(n[\"id\"], str)}\n        for i, edge in enumerate(edges):\n            if not isinstance(edge, dict):\n                errors.append(f\"edge at index {i} must be a dictionary\")\n                continue\n            \n            # Check required fields\n            if \"from_node\" not in edge:\n                errors.append(f\"edge at index {i} is missing 'from_node'\")\n            elif not isinstance(edge[\"from_node\"], str):\n                errors.append(f\"edge at index {i} has non-string 'from_node'\")\n            elif edge[\"from_node\"] not in node_ids:\n                errors.append(f\"edge at index {i} references unknown from_node: {edge['from_node']}\")\n            \n            if \"from_port\" not in edge:\n                errors.append(f\"edge at index {i} is missing 'from_port'\")\n            elif not isinstance(edge[\"from_port\"], str):\n                errors.append(f\"edge at index {i} has non-string 'from_port'\")\n            \n            if \"to_node\" not in edge:\n                errors.append(f\"edge at index {i} is missing 'to_node'\")\n            elif not isinstance(edge[\"to_node\"], str):\n                errors.append(f\"edge at index {i} has non-string 'to_node'\")\n            elif edge[\"to_node\"] not in node_ids:\n                errors.append(f\"edge at index {i} references unknown to_node: {edge['to_node']}\")\n            \n            if \"to_port\" not in edge:\n                errors.append(f\"edge at index {i} is missing 'to_port'\")\n            elif not isinstance(edge[\"to_port\"], str):\n                errors.append(f\"edge at index {i} has non-string 'to_port'\")\n    \n    # Check for cycles\n    if not errors:  # Only check cycles if no structural errors\n        try:\n            deps: dict[str, set[str]] = {n[\"id\"]: set() for n in nodes}\n            for edge in edges:\n                deps[edge[\"to_node\"]].add(edge[\"from_node\"])\n            list(TopologicalSorter(deps).static_order())\n        except CycleError as e:\n            errors.append(f\"cycle detected in graph: {str(e)}\")\n    \n    return errors",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_api.py::\u001b[1mtest_pipeline_validate_bad\u001b[0m - AttributeError: module 'aspen.pipeline.registry' has no attribute 'has'\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m, \u001b[33m2 warnings\u001b[0m\u001b[31m in 0.44s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "def validate(spec: GraphSpec) -> list[str]:\n    \"\"\"Return a list of validation errors. Empty list means the graph is valid.\"\"\"\n    errors = []\n    nodes = spec.get(\"nodes\", [])\n    edges = spec.get(\"edges\", [])\n\n    node_ids = set()\n    for node in nodes:\n        node_id = node.get(\"id\")\n        if not node_id:\n            errors.append(f\"Node missing 'id': {node}\")\n            continue\n        if node_id in node_ids:\n            errors.append(f\"Duplicate node id: {node_id}\")\n        node_ids.add(node_id)\n\n        node_type = node.get(\"type\")\n        if not node_type:\n            errors.append(f\"Node '{node_id}' missing 'type'\")\n        else:\n            # Check registry using available API\n            try:\n                registry.get(node_type)\n            except Exception:\n                errors.append(f\"Node '{node_id}' has unknown type: '{node_type}'\")\n\n    for edge in edges:\n        from_node = edge.get(\"from_node\")\n        to_node = edge.get(\"to_node\")\n        if from_node not in node_ids:\n            errors.append(f\"Edge references unknown from_node: '{from_node}'\")\n        if to_node not in node_ids:\n            errors.append(f\"Edge references unknown to_node: '{to_node}'\")\n\n    # Check for cycles\n    deps: dict[str, set[str]] = {n[\"id\"]: set() for n in nodes if n.get(\"id\")}\n    for edge in edges:\n        from_node = edge.get(\"from_node\")\n        to_node = edge.get(\"to_node\")\n        if from_node in deps and to_node in deps:\n            deps[to_node].add(from_node)\n    try:\n        from graphlib import TopologicalSorter, CycleError\n        list(TopologicalSorter(deps).static_order())\n    except CycleError as e:\n        errors.append(f\"Graph contains a cycle: {e}\")\n\n    return errors",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_pipeline_graph.py::\u001b[1mtest_validate_bad_node_ref\u001b[0m - Failed: DID NOT RAISE <class 'KeyError'>\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m16 passed\u001b[0m, \u001b[33m2 warnings\u001b[0m\u001b[31m in 0.31s\u001b[0m\u001b[0m",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 13.347248750040308,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.graph.validate",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def validate(spec: GraphSpec) -> list[str]:\n    \"\"\"Return a list of validation errors. Empty list means the graph is valid.\"\"\"\n    issues: list[str] = []\n    node_map = {n[\"id\"]: n for n in spec.get(\"nodes\", [])}\n\n    # Check node types are registered\n    for node in spec.get(\"nodes\", []):\n        node_type = node.get(\"type\", \"\")\n        try:\n            registry.get(node_type)\n        except KeyError as e:\n            issues.append(str(e))\n\n    # Check edges\n    for edge in spec.get(\"edges\", []):\n        required_fields = (\"from_node\", \"from_port\", \"to_node\", \"to_port\")\n        missing = [f for f in required_fields if not edge.get(f)]\n        if missing:\n            for field in missing:\n                issues.append(f\"Edge missing field {field!r}: {edge}\")\n            continue\n\n        from_node_id = edge[\"from_node\"]\n        to_node_id = edge[\"to_node\"]\n\n        # Validate node references\n        if from_node_id not in node_map:\n            issues.append(f\"Edge references unknown source node: {from_node_id!r}\")\n        if to_node_id not in node_map:\n            issues.append(f\"Edge references unknown target node: {to_node_id!r}\")\n\n        # Check port type compatibility\n        if from_node_id in node_map and to_node_id in node_map:\n            from_type = node_map[from_node_id].get(\"type\", \"\")\n            to_type = node_map[to_node_id].get(\"type\", \"\")\n            try:\n                from_inst = registry.get(from_type)()\n                to_inst = registry.get(to_type)()\n                from_port = edge[\"from_port\"]\n                to_port = edge[\"to_port\"]\n                out_type = from_inst.output_ports.get(from_port)\n                in_type = to_inst.input_ports.get(to_port)\n                if out_type and in_type:\n                    allowed_types = {t.strip() for t in in_type.split(\"|\")}\n                    if out_type not in allowed_types:\n                        issues.append(\n                            f\"Type mismatch: {from_node_id}.{from_port} ({out_type}) -> {to_node_id}.{to_port} ({in_type})\"\n                        )\n            except KeyError:\n                pass\n\n    # Check for cycles\n    try:\n        topo_sort(spec)\n    except CycleError as e:\n        issues.append(f\"Graph contains a cycle: {e}\")\n\n    return issues",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.35147849462365593
+        }
+      ],
+      "verify_seconds": 3.549407583894208,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.registry.all_metadata",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def all_metadata() -> dict[str, dict]:\n    \"\"\"Return metadata for all registered node types (for the UI palette).\"\"\"\n    return {\n        node_type: cls.metadata()\n        for node_type, cls in _REGISTRY.items()\n    }",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31maspen/pipeline/registry.py\u001b[0m:28: TypeError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_registry.py::\u001b[1mtest_all_metadata_has_expected_keys\u001b[0m - TypeError: Node.metadata() missing 1 required positional argument: 'self'\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m2 passed\u001b[0m\u001b[31m in 0.08s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def all_metadata() -> dict[str, dict]:\n    \"\"\"Return metadata for all registered node types (for the UI palette).\"\"\"\n    result = {}\n    for node_type, node_class in _REGISTRY.items():\n        if hasattr(node_class, 'metadata') and isinstance(node_class.metadata, dict):\n            result[node_type] = node_class.metadata\n        else:\n            result[node_type] = {}\n    return result",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 5.8609269158914685,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.registry.all_metadata",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def all_metadata() -> dict[str, dict]:\n    \"\"\"Return metadata for all registered node types (for the UI palette).\"\"\"\n    result = {}\n    for node_type, node_class in _REGISTRY.items():\n        node_instance = node_class()\n        result[node_type] = node_instance.metadata()\n    return result",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.6482758620689655
+        }
+      ],
+      "verify_seconds": 3.016161666950211,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.registry.get",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def get(node_type: str) -> type[\"Node\"]:\n    \"\"\"Retrieve a registered Node class by its node_type.\"\"\"\n    return _REGISTRY[node_type]",
+          "contract_ok": false,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 6.1693782499060035,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.pipeline.registry.get",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def get(node_type: str) -> type[\"Node\"]:\n    available = sorted(_REGISTRY)\n    if node_type not in _REGISTRY:\n        msg = f\"Unknown node type: {node_type!r}. Available: {available}\"\n        raise KeyError(msg)\n    return _REGISTRY[node_type]",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.45
+        }
+      ],
+      "verify_seconds": 6.2115217910613865,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker._iou",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _iou(\n    a: tuple[float, float, float, float], b: tuple[float, float, float, float]\n) -> float:\n    \"\"\"\n    Compute Intersection over Union (IoU) between two bboxes in xyxy format.\n    \n    Args:\n        a: bbox as (x1, y1, x2, y2)\n        b: bbox as (x1, y1, x2, y2)\n    \n    Returns:\n        IoU score in range [0, 1]\n    \"\"\"\n    x1_a, y1_a, x2_a, y2_a = a\n    x1_b, y1_b, x2_b, y2_b = b\n    \n    # Compute intersection\n    x1_inter = max(x1_a, x1_b)\n    y1_inter = max(y1_a, y1_b)\n    x2_inter = min(x2_a, x2_b)\n    y2_inter = min(y2_a, y2_b)\n    \n    inter_width = max(0.0, x2_inter - x1_inter)\n    inter_height = max(0.0, y2_inter - y1_inter)\n    inter_area = inter_width * inter_height\n    \n    # Compute areas\n    area_a = (x2_a - x1_a) * (y2_a - y1_a)\n    area_b = (x2_b - x1_b) * (y2_b - y1_b)\n    \n    # Compute union\n    union_area = area_a + area_b - inter_area\n    \n    # Avoid division by zero\n    if union_area == 0.0:\n        return 0.0\n    \n    return inter_area / union_area",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 3.0613562499638647,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker._iou",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def _iou(\n    a: tuple[float, float, float, float], b: tuple[float, float, float, float]\n) -> float:\n    ax1, ay1, ax2, ay2 = a\n    bx1, by1, bx2, by2 = b\n\n    # Calculate intersection box coordinates\n    left = max(ax1, bx1)\n    top = max(ay1, by1)\n    right = min(ax2, bx2)\n    bottom = min(ay2, by2)\n\n    # Calculate intersection area\n    width = right - left\n    height = bottom - top\n    if width <= 0.0 or height <= 0.0:\n        return 0.0\n    intersection_area = width * height\n\n    # Calculate union area\n    a_width = ax2 - ax1\n    a_height = ay2 - ay1\n    b_width = bx2 - bx1\n    b_height = by2 - by1\n    \n    a_area = max(0.0, a_width) * max(0.0, a_height)\n    b_area = max(0.0, b_width) * max(0.0, b_height)\n    union_area = a_area + b_area - intersection_area\n\n    if union_area <= 0.0:\n        return 0.0\n    return intersection_area / union_area",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.2979094076655052
+        }
+      ],
+      "verify_seconds": 3.1552549169864506,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker.init_tracker_state",
+      "arm": "spec",
+      "solved_by": "escalation",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def init_tracker_state() -> TrackerState:\n    return TrackerState(next_id=0, tracks=[])",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_iou_tracker.py\u001b[0m:44: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_iou_tracker.py::\u001b[1mtest_tracker_creates_new_tracks\u001b[0m - assert [0, 1] == [1, 2]\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def init_tracker_state() -> TrackerState:\n    return TrackerState(next_id=0, tracks=[])",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_iou_tracker.py\u001b[0m:44: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_iou_tracker.py::\u001b[1mtest_tracker_creates_new_tracks\u001b[0m - assert [0, 1] == [1, 2]\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def init_tracker_state() -> TrackerState:\n    return TrackerState(next_id=0, tracks=[])",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_iou_tracker.py\u001b[0m:44: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_iou_tracker.py::\u001b[1mtest_tracker_creates_new_tracks\u001b[0m - assert [0, 1] == [1, 2]\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "def init_tracker_state() -> TrackerState:\n    return TrackerState(next_id=1, tracks=[])",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 10.604411874199286,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker.init_tracker_state",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def init_tracker_state() -> TrackerState:\n    initial_track_id = 1\n    empty_tracks = []\n    return TrackerState(next_id=initial_track_id, tracks=empty_tracks)",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.6956521739130435
+        }
+      ],
+      "verify_seconds": 2.3635645830072463,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker.update_iou_tracker",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def update_iou_tracker(\n    state: TrackerState,\n    frame_index: int,\n    bboxes: list[tuple[float, float, float, float]],\n    *,\n    iou_threshold: float = 0.3,\n    max_age_frames: int = 30,\n) -> tuple[TrackerState, list[int]]:\n    \"\"\"Matches incoming bboxes to existing tracks via greedy IoU.\n\n    Returns:\n      new_state, assigned_track_ids (same order as bboxes)\"\"\"\n    \n    # Remove tracks that are too old\n    active_tracks = [\n        track for track in state.tracks\n        if frame_index - track.last_seen_frame <= max_age_frames\n    ]\n    \n    assigned_track_ids = []\n    used_track_indices = set()\n    \n    # Greedy matching: for each bbox, find the best matching track\n    for bbox in bboxes:\n        best_iou = iou_threshold\n        best_track_idx = -1\n        \n        for track_idx, track in enumerate(active_tracks):\n            if track_idx in used_track_indices:\n                continue\n            \n            iou_score = _iou(bbox, track.bbox_xyxy)\n            if iou_score > best_iou:\n                best_iou = iou_score\n                best_track_idx = track_idx\n        \n        if best_track_idx >= 0:\n            # Match found\n            used_track_indices.add(best_track_idx)\n            track_id = active_tracks[best_track_idx].track_id\n            assigned_track_ids.append(track_id)\n        else:\n            # No match, create new track\n            track_id = state.next_id\n            assigned_track_ids.append(track_id)\n    \n    # Update matched tracks and create new ones\n    next_id = state.next_id\n    updated_tracks = []\n    \n    for track_idx, track in enumerate(active_tracks):\n        if track_idx in used_track_indices:\n            # Find which bbox matched this track\n            for bbox_idx, bbox in enumerate(bboxes):\n                if assigned_track_ids[bbox_idx] == track.track_id:\n                    # Update the track with new bbox\n                    updated_tracks.append(TrackState(\n                        track_id=track.track_id,\n                        bbox_xyxy=bbox,\n                        last_seen_frame=frame_index\n                    ))\n                    break\n        else:\n            # Keep unmatched track as-is (may age out later)\n            updated_tracks.append(track)\n    \n    # Add new tracks for unmatched bboxes\n    for bbox_idx, bbox in enumerate(bboxes):\n        if assigned_track_ids[bbox_idx] == next_id:\n            updated_tracks.append(TrackState(\n                track_id=next_id,\n                bbox_xyxy=bbox,\n                last_seen_frame=frame_index\n            ))\n            next_id += 1\n        elif assigned_track_ids[bbox_idx] > next_id:\n            next_id = assigned_track_ids[bbox_idx] + 1\n    \n    new_state = TrackerState(next_id=next_id, tracks=updated_tracks)\n    return new_state, assigned_track_ids",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_iou_tracker.py\u001b[0m:44: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_iou_tracker.py::\u001b[1mtest_tracker_creates_new_tracks\u001b[0m - assert [1, 1] == [1, 2]\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def update_iou_tracker(\n    state: TrackerState,\n    frame_index: int,\n    bboxes: list[tuple[float, float, float, float]],\n    *,\n    iou_threshold: float = 0.3,\n    max_age_frames: int = 30,\n) -> tuple[TrackerState, list[int]]:\n    \"\"\"Matches incoming bboxes to existing tracks via greedy IoU.\n\n    Returns:\n      new_state, assigned_track_ids (same order as bboxes)\"\"\"\n    \n    # Remove tracks that are too old\n    active_tracks = [\n        t for t in state.tracks\n        if frame_index - t.last_seen_frame <= max_age_frames\n    ]\n    \n    assigned_track_ids = []\n    matched_track_indices = set()\n    \n    # Greedy matching: for each bbox, find the best matching track\n    for bbox in bboxes:\n        best_iou = iou_threshold\n        best_track_idx = None\n        \n        for track_idx, track in enumerate(active_tracks):\n            if track_idx in matched_track_indices:\n                continue\n            \n            iou_score = _iou(bbox, track.bbox_xyxy)\n            if iou_score > best_iou:\n                best_iou = iou_score\n                best_track_idx = track_idx\n        \n        if best_track_idx is not None:\n            # Match found: update the track\n            matched_track_indices.add(best_track_idx)\n            track = active_tracks[best_track_idx]\n            updated_track = TrackState(\n                track_id=track.track_id,\n                bbox_xyxy=bbox,\n                last_seen_frame=frame_index\n            )\n            # Replace the track in active_tracks\n            active_tracks[best_track_idx] = updated_track\n            assigned_track_ids.append(track.track_id)\n        else:\n            # No match: create a new track\n            new_track = TrackState(\n                track_id=state.next_id,\n                bbox_xyxy=bbox,\n                last_seen_frame=frame_index\n            )\n            active_tracks.append(new_track)\n            assigned_track_ids.append(state.next_id)\n            state = TrackerState(next_id=state.next_id + 1, tracks=active_tracks)\n    \n    new_state = TrackerState(next_id=state.next_id, tracks=active_tracks)\n    return new_state, assigned_track_ids",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 5.603299541864544,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.tracking.iou_tracker.update_iou_tracker",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def update_iou_tracker(\n    state: TrackerState,\n    frame_index: int,\n    bboxes: list[tuple[float, float, float, float]],\n    *,\n    iou_threshold: float = 0.3,\n    max_age_frames: int = 30,\n) -> tuple[TrackerState, list[int]]:\n    \"\"\"\n    Matches incoming bboxes to existing tracks via greedy IoU.\n\n    Returns:\n      new_state, assigned_track_ids (same order as bboxes)\n    \"\"\"\n    \n    # Filter out expired tracks\n    active_tracks = [\n        track for track in state.tracks\n        if frame_index - track.last_seen_frame <= max_age_frames\n    ]\n    \n    # Initialize all detections as unmatched\n    matched_track_ids = [-1] * len(bboxes)\n    matched_track_indices = set()\n    \n    # Greedily assign each detection to its best matching track\n    for det_idx, detection_box in enumerate(bboxes):\n        best_track_idx = -1\n        best_overlap = iou_threshold\n        \n        for track_idx, track in enumerate(active_tracks):\n            if track_idx in matched_track_indices:\n                continue\n            \n            overlap = _iou(detection_box, track.bbox_xyxy)\n            if overlap > best_overlap:\n                best_overlap = overlap\n                best_track_idx = track_idx\n        \n        if best_track_idx >= 0:\n            # Assign detection to matched track\n            matched_track = active_tracks[best_track_idx]\n            matched_track_ids[det_idx] = matched_track.track_id\n            matched_track_indices.add(best_track_idx)\n            \n            # Update track with new bbox and timestamp\n            active_tracks[best_track_idx] = TrackState(\n                track_id=matched_track.track_id,\n                bbox_xyxy=detection_box,\n                last_seen_frame=frame_index\n            )\n    \n    # Assign new track IDs to unmatched detections\n    current_id = state.next_id\n    for det_idx, detection_box in enumerate(bboxes):\n        if matched_track_ids[det_idx] == -1:\n            matched_track_ids[det_idx] = current_id\n            active_tracks.append(\n                TrackState(\n                    track_id=current_id,\n                    bbox_xyxy=detection_box,\n                    last_seen_frame=frame_index\n                )\n            )\n            current_id += 1\n    \n    updated_state = TrackerState(next_id=current_id, tracks=active_tracks)\n    return updated_state, matched_track_ids",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.4731884057971015
+        }
+      ],
+      "verify_seconds": 2.7695297920145094,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.zones.contains.point_in_polygon",
+      "arm": "spec",
+      "solved_by": "escalation",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def point_in_polygon(p: Point, poly: Polygon) -> bool:\n    \"\"\"Ray-casting algorithm.\n    Returns True if point is inside or on the boundary.\"\"\"\n    x, y = p\n    n = len(poly)\n    inside = False\n\n    p1x, p1y = poly[0]\n    for i in range(1, n + 1):\n        p2x, p2y = poly[i % n]\n        # Check if point is on the edge\n        if y == p1y == p2y and min(p1x, p2x) <= x <= max(p1x, p2x):\n            return True\n        if (y > min(p1y, p2y)) and (y <= max(p1y, p2y)) and (x <= max(p1x, p2x)):\n            if p1y != p2y:\n                xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x\n            if p1x == p2x or x <= xinters:\n                inside = not inside\n        p1x, p1y = p2x, p2y\n\n    return inside",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31maspen/zones/contains.py\u001b[0m:15: IndexError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_zones_contains.py::\u001b[1mtest_degenerate_polygon_empty\u001b[0m - IndexError: list index out of range\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m5 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def point_in_polygon(p: Point, poly: Polygon) -> bool:\n    \"\"\"Ray-casting algorithm.\n    Returns True if point is inside or on the boundary.\"\"\"\n    x, y = p\n    n = len(poly)\n    inside = False\n    \n    p1x, p1y = poly[0]\n    for i in range(1, n + 1):\n        p2x, p2y = poly[i % n]\n        \n        # Check if point is on the boundary (collinear and within segment bounds)\n        if _point_on_segment(p, (p1x, p1y), (p2x, p2y)):\n            return True\n        \n        # Ray-casting: count crossings\n        if y > min(p1y, p2y):\n            if y <= max(p1y, p2y):\n                if x <= max(p1x, p2x):\n                    if p1y != p2y:\n                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x\n                    if p1x == p2x or x <= xinters:\n                        inside = not inside\n        \n        p1x, p1y = p2x, p2y\n    \n    return inside\n\n\ndef _point_on_segment(p: Point, p1: Point, p2: Point) -> bool:\n    \"\"\"Check if point p lies on line segment p1-p2.\"\"\"\n    x, y = p\n    x1, y1 = p1\n    x2, y2 = p2\n    \n    # Check collinearity using cross product\n    cross = (y - y1) * (x2 - x1) - (x - x1) * (y2 - y1)\n    if cross != 0:\n        return False\n    \n    # Check if point is within bounding box of segment\n    if x < min(x1, x2) or x > max(x1, x2):\n        return False\n    if y < min(y1, y2) or y > max(y1, y2):\n        return False\n    \n    return True",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_zones_contains.py\u001b[0m:27: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_zones_contains.py::\u001b[1mtest_degenerate_polygon_two_points\u001b[0m - assert True is False\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def point_in_polygon(p: Point, poly: Polygon) -> bool:\n    \"\"\"Ray-casting algorithm.\n    Returns True if point is inside or on the boundary.\"\"\"\n    x, y = p\n    n = len(poly)\n    inside = False\n    \n    p1x, p1y = poly[0]\n    for i in range(1, n + 1):\n        p2x, p2y = poly[i % n]\n        \n        # Check if point is on the edge\n        if min(p1y, p2y) <= y <= max(p1y, p2y):\n            if min(p1x, p2x) <= x <= max(p1x, p2x):\n                # Point is within bounding box of edge, check if on the line\n                if p1y == p2y:  # Horizontal edge\n                    if y == p1y:\n                        return True\n                else:\n                    # Check if point lies on the line segment\n                    cross = (y - p1y) * (p2x - p1x) - (x - p1x) * (p2y - p1y)\n                    if cross == 0:\n                        return True\n        \n        # Ray casting: count intersections with rays going to the right\n        if (p1y > y) != (p2y > y):\n            # Edge crosses the horizontal ray from the point\n            xinters = (p2x - p1x) * (y - p1y) / (p2y - p1y) + p1x\n            if x < xinters:\n                inside = not inside\n        \n        p1x, p1y = p2x, p2y\n    \n    return inside\n",
+          "contract_ok": true,
+          "tests_ok": false,
+          "gate_ok": false,
+          "feedback": "tests failed:\n\u001b[1m\u001b[31mtests/test_zones_contains.py\u001b[0m:27: AssertionError\n\u001b[36m\u001b[1m=========================== short test summary info ============================\u001b[0m\n\u001b[31mFAILED\u001b[0m tests/test_zones_contains.py::\u001b[1mtest_degenerate_polygon_two_points\u001b[0m - assert True is False\n\u001b[31m!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\u001b[0m\n\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m",
+          "similarity": null
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "def point_in_polygon(p: Point, poly: Polygon) -> bool:\n    \"\"\"Ray-casting algorithm.\n    Returns True if point is inside or on the boundary.\"\"\"\n    if not poly:\n        return False\n    x, y = p\n    n = len(poly)\n    inside = False\n    j = n - 1\n    for i in range(n):\n        xi, yi = poly[i]\n        xj, yj = poly[j]\n        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi) + xi):\n            inside = not inside\n        j = i\n    return inside",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 10.405613459413871,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.zones.contains.point_in_polygon",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def point_in_polygon(p: Point, poly: Polygon) -> bool:\n    \"\"\"\n    Ray-casting algorithm.\n    Returns True if point is inside or on the boundary.\n    \"\"\"\n    x, y = p\n    vertices = len(poly)\n    \n    if vertices < 3:\n        return False\n    \n    tolerance = 1e-9\n    is_inside = False\n    \n    for vertex_idx in range(vertices):\n        curr = poly[vertex_idx]\n        next_vertex = poly[(vertex_idx + 1) % vertices]\n        \n        x1, y1 = curr\n        x2, y2 = next_vertex\n        \n        # Check if point lies on the edge\n        left_x = min(x1, x2)\n        right_x = max(x1, x2)\n        bottom_y = min(y1, y2)\n        top_y = max(y1, y2)\n        \n        in_bounds = (left_x - tolerance) <= x <= (right_x + tolerance) and (bottom_y - tolerance) <= y <= (top_y + tolerance)\n        \n        if in_bounds:\n            dx_edge = x2 - x1\n            dy_edge = y2 - y1\n            dx_point = x - x1\n            dy_point = y - y1\n            cross_product = dx_edge * dy_point - dy_edge * dx_point\n            \n            if abs(cross_product) <= tolerance:\n                return True\n        \n        # Ray casting: count intersections with horizontal ray from point\n        y1_above = y1 > y\n        y2_above = y2 > y\n        \n        if y1_above != y2_above:\n            x_intersect = (x2 - x1) * (y - y1) / (y2 - y1 + tolerance) + x1\n            if x < x_intersect:\n                is_inside = not is_inside\n    \n    return is_inside",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.30222757375075254
+        }
+      ],
+      "verify_seconds": 2.8656638748943806,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.zones.contains.zones_for_points",
+      "arm": "spec",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def zones_for_points(points: Iterable[Point], zones: Zones) -> list[str]:\n    \"\"\"Return sorted list of zone names that contain ANY of the points.\"\"\"\n    zone_names = set()\n    \n    for point in points:\n        for zone_name, polygon in zones.items():\n            if point_in_polygon(point, polygon):\n                zone_names.add(zone_name)\n    \n    return sorted(zone_names)",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": null
+        }
+      ],
+      "verify_seconds": 2.29093433287926,
+      "error": ""
+    },
+    {
+      "component_id": "aspen.zones.contains.zones_for_points",
+      "arm": "translate",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "def zones_for_points(points: Iterable[Point], zones: Zones) -> list[str]:\n    \"\"\"\n    Return sorted list of zone names that contain ANY of the points.\n    \"\"\"\n    matching_zones = set()\n    \n    for point in points:\n        for zone_name, polygon in zones.items():\n            if point_in_polygon(point, polygon) and zone_name not in matching_zones:\n                matching_zones.add(zone_name)\n    \n    return sorted(matching_zones)",
+          "contract_ok": true,
+          "tests_ok": true,
+          "gate_ok": true,
+          "feedback": "",
+          "similarity": 0.75
+        }
+      ],
+      "verify_seconds": 2.8663768749684095,
+      "error": ""
+    }
+  ]
+}

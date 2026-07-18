@@ -69,6 +69,7 @@ class Attempt:
     candidate: str = ""
     contract_ok: bool = False
     tests_ok: bool | None = None
+    gate_ok: bool = False
     feedback: str = ""
     similarity: float | None = None
 
@@ -83,45 +84,90 @@ class ComponentResult:
     error: str = ""
 
 
-def _pure_covered_functions(index: Path) -> list[str]:
-    """Module-level pure functions with direct test coverage — the worklist."""
+# Uncovered-worklist scope: Python computational modules only. API handlers,
+# frontend TSX, and ML-backend wrappers are excluded — their `pure_function`
+# labels are the purity-precision question, not the rewrite question.
+_UNCOVERED_EXCLUDE = (
+    "aspen.api.",
+    "aspen.frontend.",
+    "tools.",
+    "aspen.pose.backends.",
+    "aspen.actions.rgb.backend_",
+)
+
+
+def _worklist(index: Path, which: str) -> list[str]:
+    """covered: module-level pure functions with direct test coverage.
+    uncovered: same shape, no coverage, in-scope modules, largest first."""
     graph = _load_graph(index)
-    kind_by_qual = {
-        n.attrs.get("qualname"): n.kind
+    nodes = {
+        n.attrs.get("qualname"): n
         for n in graph.nodes()
         if n.kind in {NodeKind.Function, NodeKind.Method}
     }
-    ids = []
+    picked: list[tuple[int, str]] = []
     for spec in _load_specs(index):
+        node = nodes.get(spec.id)
         if spec.kind.value != "pure_function" or spec.id.startswith("tests."):
             continue
-        if not spec.covered_by or set(spec.effects) - {"raise"}:
+        if set(spec.effects) - {"raise"} or node is None or node.kind is not NodeKind.Function:
             continue
-        if kind_by_qual.get(spec.id) is not NodeKind.Function:
-            continue
-        ids.append(spec.id)
-    return sorted(ids)
+        if which == "covered":
+            if not spec.covered_by:
+                continue
+        else:
+            if spec.covered_by or spec.language != "python":
+                continue
+            if spec.id.startswith(_UNCOVERED_EXCLUDE):
+                continue
+            if not node.start_line or not node.end_line or node.end_line - node.start_line < 2:
+                continue
+        size = (node.end_line or 0) - (node.start_line or 0)
+        picked.append((size, spec.id))
+    if which == "covered":
+        return sorted(cid for _, cid in picked)
+    return [cid for _, cid in sorted(picked, key=lambda t: (-t[0], t[1]))]
 
 
-def _prompt(index: Path, repo: Path, component_id: str, arm: str) -> str:
+def _prompt(index: Path, repo: Path, component_id: str, arm: str, prompt_mode: str) -> str:
     specs = _load_specs(index)
     target = next(s for s in specs if s.id == component_id)
     graph = _load_graph(index)
-    source = _component_source(graph, component_id, repo)
-    bundle = build_pack(
-        specs,
-        component_id,
-        source=source if arm == "translate" else None,
-        types=_type_sources(graph, referenced_type_names(target), repo),
-        tests={},  # never leak the oracle
-        context=_module_context(graph, component_id, repo),
-        receivers=_call_receivers(graph, target),
-    )
-    pack_text = render_pack(bundle)
     name = component_id.rsplit(".", 1)[-1]
+
+    if prompt_mode == "file":
+        # The no-cgir baseline: the whole source file, target stubbed for the
+        # spec arm (signature + docstring survive — same information parity
+        # as the pack's spec arm, minus the contract fields).
+        node = next(
+            n
+            for n in graph.nodes()
+            if n.kind in {NodeKind.Function, NodeKind.Method}
+            and n.attrs.get("qualname") == component_id
+        )
+        assert node.path and node.start_line and node.end_line
+        lines = (repo / node.path).read_text().splitlines()
+        if arm == "spec":
+            doc = f'    """{target.doc}"""\n' if target.doc else ""
+            stub = f"def {target.signature}:\n{doc}    ...\n"
+            lines = lines[: node.start_line - 1] + stub.splitlines() + lines[node.end_line :]
+        context_text = f"# {node.path}\n\n" + "\n".join(lines)
+    else:
+        source = _component_source(graph, component_id, repo)
+        bundle = build_pack(
+            specs,
+            component_id,
+            source=source if arm == "translate" else None,
+            types=_type_sources(graph, referenced_type_names(target), repo),
+            tests={},  # never leak the oracle
+            context=_module_context(graph, component_id, repo),
+            receivers=_call_receivers(graph, target),
+        )
+        context_text = render_pack(bundle)
     if arm == "spec":
+        what = "this contract" if prompt_mode == "pack" else "its stub in the file above"
         task = (
-            f"Implement `{name}` from this contract. Copy the signature "
+            f"Implement `{name}` from {what}. Copy the signature "
             "verbatim (including annotations). The function must be pure: no "
             "I/O, no globals, no argument mutation. The docstring describes "
             "the behavior — implement it faithfully, including edge cases it "
@@ -134,7 +180,7 @@ def _prompt(index: Path, repo: Path, component_id: str, arm: str) -> str:
             "implementation — different control flow or decomposition, your "
             "own local names. Do not copy the original line-for-line."
         )
-    return f"{pack_text}\n\n---\n\n{task}"
+    return f"{context_text}\n\n---\n\n{task}"
 
 
 def _extract(text: str) -> str:
@@ -192,23 +238,42 @@ def _generate(
 
 
 def _check(
-    index: Path, repo: Path, component_id: str, candidate: str, result: ComponentResult
-) -> tuple[bool, bool, str]:
-    """Contract-check then test-check. Returns (contract_ok, tests_ok, feedback)."""
+    index: Path,
+    repo: Path,
+    component_id: str,
+    candidate: str,
+    result: ComponentResult,
+    filter_mode: str,
+) -> tuple[bool, bool | None, bool, str]:
+    """Returns (contract_ok, tests_ok, gate_ok, feedback).
+
+    filter modes — `both`: contract gates cheaply, tests gate survivors;
+    `tests-only`: the no-cgir ablation — tests alone gate, the contract
+    verdict is recorded for disagreement analysis but never enforced;
+    `contract-only`: the untested-component setting — the contract is the
+    only gate there is.
+    """
     t0 = time.monotonic()
     try:
+        if filter_mode == "tests-only":
+            r = verify(index, component_id, candidate, repo, run_tests=True)
+            gate = r.tests_ok is True
+            fb = "" if gate else (f"tests failed:\n{r.detail}" if r.tests_ran else "no tests ran")
+            return r.contract_ok, r.tests_ok, gate, fb
         contract = verify(index, component_id, candidate, repo, run_tests=False)
+        if not contract.contract_ok:
+            fb = f"contract drift: {contract.drift} violations: {contract.violations}"
+            return False, None, False, fb
+        if filter_mode == "contract-only":
+            return True, None, True, ""
+        tested = verify(index, component_id, candidate, repo, run_tests=True)
+        if tested.tests_ok is False:
+            return True, False, False, f"tests failed:\n{tested.detail}"
+        return True, tested.tests_ok, True, ""
     except Exception as exc:  # syntax errors etc. — count as a contract failure
+        return False, None, False, f"verify error: {exc}"
+    finally:
         result.verify_seconds += time.monotonic() - t0
-        return False, False, f"verify error: {exc}"
-    if not contract.contract_ok:
-        result.verify_seconds += time.monotonic() - t0
-        return False, False, f"contract drift: {contract.drift} violations: {contract.violations}"
-    tested = verify(index, component_id, candidate, repo, run_tests=True)
-    result.verify_seconds += time.monotonic() - t0
-    if tested.tests_ok is False:
-        return True, False, f"tests failed:\n{tested.detail}"
-    return True, True, ""
 
 
 def run_component(
@@ -220,9 +285,11 @@ def run_component(
     k: int,
     ledger: Ledger,
     original: str,
+    prompt_mode: str,
+    filter_mode: str,
 ) -> ComponentResult:
     result = ComponentResult(component_id=component_id, arm=arm)
-    prompt = _prompt(index, repo, component_id, arm)
+    prompt = _prompt(index, repo, component_id, arm, prompt_mode)
 
     for model, tier, n in ((CHEAP_MODEL, "cheap", k), (ESCALATION_MODEL, "escalation", 1)):
         if tier == "escalation":
@@ -239,12 +306,11 @@ def run_component(
                 attempt.similarity = difflib.SequenceMatcher(
                     None, _normalized(original), _normalized(candidate)
                 ).ratio()
-            attempt.contract_ok, ok, attempt.feedback = _check(
-                index, repo, component_id, candidate, result
+            attempt.contract_ok, attempt.tests_ok, attempt.gate_ok, attempt.feedback = _check(
+                index, repo, component_id, candidate, result, filter_mode
             )
-            attempt.tests_ok = ok
             result.attempts.append(attempt)
-            if ok:
+            if attempt.gate_ok:
                 result.solved_by = tier
                 return result
     return result
@@ -259,11 +325,14 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--only", nargs="*", default=None)
+    ap.add_argument("--prompt", choices=["pack", "file"], default="pack")
+    ap.add_argument("--filter", choices=["both", "tests-only", "contract-only"], default="both")
+    ap.add_argument("--worklist", choices=["covered", "uncovered"], default="covered")
     args = ap.parse_args()
 
     client = anthropic.Anthropic()
     ledger = Ledger()
-    ids = args.only or _pure_covered_functions(args.index)
+    ids = args.only or _worklist(args.index, args.worklist)
     if args.limit:
         ids = ids[: args.limit]
     arms = ["spec", "translate"] if args.arm == "both" else [args.arm]
@@ -276,7 +345,16 @@ def main() -> None:
             t0 = time.monotonic()
             try:
                 res = run_component(
-                    client, args.index, args.repo, cid, arm, args.k, ledger, original
+                    client,
+                    args.index,
+                    args.repo,
+                    cid,
+                    arm,
+                    args.k,
+                    ledger,
+                    original,
+                    args.prompt,
+                    args.filter,
                 )
             except Exception as exc:
                 res = ComponentResult(component_id=cid, arm=arm, error=str(exc))
@@ -293,6 +371,9 @@ def main() -> None:
         "repo": str(args.repo),
         "k": args.k,
         "models": {"cheap": CHEAP_MODEL, "escalation": ESCALATION_MODEL},
+        "prompt": args.prompt,
+        "filter": args.filter,
+        "worklist": args.worklist,
         "components": len(ids),
         "arms": {},
         "cost_usd": {
@@ -308,7 +389,7 @@ def main() -> None:
         solved_cheap = sum(r.solved_by == "cheap" for r in rs)
         solved_esc = sum(r.solved_by == "escalation" for r in rs)
         sims = [
-            a.similarity for r in rs for a in r.attempts if a.similarity is not None and a.tests_ok
+            a.similarity for r in rs for a in r.attempts if a.similarity is not None and a.gate_ok
         ]
         report["arms"][arm] = {
             "n": len(rs),
