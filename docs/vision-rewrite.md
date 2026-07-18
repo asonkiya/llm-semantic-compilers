@@ -63,8 +63,10 @@ useful — and it funds the credibility of the flagship.
    source in context (the rung-4 shape): 17/17 plug-in at ~$0.014 per
    component, all Haiku, genuinely restructured (mean similarity 0.49).**
    From the contract alone: 12/17 (71%) — the gap is docstring-
-   underdetermined semantics, every failure caught deterministically
-   (one by effect-gain drift before tests even ran). Harness:
+   underdetermined semantics. Post-run audit: the tests were the real
+   oracle; all 7 contract-stage kills were lexical `raise`-visibility
+   artifacts (0 demonstrated saves, ~3 likely false rejections) — raise
+   drift needs confidence tiers before it may kill candidates. Harness:
    `benchmarks/rung3_rewrite.py`.
 4. **Cross-language regeneration (C → Rust)** — light up the spec's
    dormant `REGENERATED_AS` / `TRACE_OF` edges: language-agnostic pack →

@@ -66,6 +66,7 @@ SYSTEM = (
 @dataclass
 class Attempt:
     model: str
+    candidate: str = ""
     contract_ok: bool = False
     tests_ok: bool | None = None
     feedback: str = ""
@@ -233,7 +234,7 @@ def run_component(
                 f"Feedback:\n{best.feedback}\n\nProduce a corrected implementation."
             )
         for candidate in _generate(client, model, prompt, n, ledger):
-            attempt = Attempt(model=model)
+            attempt = Attempt(model=model, candidate=candidate)
             if arm == "translate":
                 attempt.similarity = difflib.SequenceMatcher(
                     None, _normalized(original), _normalized(candidate)

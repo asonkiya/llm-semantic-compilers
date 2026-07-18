@@ -233,13 +233,46 @@ every one deterministically:
 
 - 4× killed by tests: unstated semantics (a zone-stats counting rule, DSL
   validation rules and error-message shapes, a missing-field check).
-- 1× killed by the *contract stage itself*: `topo_sort` — Haiku added
-  cycle-detection `raise`, an effect the original doesn't have. Effect-gain
-  drift caught before any test ran.
+- 1× killed by the *contract stage*: `topo_sort` — see the audit below;
+  this kill does not hold up as a save.
 
 Anti-vacuity control: a deliberately wrong candidate (correct signature,
 garbage math) passes the contract stage and fails the test stage — the
 two filters measure different things and both bite.
+
+### Post-run audit (2026-07-18): what did the contract stage actually buy?
+
+Across all 57 attempts: **29 passed, 21 killed by tests, 7 killed by the
+contract stage — and on audit, none of the 7 contract kills was a
+demonstrated save.** All 7 were `raise`-visibility artifacts of lexical
+effect detection:
+
+- `topo_sort` (4 kills, left "unsolved"): the writeup above originally
+  claimed Haiku added "an effect the original doesn't have." **Wrong** —
+  the original raises `CycleError` *through* `graphlib.TopologicalSorter`,
+  which lexical detection can't see, so the indexed contract says
+  `effects: []`. Candidates with an explicit raise were rejected for
+  matching the real behavior more visibly than the original. (The tests
+  pin `CycleError` exactly and would have adjudicated fine on their own —
+  a replayed explicit-`ValueError` candidate fails `test_topo_cycle_raises`
+  deterministically.)
+- `registry.get` (3 kills, then escalated): killed for effect-*loss* —
+  almost certainly candidates using bare `_REGISTRY[node_type]` indexing,
+  which raises the same `KeyError` the test demands (`match=` passes) but
+  with no lexical `raise`. Behaviorally-correct candidates plausibly
+  blocked; the Sonnet escalation was likely unnecessary. Not provable
+  post-hoc: the harness didn't persist candidate bodies (now fixed).
+
+Honest scoring, then: on a well-tested Python repo, the *tests* were the
+oracle; the contract stage contributed cheap pre-filtering (7 avoided
+test runs) and **zero demonstrated semantic saves, with 3 likely false
+rejections**. `raise`-drift should inherit the confidence-tier treatment
+I/O effects already have (lexical vs verified) before it's allowed to
+kill candidates. What this run does *not* measure at all: components
+without tests (the contract is the only gate there — deliberately
+excluded from this worklist) and cross-language rewrites (tests don't
+transfer; contracts do). Both need their own experiment before the
+verify layer's rewrite-loop value is established.
 
 **Takeaway:** verification being free and deterministic converts cheap
 generation into search that *works*: 100% plug-in success at about a cent
