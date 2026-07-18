@@ -165,7 +165,7 @@ class GoAdapter(LanguageAdapter):
                 if fn is not None:
                     dotted = _node_text(fn)
                     if fn.type == "identifier" and dotted == "panic":
-                        tags.setdefault("raise", "high")
+                        tags.setdefault("raise", "lexical")  # raise-diff is never load-bearing
                     else:
                         hit = _classify_call_conf(dotted)
                         if hit is not None and tags.get(hit[0]) != "high":

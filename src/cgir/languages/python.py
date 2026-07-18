@@ -218,7 +218,10 @@ class PythonAdapter(LanguageAdapter):
         while stack:
             node = stack.pop()
             if node.type == "raise_statement":
-                add("raise", "high")
+                # Lexical by design: an explicit raise is certain, but its
+                # absence proves nothing (any callee can raise), so raise-
+                # DIFF is never load-bearing. Gates skip lexical by default.
+                add("raise", "lexical")
             elif node.type == "call":
                 fn = node.child_by_field_name("function")
                 if fn is not None and fn.type == "identifier":

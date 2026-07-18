@@ -249,7 +249,7 @@ class TypeScriptAdapter(LanguageAdapter):
         while stack:
             node = stack.pop()
             if node.type == "throw_statement":
-                add("raise", "high")
+                add("raise", "lexical")  # raise-diff is never load-bearing; see python.py
             elif node.type == "call_expression":
                 fn = node.child_by_field_name("function")
                 if fn is not None:

@@ -66,7 +66,7 @@ useful — and it funds the credibility of the flagship.
    underdetermined semantics. Post-run audit + ablation (experiment-log
    "Rung 3b"): the tests were the real oracle on covered code — the
    contract stage's raise-drift kills produced 2 *measured* false
-   rejections and 0 saves (fix: raise drift inherits confidence tiers);
+   rejections and 0 saves (fixed 2026-07-18: raise is lexical-tier, verify's contract_ok is confidence-aware);
    pack context beat whole-file on cost (~2x cheaper input, half the
    escalations) at yield parity. On 24 *uncovered* functions the
    contract-only gate passed 24/24 and differential replay showed a ~6%

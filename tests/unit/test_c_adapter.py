@@ -296,12 +296,13 @@ class TestEffects:
         assert tags.get("db") == "lexical"
 
     def test_raise_abort(self):
+        # raise is lexical-tier by design: raise-diff is never load-bearing
         tags = self._effects(b"void f(void) { abort(); }")
-        assert tags.get("raise") == "high"
+        assert tags.get("raise") == "lexical"
 
     def test_raise_exit(self):
         tags = self._effects(b"void f(int c) { exit(c); }")
-        assert tags.get("raise") == "high"
+        assert tags.get("raise") == "lexical"
 
     def test_pure_no_effects(self):
         tags = self._effects(b"int f(int x) { return x * 2; }")

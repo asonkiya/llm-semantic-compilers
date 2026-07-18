@@ -708,7 +708,7 @@ class CAdapter(LanguageAdapter):
             plain = callee.split(".")[0]  # first segment (receiver or bare name)
 
             if base in _RAISE_HIGH or plain in _RAISE_HIGH:
-                tags["raise"] = "high"
+                tags["raise"] = "lexical"  # raise-diff is never load-bearing; see python.py
 
             if base in _IO_HIGH or plain in _IO_HIGH:
                 tags["io"] = "high"

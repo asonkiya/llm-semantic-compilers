@@ -178,9 +178,8 @@ def _contract_result(
     detail: str = "",
 ) -> VerifyResult:
     diff = compute_diff(old_specs, new_specs)
-    drift: dict[str, Any] = next(
-        (c["fields"] for c in diff["changed"] if c["id"] == component_id), {}
-    )
+    change = next((c for c in diff["changed"] if c["id"] == component_id), None)
+    drift: dict[str, Any] = change["fields"] if change else {}
     target_diff = {
         "changed": [c for c in diff["changed"] if c["id"] == component_id],
         "entrypoints": {
@@ -198,13 +197,32 @@ def _contract_result(
     viol += [v for v in state_violations(new_specs) if v.startswith(component_id)]
     return VerifyResult(
         component_id=component_id,
-        contract_ok=not drift,
+        contract_ok=not _hard_drift(change),
         violations=viol,
         drift=drift,
         tests_ran=tests_ran or [],
         tests_ok=tests_ok,
         detail=detail,
     )
+
+
+def _hard_drift(change: dict[str, Any] | None) -> dict[str, Any]:
+    """Drift that fails contract_ok. Effect changes whose tags are backed
+    only by lexical evidence *on the side they changed* report but don't
+    fail — mirroring the default gate rules. ``raise`` lives here by
+    design (its absence is unobservable, so raise-diff is never
+    load-bearing); ``:any`` rules and pins still see everything."""
+    if change is None:
+        return {}
+    fields = dict(change["fields"])
+    eff = fields.get("effects")
+    if eff:
+        lex = change.get("lexical", {"old": [], "new": []})
+        gained = set(eff["new"]) - set(eff["old"]) - set(lex["new"])
+        lost = set(eff["old"]) - set(eff["new"]) - set(lex["old"])
+        if not gained and not lost:
+            fields.pop("effects")
+    return fields
 
 
 def _incremental_new_specs(

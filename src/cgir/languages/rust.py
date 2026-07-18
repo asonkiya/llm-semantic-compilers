@@ -469,7 +469,7 @@ class RustAdapter(LanguageAdapter):
                 if macro_id is not None:
                     mname = _node_text(macro_id)
                     if mname in _PANIC_MACROS:
-                        add("raise", "high")
+                        add("raise", "lexical")  # raise-diff is never load-bearing; see python.py
                     elif mname in _IO_MACROS:
                         add("io", "high")
 
@@ -958,7 +958,7 @@ def _classify_rust_call_conf(dotted: str) -> tuple[str, str] | None:
 
     # unwrap/expect → raise
     if leaf in _PANIC_METHODS:
-        return ("raise", "high")
+        return ("raise", "lexical")  # raise-diff is never load-bearing
 
     # FS by prefix
     if dotted.startswith(_FS_PREFIXES):
