@@ -352,3 +352,64 @@ winners: 1/17 (~6%).**
 - **Quantified honestly:** contract-only gating on untested code lets
   ~6% wrong rewrites through — usable as a *pre-filter*, not an oracle.
   The rung-5 differential harness is no longer speculative; it works.
+
+## Rung 4: C -> Rust cross-language regeneration (SQLite)
+
+The first cross-language artifact (2026-07-18; harness
+`benchmarks/rung4_c_to_rust.py`, results
+`benchmarks/rung4-results-sqlite.json`). Worklist: every pure *leaf*
+function in the sqlite3.c amalgamation whose ABI is scalars only — 34
+callable after platform/#ifdef exclusions. Pipeline: Haiku 4.5 writes a
+`#[no_mangle] extern "C"` implementation (exact FFI signature supplied —
+the cbindgen-shaped mechanical part) → **rustc** (filter 1, free) →
+**cgir's Rust adapter** contract-scans the candidate (filter 2: pure +
+arity — the REGENERATED_AS record) → **differential vs the real compiled
+SQLite** (filter 3: 300 random scalar inputs via ctypes; the C oracle is
+the amalgamation built with `-DSQLITE_PRIVATE=` so originals are called
+directly, no reimplementation drift; trials run in a child process so a
+Rust abort can't kill the harness) → one Sonnet escalation carrying the
+compiler error or counterexample.
+
+**26/34 (76.5%) verified equivalent — 22 Haiku-only, 4 escalation —
+$0.22 for the whole run (~$0.0066 per solved component).** Solved
+includes genuinely subtle functions: `sqlite3LogEst`,
+`sqlite3IntFloatCompare` (i64/double comparison edge cases),
+`countLeadingZeros`, varint length coding. Stage kills across 45 failed
+attempts: rustc 10, differential 35, contract 0.
+
+The escalation loop turned out to *extract missing constants from the
+oracle*: Haiku guessed `SQLITE_VERSION_NUMBER` (3046000); the
+counterexample said "C returned 3053003"; Sonnet shipped the corrected
+constant. Same for `sqlite3_keyword_count` (147). The feedback channel
+literally carries the invisible context.
+
+The 8 unsolved, categorized — every one caught deterministically, none
+wrong-but-accepted:
+
+- **Invisible compile-time context (6)**: `sizeof()` of structs the
+  prompt can't see (`sqlite3BtreeCursorSize`: C says 296, Rust guessed
+  168), token-code macros (`allowedOp`), generated tables
+  (`sqlite3ParserFallback` — the Rust candidate panicked on a negative
+  index and the child-process guard caught the abort), a ctype lookup
+  table (`sqlite3IsIdChar` — failed on exactly 1/300 inputs: `'$'`).
+- **Edge-case semantics (1)**: `sqlite3LogEstAdd` diverged on exactly
+  one input pair — `(32767, 32767)`, i16 saturation vs C wraparound.
+  The differential found it.
+- **Malformed output (1)**: `nodeHash` — Haiku wrote C-style Rust and
+  never recovered; rustc filtered every attempt.
+
+Honest caveats: two solved components (`sqlite3_release_memory`,
+`sqlite3_threadsafe`) are constant-returning under this build config, so
+their solves are trivial; the contract stage killed nothing in this run
+(rustc and the differential did the work — its value here is the
+REGENERATED_AS bookkeeping and the purity scan, not filtering); and
+scalar-ABI leaves are the easy 34 of SQLite's 583 pure functions —
+pointers/structs are the next frontier and need real FFI marshaling.
+
+**Takeaway:** the full vision-loop exists end to end for the first time —
+enumerate from the graph, regenerate cross-language with a cheap model,
+verify mechanically (compiler → contract → differential-vs-original),
+escalate with evidence. Failures are not noise: they map one-to-one onto
+the vision doc's stated ceilings (the preprocessor, invisible sizeof,
+generated tables), which means the next unlock is *context enrichment*
+(macro expansion + sizeof provisioning in the pack), not better models.

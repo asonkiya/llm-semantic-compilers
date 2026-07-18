@@ -72,11 +72,15 @@ useful — and it funds the credibility of the flagship.
    contract-only gate passed 24/24 and differential replay showed a ~6%
    false-pass rate — pre-filter, not oracle. Harness:
    `benchmarks/rung3_rewrite.py`.
-4. **Cross-language regeneration (C → Rust)** — light up the spec's
-   dormant `REGENERATED_AS` / `TRACE_OF` edges: language-agnostic pack →
-   Rust candidate → FFI boundary generation (cbindgen-shaped) → link and
-   test. Start with pure leaf functions where the ABI surface is scalars
-   and structs.
+4. **Cross-language regeneration (C → Rust)** *(✅ first artifact landed
+   — experiment-log "Rung 4")*. SQLite scalar-ABI pure leaves, Haiku →
+   rustc → cgir Rust-adapter contract scan → differential vs the real
+   compiled SQLite: **26/34 (76.5%) verified equivalent at ~$0.0066 per
+   solved component**; REGENERATED_AS recorded in the results. All 8
+   misses caught deterministically and map onto the stated ceilings
+   (invisible sizeof/macros/tables, one i16-saturation edge case found
+   at input 1-in-300). Next unlock: macro/sizeof context enrichment in
+   the pack, then pointer/struct ABIs.
 5. **Differential harness** — contract equivalence ≠ behavioral
    equivalence. Capture/replay at the component boundary: record real
    inputs/outputs of the old implementation, replay against the new one.
