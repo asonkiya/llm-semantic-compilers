@@ -25,7 +25,6 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -59,25 +58,119 @@ _SYSTEM = (
 )
 
 
-@dataclass(slots=True)
-class RewriteAttempt:
-    tier: str  # cheap | escalation
-    model: str
-    candidate: str
-    stage: str = ""  # contract | tests | ok
-    feedback: str = ""
+# The per-candidate evaluator seam: (item, candidate) -> (stage, feedback,
+# meta). ``stage == "ok"`` accepts (meta is merged into the outcome, e.g.
+# {"oracle": ...} or {"regenerated_as": ...}); any other stage rejects and
+# ``feedback`` flows into the escalation prompt.
+Evaluate = Callable[[Any, str], tuple[str, str, dict[str, Any]]]
+BuildPrompt = Callable[[Any], str]
+IdOf = Callable[[Any], str]
 
 
-@dataclass(slots=True)
-class ComponentOutcome:
-    component_id: str
-    status: str = "pending"  # solved | unsolved | budget-exhausted
-    solved_by: str | None = None
-    oracle: str = "contract+tests"  # contract-only when no linked tests ran
-    attempts: list[RewriteAttempt] = field(default_factory=list)
+def run_search_loop(
+    items: list[Any],
+    *,
+    build_prompt: BuildPrompt,
+    evaluate: Evaluate,
+    sampler: Sampler,
+    id_of: IdOf,
+    k: int = 3,
+    cheap_model: str = DEFAULT_CHEAP_MODEL,
+    escalation_model: str = DEFAULT_ESCALATION_MODEL,
+    budget_usd: float | None = None,
+    ledger_path: Path | None = None,
+    report_meta: dict[str, Any] | None = None,
+    log: Callable[[str], None] = lambda _: None,
+) -> dict[str, Any]:
+    """The language-agnostic rewrite-as-search core.
 
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+    Over an opaque worklist: k cheap candidates per item -> ``evaluate``
+    (first "ok" wins) -> one escalation carrying the last failure's feedback
+    -> resumable per-item ledger, hard budget cap. Knows nothing about cgir
+    indexes, packs, or languages — ``build_prompt``/``evaluate``/``id_of``
+    supply all of that, so both the Python-with-tests loop (rewrite_repo)
+    and the C->Rust-with-differential harness share this one machine."""
+    prior: dict[str, dict[str, Any]] = {}
+    if ledger_path is not None and ledger_path.exists():
+        prior = {
+            o["component_id"]: o
+            for o in json.loads(ledger_path.read_text()).get("outcomes", [])
+            if o["status"] == "solved"
+        }
+    outcomes: list[dict[str, Any]] = []
+    spent = 0.0
+
+    def _flush() -> dict[str, Any]:
+        solved = sum(o["status"] == "solved" for o in outcomes)
+        report = {
+            **(report_meta or {}),
+            "k": k,
+            "models": {"cheap": cheap_model, "escalation": escalation_model},
+            "totals": {
+                "components": len(items),
+                "solved": solved,
+                "unsolved": sum(o["status"] == "unsolved" for o in outcomes),
+                "budget_exhausted": sum(o["status"] == "budget-exhausted" for o in outcomes),
+                "cost_usd": round(spent, 4),
+            },
+            "outcomes": outcomes,
+        }
+        if ledger_path is not None:
+            ledger_path.write_text(json.dumps(report, indent=2) + "\n")
+        return report
+
+    for item in sorted(items, key=id_of):
+        cid = id_of(item)
+        if cid in prior:
+            outcomes.append(prior[cid])
+            continue
+        out: dict[str, Any] = {
+            "component_id": cid,
+            "status": "pending",
+            "solved_by": None,
+            "attempts": [],
+        }
+        outcomes.append(out)
+        if budget_usd is not None and spent >= budget_usd:
+            out["status"] = "budget-exhausted"
+            _flush()
+            continue
+        prompt = build_prompt(item)
+        for model, tier, n in ((cheap_model, "cheap", k), (escalation_model, "escalation", 1)):
+            if tier == "escalation":
+                fb = next((a["feedback"] for a in reversed(out["attempts"]) if a["feedback"]), "")
+                if not fb:
+                    break
+                prompt = (
+                    f"{prompt}\n\nA previous attempt failed verification. Feedback:\n{fb}\n\n"
+                    "Produce a corrected implementation."
+                )
+            for _ in range(n):
+                text, cost = sampler(prompt, model)
+                spent += cost
+                candidate = _extract_code(text)
+                stage, feedback, meta = evaluate(item, candidate)
+                out["attempts"].append(
+                    {
+                        "tier": tier,
+                        "model": model,
+                        "candidate": candidate,
+                        "stage": stage,
+                        "feedback": feedback,
+                    }
+                )
+                if stage == "ok":
+                    out["status"] = "solved"
+                    out["solved_by"] = tier
+                    out.update(meta)
+                    break
+            if out["status"] == "solved":
+                break
+        if out["status"] == "pending":
+            out["status"] = "unsolved"
+        log(f"{cid}: {out['status']} ({len(out['attempts'])} attempts, ${spent:.3f} spent)")
+        _flush()
+    return _flush()
 
 
 def _extract_code(text: str) -> str:
@@ -189,85 +282,38 @@ def rewrite_repo(
     specs = read_specs(index_dir)
     # Test components are the oracle; the loop must never rewrite them.
     worklist = [s for s in search_specs(specs, query, limit=None) if not _is_test_spec(s)]
-    prior: dict[str, dict[str, Any]] = {}
-    if ledger_path is not None and ledger_path.exists():
-        prior = {
-            o["component_id"]: o
-            for o in json.loads(ledger_path.read_text()).get("outcomes", [])
-            if o["status"] == "solved"
-        }
 
-    outcomes: list[ComponentOutcome | dict[str, Any]] = []
-    spent = 0.0
+    def _prompt(spec: ComponentSpec) -> str:
+        return _build_prompt(index_dir, repo, spec, mode)
 
-    def _flush() -> dict[str, Any]:
-        dicts = [o if isinstance(o, dict) else o.to_dict() for o in outcomes]
-        solved = sum(o["status"] == "solved" for o in dicts)
-        report = {
-            "query": query,
-            "mode": mode,
-            "k": k,
-            "models": {"cheap": cheap_model, "escalation": escalation_model},
-            "totals": {
-                "components": len(worklist),
-                "solved": solved,
-                "unsolved": sum(o["status"] == "unsolved" for o in dicts),
-                "budget_exhausted": sum(o["status"] == "budget-exhausted" for o in dicts),
-                "cost_usd": round(spent, 4),
-            },
-            "outcomes": dicts,
-        }
-        if ledger_path is not None:
-            ledger_path.write_text(json.dumps(report, indent=2) + "\n")
-        return report
+    def _evaluate(spec: ComponentSpec, candidate: str) -> tuple[str, str, dict[str, Any]]:
+        stage, feedback, behavioral_ran = _check(
+            index_dir, repo, spec.id, candidate, run_tests, oracle
+        )
+        if stage != "ok":
+            return stage, feedback, {}
+        if not behavioral_ran:
+            kind = "contract-only"
+        elif oracle is not None:
+            kind = "contract+behavioral"
+        else:
+            kind = "contract+tests"
+        return "ok", "", {"oracle": kind}
 
-    for spec in sorted(worklist, key=lambda s: s.id):
-        if spec.id in prior:
-            outcomes.append(prior[spec.id])
-            continue
-        out = ComponentOutcome(component_id=spec.id)
-        outcomes.append(out)
-        if budget_usd is not None and spent >= budget_usd:
-            out.status = "budget-exhausted"
-            _flush()
-            continue
-        prompt = _build_prompt(index_dir, repo, spec, mode)
-        for model, tier, n in ((cheap_model, "cheap", k), (escalation_model, "escalation", 1)):
-            if tier == "escalation":
-                fb = next((a.feedback for a in reversed(out.attempts) if a.feedback), "")
-                if not fb:
-                    break
-                prompt = (
-                    f"{prompt}\n\nA previous attempt failed verification. Feedback:\n{fb}\n\n"
-                    "Produce a corrected implementation."
-                )
-            for _ in range(n):
-                text, cost = sampler(prompt, model)
-                spent += cost
-                candidate = _extract_code(text)
-                attempt = RewriteAttempt(tier=tier, model=model, candidate=candidate)
-                out.attempts.append(attempt)
-                attempt.stage, attempt.feedback, behavioral_ran = _check(
-                    index_dir, repo, spec.id, candidate, run_tests, oracle
-                )
-                if attempt.stage == "ok":
-                    out.status = "solved"
-                    out.solved_by = tier
-                    if not behavioral_ran:
-                        out.oracle = "contract-only"
-                    elif oracle is not None:
-                        out.oracle = "contract+behavioral"
-                    else:
-                        out.oracle = "contract+tests"
-                    break
-            if out.status == "solved":
-                break
-        if out.status == "pending":
-            out.status = "unsolved"
-        log(f"{spec.id}: {out.status} ({len(out.attempts)} attempts, ${spent:.3f} spent)")
-        _flush()
-
-    report = _flush()
+    report = run_search_loop(
+        worklist,
+        build_prompt=_prompt,
+        evaluate=_evaluate,
+        sampler=sampler,
+        id_of=lambda s: s.id,
+        k=k,
+        cheap_model=cheap_model,
+        escalation_model=escalation_model,
+        budget_usd=budget_usd,
+        ledger_path=ledger_path,
+        report_meta={"query": query, "mode": mode},
+        log=log,
+    )
     if apply:
         report["final_gate"] = _apply_winners(index_dir, repo, report, run_tests=run_tests)
         if ledger_path is not None:

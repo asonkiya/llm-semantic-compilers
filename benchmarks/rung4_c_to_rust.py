@@ -34,25 +34,16 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
-# Reuse the rung-3 generation/ledger machinery (same directory).
+# The C->Rust harness rides cgir's shared rewrite-as-search core.
+from cgir.rewrite import run_search_loop
+
+# rung-3 (a sibling benchmark, not an installed package) supplies model IDs,
+# prices, and the cost ledger — needs the script dir on the path first.
 sys.path.insert(0, str(Path(__file__).parent))
-from rung3_rewrite import CHEAP_MODEL, ESCALATION_MODEL, Ledger, _generate
-
-
-def _extract(text: str) -> str:
-    """Language-agnostic fence stripper (rung3's is Python-specific)."""
-    m = re.search(r"```[a-zA-Z]*\n(.*?)```", text, re.DOTALL)
-    if m:
-        return m.group(1)
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if line.startswith(("#[", "pub ", "fn ", "extern ")):
-            return "\n".join(lines[i:])
-    return text
-
+from rung3_rewrite import CHEAP_MODEL, ESCALATION_MODEL, PRICES, Ledger
 
 SCALAR_RE = (
     r"(?:const\s+)?(?:unsigned\s+|signed\s+)?"
@@ -114,23 +105,6 @@ class Entry:
     params: list[tuple[str, str]]
     source: str
     lines: int
-
-
-@dataclass
-class Attempt:
-    model: str
-    candidate: str = ""
-    stage: str = ""  # rustc | contract | differential | ok
-    feedback: str = ""
-
-
-@dataclass
-class Rung4Result:
-    component_id: str
-    solved_by: str | None = None
-    attempts: list[Attempt] = field(default_factory=list)
-    excluded: str = ""
-    regenerated_as: str = ""
 
 
 def _parse_param(q: str) -> tuple[str, str] | None:
@@ -802,59 +776,60 @@ def main() -> None:
         flush=True,
     )
 
+    # The C->Rust pipeline now rides the SAME orchestrator as `cgir rewrite`
+    # (cgir.rewrite.run_search_loop): identical k-sampling / escalation /
+    # ledger / budget machinery, with C-specific prompt + evaluate injected.
     client = anthropic.Anthropic()
     ledger = Ledger()
-    results: list[Rung4Result] = []
-    for i, e in enumerate(entries):
-        res = Rung4Result(component_id=e.component_id)
-        prompt = build_prompt(e, probe_ctx.get(e.component_id, ""))
-        t0 = time.monotonic()
-        for model, tier, n in ((CHEAP_MODEL, "cheap", args.k), (ESCALATION_MODEL, "escalation", 1)):
-            if tier == "escalation":
-                fb = next((a.feedback for a in reversed(res.attempts) if a.feedback), "")
-                if not fb:
-                    break
-                prompt = (
-                    f"{prompt}\n\nA previous attempt failed:\n{fb}\n\n"
-                    "Produce a corrected implementation."
-                )
-            for j, cand in enumerate(_generate(client, model, prompt, n, ledger)):
-                cand = _extract(cand)
-                at = Attempt(model=model, candidate=cand)
-                res.attempts.append(at)
-                dylib, err = try_rustc(cand, workdir, f"{i}_{len(res.attempts)}_{j}")
-                if dylib is None:
-                    at.stage, at.feedback = "rustc", err
-                    continue
-                err = contract_check(cand, e)
-                if err:
-                    at.stage, at.feedback = "contract", err
-                    continue
-                err = differential(orig, dylib, e, args.n_trials, seed=42)
-                if err:
-                    at.stage, at.feedback = "differential", err
-                    continue
-                at.stage = "ok"
-                res.solved_by = tier
-                res.regenerated_as = f"rust:{e.name}"
-                break
-            if res.solved_by:
-                break
-        status = res.solved_by or "unsolved"
-        print(
-            f"{e.component_id:55s} {status:11s} attempts={len(res.attempts)} "
-            f"{time.monotonic() - t0:5.1f}s ${ledger.cost():.3f} cum",
-            flush=True,
-        )
-        results.append(res)
+    counter = {"n": 0}
 
-    solved_cheap = sum(r.solved_by == "cheap" for r in results)
-    solved_esc = sum(r.solved_by == "escalation" for r in results)
+    def sampler(prompt: str, model: str) -> tuple[str, float]:
+        msg = client.messages.create(
+            model=model,
+            max_tokens=3000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        ledger.add(model, msg.usage)
+        u = msg.usage
+        cost = u.input_tokens * PRICES[model][0] / 1e6 + u.output_tokens * PRICES[model][1] / 1e6
+        return "".join(b.text for b in msg.content if b.type == "text"), cost
+
+    def make_prompt(e: Entry) -> str:
+        return build_prompt(e, probe_ctx.get(e.component_id, ""))
+
+    def evaluate(e: Entry, cand: str) -> tuple[str, str, dict[str, object]]:
+        counter["n"] += 1
+        dylib, err = try_rustc(cand, workdir, f"{e.name}_{counter['n']}")
+        if dylib is None:
+            return "rustc", err, {}
+        err = contract_check(cand, e)
+        if err:
+            return "contract", err, {}
+        err = differential(orig, dylib, e, args.n_trials, seed=42)
+        if err:
+            return "differential", err, {}
+        return "ok", "", {"regenerated_as": f"rust:{e.name}"}
+
+    loop = run_search_loop(
+        entries,
+        build_prompt=make_prompt,
+        evaluate=evaluate,
+        sampler=sampler,
+        id_of=lambda e: e.component_id,
+        k=args.k,
+        cheap_model=CHEAP_MODEL,
+        escalation_model=ESCALATION_MODEL,
+        log=lambda m: print(m, flush=True),
+    )
+
+    outcomes = loop["outcomes"]
+    solved_cheap = sum(o["solved_by"] == "cheap" for o in outcomes)
+    solved_esc = sum(o["solved_by"] == "escalation" for o in outcomes)
     stage_kills: dict[str, int] = {}
-    for r in results:
-        for a in r.attempts:
-            if a.stage != "ok":
-                stage_kills[a.stage] = stage_kills.get(a.stage, 0) + 1
+    for o in outcomes:
+        for a in o["attempts"]:
+            if a["stage"] != "ok":
+                stage_kills[a["stage"]] = stage_kills.get(a["stage"], 0) + 1
     report = {
         "src": str(args.src),
         "k": args.k,
@@ -873,7 +848,7 @@ def main() -> None:
             "total": round(ledger.cost(), 4),
         },
         "tokens": ledger.tokens,
-        "results": [asdict(r) for r in results],
+        "results": outcomes,
     }
     args.out.write_text(json.dumps(report, indent=2) + "\n")
     print(
