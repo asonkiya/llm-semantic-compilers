@@ -788,22 +788,17 @@ def link_back(
     staticlib = _build_rust_staticlib(winners, workdir)
     patched = _patch_source(c_source, names, workdir)
     shared = out_dir / (c_source.stem + "_rust_inside.dylib")
-    # force_load pulls in every Rust object even when this TU doesn't itself
-    # call the symbol (a linking executable will), so each rewrite is present
-    # and nm-verifiable.
+    # Force the whole Rust archive in even when this TU doesn't itself call
+    # the symbol (a linking executable will), so each rewrite is present and
+    # nm-verifiable. The flag spelling differs by linker.
+    import sys
+
+    if sys.platform == "darwin":
+        force = [f"-Wl,-force_load,{staticlib}"]
+    else:  # GNU ld
+        force = ["-Wl,--whole-archive", str(staticlib), "-Wl,--no-whole-archive"]
     proc = subprocess.run(
-        [
-            "cc",
-            "-O1",
-            "-w",
-            "-shared",
-            "-fPIC",
-            *flags,
-            str(patched),
-            f"-Wl,-force_load,{staticlib}",
-            "-o",
-            str(shared),
-        ],
+        ["cc", "-O1", "-w", "-shared", "-fPIC", *flags, str(patched), *force, "-o", str(shared)],
         capture_output=True,
         text=True,
         timeout=600,
