@@ -887,6 +887,105 @@ def trace(
     typer.echo(hit)
 
 
+@app.command(name="rewrite")
+def rewrite_cmd(
+    index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
+    repo: Annotated[Path, typer.Option("--repo", help="Repo root.")] = Path("."),
+    query: Annotated[
+        str, typer.Option("--query", help="Worklist search query (contract predicates).")
+    ] = "kind:pure covered:true",
+    k: Annotated[int, typer.Option("--k", help="Candidates per component (cheap model).")] = 3,
+    mode: Annotated[
+        str, typer.Option("--mode", help="translate (source in context) or spec (contract only).")
+    ] = "translate",
+    model: Annotated[str | None, typer.Option("--model", help="Cheap model override.")] = None,
+    escalation_model: Annotated[
+        str | None, typer.Option("--escalation-model", help="Escalation model override.")
+    ] = None,
+    budget_usd: Annotated[
+        float | None, typer.Option("--budget-usd", help="Stop starting components past this.")
+    ] = None,
+    ledger: Annotated[
+        Path | None,
+        typer.Option("--ledger", help="Resumable ledger path (skips solved on rerun)."),
+    ] = None,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Splice winners into the working tree + final gate."),
+    ] = False,
+    no_tests: Annotated[
+        bool,
+        typer.Option(
+            "--no-tests",
+            help="Contract-only gating (measured ~6% false-pass rate — see experiment log).",
+        ),
+    ] = False,
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Call the Anthropic API (requires cgir[llm] + API key)."),
+    ] = False,
+) -> None:
+    """Rewrite every matching component through the sample->verify->escalate loop."""
+    from cgir.report.impact import _is_test_spec
+    from cgir.report.search import search_specs
+    from cgir.rewrite import (
+        DEFAULT_CHEAP_MODEL,
+        DEFAULT_ESCALATION_MODEL,
+        anthropic_sampler,
+        rewrite_repo,
+    )
+
+    specs = _load_specs(index_dir)
+    worklist = [s for s in search_specs(specs, query, limit=None) if not _is_test_spec(s)]
+    if not live:
+        typer.echo(f"dry run: {len(worklist)} component(s) match {query!r}")
+        for spec in sorted(worklist, key=lambda s: s.id):
+            oracle = "contract+tests" if spec.covered_by else "contract-only"
+            typer.echo(f"  {spec.id}  [{oracle}]")
+        typer.echo(
+            f"~{len(worklist) * k} cheap calls + escalations. "
+            "Rerun with --live to generate (requires cgir[llm] + ANTHROPIC_API_KEY)."
+        )
+        return
+    try:
+        sampler = anthropic_sampler()
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    report = rewrite_repo(
+        index_dir,
+        repo,
+        sampler=sampler,
+        query=query,
+        k=k,
+        mode=mode,
+        cheap_model=model or DEFAULT_CHEAP_MODEL,
+        escalation_model=escalation_model or DEFAULT_ESCALATION_MODEL,
+        run_tests=not no_tests,
+        budget_usd=budget_usd,
+        ledger_path=ledger,
+        apply=apply,
+        log=typer.echo,
+    )
+    totals = report["totals"]
+    typer.echo(
+        f"solved {totals['solved']}/{totals['components']} "
+        f"(unsolved {totals['unsolved']}, budget-stopped {totals['budget_exhausted']}) "
+        f"for ${totals['cost_usd']}"
+    )
+    if apply:
+        gate = report["final_gate"]
+        typer.echo(
+            f"applied {gate['applied']}; contract {'clean' if gate['contract_clean'] else 'DIRTY'}"
+            + (
+                ""
+                if gate["tests_ok"] is None
+                else f"; tests {'pass' if gate['tests_ok'] else 'FAIL'}"
+            )
+        )
+        if not gate["contract_clean"] or gate["tests_ok"] is False:
+            raise typer.Exit(code=1)
+
+
 @app.command(name="regenerate")
 def regenerate_cmd(
     component_id: Annotated[str, typer.Argument(metavar="ID")],

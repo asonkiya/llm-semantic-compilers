@@ -25,8 +25,12 @@ MAX_RESULTS = 25
 _KIND_ALIASES = {"pure": "pure_function", "adapter": "effect_adapter"}
 
 
-def search_specs(specs: list[ComponentSpec], query: str) -> list[ComponentSpec]:
-    """Specs matching ``query``, best-ranked first (capped at MAX_RESULTS)."""
+def search_specs(
+    specs: list[ComponentSpec], query: str, limit: int | None = MAX_RESULTS
+) -> list[ComponentSpec]:
+    """Specs matching ``query``, best-ranked first (capped at ``limit``;
+    ``None`` uncaps — worklist callers like the rewrite orchestrator need
+    every match, not a page)."""
     terms: list[str] = []
     predicates: list[Callable[[ComponentSpec], bool]] = []
     caller_counts: Counter[str] | None = None
@@ -52,7 +56,7 @@ def search_specs(specs: list[ComponentSpec], query: str) -> list[ComponentSpec]:
             continue
         scored.append((-score, spec.id, spec))
     scored.sort()
-    return [spec for _, _, spec in scored[:MAX_RESULTS]]
+    return [spec for _, _, spec in (scored if limit is None else scored[:limit])]
 
 
 def _score(spec: ComponentSpec, terms: list[str]) -> float:

@@ -94,6 +94,16 @@ useful — and it funds the credibility of the flagship.
 6. **Scale backend** — persistent/incremental graph (the P2 Neo4j-or-
    sqlite thread) once targets exceed in-memory comfort (~1M LOC).
 
+**The orchestrator (`cgir rewrite`) exists** *(2026-07-19)* — the
+whole-repo loop productized: search-query worklist (test components
+excluded — never rewrite the oracle), pack prompts, k cheap candidates,
+incremental contract verify, shadow tests, one evidence-carrying
+escalation, resumable ledger, budget cap, `--apply` with a final
+rescan + contract-diff + full-test seatbelt. First full-repo demo:
+**camera-tracking, 17/17 components rewritten-applied-verified for
+$0.073, final gate green (contract clean, full suite passes)** — the
+"cheap model rewrote a repo, every change verified" loop, live.
+
 ## Target ladder (evidence before ambition)
 
 | target | why | oracle |
