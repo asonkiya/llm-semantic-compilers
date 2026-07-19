@@ -955,6 +955,14 @@ def rewrite_cmd(
             help="Contract-only gating (measured ~6% false-pass rate — see experiment log).",
         ),
     ] = False,
+    oracle: Annotated[
+        str,
+        typer.Option(
+            "--oracle",
+            help="python behavioral check: tests (pytest per candidate) or replay "
+            "(capture real I/O once, replay per candidate — covers non-synthesizable inputs).",
+        ),
+    ] = "tests",
     live: Annotated[
         bool,
         typer.Option("--live", help="Call the Anthropic API (requires cgir[llm] + API key)."),
@@ -990,18 +998,23 @@ def rewrite_cmd(
     if lang != "python":
         raise typer.BadParameter(f"--lang must be python or c-rust, got {lang!r}")
 
+    if oracle not in ("tests", "replay"):
+        raise typer.BadParameter(f"--oracle must be tests or replay, got {oracle!r}")
     specs = _load_specs(index_dir)
     worklist = [s for s in search_specs(specs, query, limit=None) if not _is_test_spec(s)]
     if not live:
         typer.echo(f"dry run: {len(worklist)} component(s) match {query!r}")
         for spec in sorted(worklist, key=lambda s: s.id):
-            oracle = "contract+tests" if spec.covered_by else "contract-only"
-            typer.echo(f"  {spec.id}  [{oracle}]")
+            oracle_kind = "contract+tests" if spec.covered_by else "contract-only"
+            typer.echo(f"  {spec.id}  [{oracle_kind}]")
         typer.echo(
             f"~{len(worklist) * k} cheap calls + escalations. "
             "Rerun with --live to generate (requires cgir[llm] + ANTHROPIC_API_KEY)."
         )
         return
+    behavioral_oracle = None
+    if oracle == "replay":
+        behavioral_oracle = _capture_replay_oracle(index_dir, repo, worklist)
     try:
         sampler = anthropic_sampler()
     except RuntimeError as exc:
@@ -1016,6 +1029,7 @@ def rewrite_cmd(
         cheap_model=model or DEFAULT_CHEAP_MODEL,
         escalation_model=escalation_model or DEFAULT_ESCALATION_MODEL,
         run_tests=not no_tests,
+        oracle=behavioral_oracle,
         budget_usd=budget_usd,
         ledger_path=ledger,
         apply=apply,
@@ -1039,6 +1053,31 @@ def rewrite_cmd(
         )
         if not gate["contract_clean"] or gate["tests_ok"] is False:
             raise typer.Exit(code=1)
+
+
+def _capture_replay_oracle(index_dir: Path, repo: Path, worklist: list[ComponentSpec]) -> Any:
+    """Capture real I/O for the worklist by running the repo's tests, then
+    return a replay BehavioralOracle (rung 5)."""
+    from cgir.replay import capture, make_replay_oracle
+
+    graph = _load_graph(index_dir)
+    path_by_qual = {
+        n.attrs.get("qualname"): n.path
+        for n in graph.nodes()
+        if n.kind in {NodeKind.Function, NodeKind.Method} and n.path
+    }
+    targets: dict[str, tuple[Path, str]] = {}
+    for spec in worklist:
+        path = path_by_qual.get(spec.id)
+        if path:
+            targets[spec.id] = (Path(path), spec.id.rsplit(".", 1)[-1])
+    try:
+        traces = capture(repo, targets)
+    except RuntimeError as exc:
+        raise typer.BadParameter(f"capture failed: {exc}") from exc
+    covered = sum(1 for q in targets if traces.get(q))
+    typer.echo(f"captured real I/O for {covered}/{len(targets)} components via the test suite")
+    return make_replay_oracle(repo, traces)
 
 
 def _rewrite_c_rust(

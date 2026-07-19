@@ -95,13 +95,19 @@ useful — and it funds the credibility of the flagship.
    SQL battery and `PRAGMA integrity_check` — cheap-model Rust running
    *inside* SQLite, provably indistinguishable.** This is the founding
    vision demonstrated at one rung's scale.
-5. **Differential harness** — contract equivalence ≠ behavioral
-   equivalence. Capture/replay at the component boundary: record real
-   inputs/outputs of the old implementation, replay against the new one.
-   The one genuinely new subsystem. *Seed exists and works:*
-   `benchmarks/differential_check.py` (random-input replay from type
-   annotations) caught a real crash→None behavior change that
-   contract-only gating passed.
+5. **Differential / capture-replay harness** *(✅ landed — `src/cgir/replay.py`,
+   `cgir rewrite --oracle replay`)*. Contract equivalence ≠ behavioral
+   equivalence, and random synthesis can't build every input (opaque
+   structs, ndarrays, Any). So record *real* I/O: a setprofile tracer
+   captures each `(args, result)` during the test run, then replays the
+   recorded inputs against each candidate. Plugs into the orchestrator's
+   `oracle` seam. Dogfooded on camera-tracking (20 real `point_in_polygon`
+   calls captured; a wrong rewrite rejected with a real counterexample);
+   unit-proven on a dataclass input synthesis couldn't build. Caveat:
+   setprofile traces everything, so heavy import-time suites are slow —
+   scope the driver to the relevant tests. The earlier
+   `benchmarks/differential_check.py` (random-input) remains the
+   synthesis-based complement.
 6. **Scale backend** — persistent/incremental graph (the P2 Neo4j-or-
    sqlite thread) once targets exceed in-memory comfort (~1M LOC).
 
