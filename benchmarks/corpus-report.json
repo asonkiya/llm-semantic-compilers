@@ -14,10 +14,10 @@
       "axios (0.0)",
       "ripgrep (0.812)",
       "clap (0.797)",
-      "stb (0.593)"
+      "stb (0.821)"
     ],
     "total_loc": 1413719,
-    "total_components": 45120,
+    "total_components": 45906,
     "total_defs": 51180
   },
   "rows": [
@@ -544,21 +544,21 @@
       "lang": "c",
       "url": "https://github.com/nothings/stb",
       "scan_ok": true,
-      "seconds": 4.6,
-      "components": 1513,
+      "seconds": 6.1,
+      "components": 2095,
       "ground_truth_defs": 2552,
-      "extraction_ratio": 0.593,
+      "extraction_ratio": 0.821,
       "loc": 106684,
       "kinds": {
-        "pure_function": 900,
-        "orchestrator": 127,
-        "state_transformer": 343,
-        "effect_adapter": 143
+        "pure_function": 1239,
+        "orchestrator": 171,
+        "state_transformer": 515,
+        "effect_adapter": 170
       },
       "languages": {
-        "c": 1513
+        "c": 2095
       },
-      "resolved_calls": 2037,
+      "resolved_calls": 2983,
       "deterministic": true,
       "downstream_ok": true,
       "downstream": {
@@ -572,21 +572,21 @@
       "lang": "c",
       "url": "https://github.com/curl/curl",
       "scan_ok": true,
-      "seconds": 9.1,
-      "components": 3511,
+      "seconds": 9.7,
+      "components": 3687,
       "ground_truth_defs": 3833,
-      "extraction_ratio": 0.916,
+      "extraction_ratio": 0.962,
       "loc": 174006,
       "kinds": {
-        "state_transformer": 829,
-        "pure_function": 1660,
-        "orchestrator": 883,
-        "effect_adapter": 139
+        "state_transformer": 877,
+        "pure_function": 1728,
+        "orchestrator": 933,
+        "effect_adapter": 149
       },
       "languages": {
-        "c": 3511
+        "c": 3687
       },
-      "resolved_calls": 7623,
+      "resolved_calls": 8399,
       "deterministic": true,
       "downstream_ok": true,
       "downstream": {
@@ -600,21 +600,21 @@
       "lang": "c",
       "url": "https://github.com/redis/redis",
       "scan_ok": true,
-      "seconds": 15.7,
-      "components": 5700,
+      "seconds": 16.0,
+      "components": 5701,
       "ground_truth_defs": 5744,
-      "extraction_ratio": 0.992,
+      "extraction_ratio": 0.993,
       "loc": 207651,
       "kinds": {
-        "effect_adapter": 521,
+        "effect_adapter": 522,
         "pure_function": 2082,
         "orchestrator": 2421,
         "state_transformer": 676
       },
       "languages": {
-        "c": 5700
+        "c": 5701
       },
-      "resolved_calls": 19412,
+      "resolved_calls": 19413,
       "deterministic": true,
       "downstream_ok": true,
       "downstream": {
@@ -628,21 +628,21 @@
       "lang": "c",
       "url": "https://github.com/jqlang/jq",
       "scan_ok": true,
-      "seconds": 1.6,
-      "components": 619,
+      "seconds": 1.8,
+      "components": 646,
       "ground_truth_defs": 666,
-      "extraction_ratio": 0.929,
+      "extraction_ratio": 0.97,
       "loc": 26880,
       "kinds": {
-        "orchestrator": 329,
-        "pure_function": 207,
-        "state_transformer": 42,
-        "effect_adapter": 41
+        "orchestrator": 343,
+        "pure_function": 213,
+        "state_transformer": 45,
+        "effect_adapter": 45
       },
       "languages": {
-        "c": 619
+        "c": 646
       },
-      "resolved_calls": 2129,
+      "resolved_calls": 2278,
       "deterministic": true,
       "downstream_ok": true,
       "downstream": {

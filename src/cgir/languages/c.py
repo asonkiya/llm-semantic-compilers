@@ -187,18 +187,33 @@ _NONDETERM_HIGH: frozenset[str] = frozenset(
 # prefix-based high matches (SQLite3, MySQL, libpq)
 _DB_PREFIXES: tuple[str, ...] = ("sqlite3_", "mysql_", "PQ", "pg_")
 
-# Preprocessor-conditional wrappers tree-sitter-c nests top-level decls under.
-_PREPROC_COND: frozenset[str] = frozenset(
-    {"preproc_ifdef", "preproc_if", "preproc_elif", "preproc_elifdef", "preproc_else"}
+# Wrappers tree-sitter-c nests top-level decls under and which we descend
+# transparently: preprocessor conditionals, plus ERROR — in macro-dense files
+# tree-sitter's error recovery can wrap most of the file in one top-level
+# ERROR node while keeping the definitions inside it well-formed (observed on
+# stb_vorbis.c: the whole body under `translation_unit > ERROR > preproc_ifdef
+# > function_definition`). Only known node types are ever processed, so
+# descending an ERROR is safe.
+_TRANSPARENT: frozenset[str] = frozenset(
+    {
+        "preproc_ifdef",
+        "preproc_if",
+        "preproc_elif",
+        "preproc_elifdef",
+        "preproc_else",
+        "ERROR",
+    }
 )
 
 
 def _iter_top_level(node: TSNode) -> Iterator[TSNode]:
     """Yield effective top-level declaration nodes, descending transparently
-    through #ifdef/#if conditionals (and their #else/#elif branches) so
-    functions guarded by e.g. `#ifdef X_IMPLEMENTATION` are reached."""
+    through #ifdef/#if conditionals (and their #else/#elif branches) and
+    tree-sitter ERROR wrappers, so functions guarded by e.g.
+    `#ifdef X_IMPLEMENTATION` or buried in an error-recovered region are
+    reached."""
     for child in node.named_children:
-        if child.type in _PREPROC_COND:
+        if child.type in _TRANSPARENT:
             yield from _iter_top_level(child)
         else:
             yield child

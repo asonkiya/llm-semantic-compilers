@@ -282,6 +282,49 @@ class TestModuleDeclarations:
 
         assert any(isinstance(d, ImportDecl) for d in decls)
 
+    def test_functions_buried_in_error_node_extracted(self):
+        """Macro-dense C (a real stb_vorbis.c prefix) makes tree-sitter wrap
+        most of the file in one top-level ERROR node while keeping the
+        definitions inside it well-formed. The walk must descend ERROR nodes
+        too, or whole files extract nothing (corpus finding: stb_vorbis.c
+        0/115). Asserts real functions buried under the ERROR are recovered."""
+        import pathlib
+
+        import pytest
+
+        from cgir.languages.base import FunctionDecl
+
+        src = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "fixtures"
+            / "c_error_recovery"
+            / "vorbis_prefix.c"
+        ).read_bytes()
+        root = adapter.parse(src)
+
+        # keep this honest if a future grammar stops producing the pathology
+        expected = {"error", "make_block_array", "setup_malloc", "setup_free"}
+        buried: set[str] = set()
+
+        def collect(node: object, in_err: bool) -> None:
+            n = node
+            if n.type == "function_definition" and in_err:  # type: ignore[attr-defined]
+                d = n.child_by_field_name("declarator")  # type: ignore[attr-defined]
+                while d is not None and d.type != "identifier":
+                    d = d.child_by_field_name("declarator")
+                if d is not None:
+                    buried.add(d.text.decode())
+            for c in n.children:  # type: ignore[attr-defined]
+                collect(c, in_err or n.type == "ERROR")  # type: ignore[attr-defined]
+
+        collect(root, False)
+        if not expected <= buried:
+            pytest.skip("grammar no longer buries the expected functions under ERROR")
+
+        decls = adapter.module_declarations(root, src, "m", "m.c")
+        names = {d.name for d in decls if isinstance(d, FunctionDecl)}
+        assert expected <= names
+
 
 class TestCallSites:
     def test_simple_call(self):

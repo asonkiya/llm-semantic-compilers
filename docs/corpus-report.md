@@ -64,12 +64,21 @@ preprocessor conditionals but not through `ERROR` nodes, so cgir sees only the
 leading comments and extracts zero. tree-sitter's error recovery keeps the
 buried function subtrees well-formed; cgir simply never descends to them.
 
-*Proposed fix (C adapter, same class as the just-landed #ifdef fix):* add
-`ERROR` to the transparent-recursion set in `_iter_top_level` (only known node
-types are ever processed, so descending an ERROR wrapper is safe). Expected to
-recover stb_vorbis / stb_truetype and any real macro-dense C that trips
-tree-sitter mid-file. Redis (0.99), curl (0.92), jq (0.93) already scan
-near-complete, so this is the tail, not the common case.
+**Fixed (2026-07-19, `c.py:_iter_top_level`):** `ERROR` added to the
+transparent-recursion set (only known node types are ever processed, so
+descending an ERROR wrapper is safe). After the fix:
+
+| repo | before | after |
+|---|---|---|
+| stb | 0.59 | **0.82** (1,513 → 2,095 comps) |
+| curl | 0.92 | **0.96** |
+| jq | 0.93 | **0.97** |
+
+Red-green regression test uses a real 970-line stb_vorbis.c prefix that
+reproduces the burial (4 real functions recovered). stb's residual 0.82 is a
+few other files (stb_truetype.h, stb_image_resize2.h) with their own
+tree-sitter quirks plus macro-noise in the denominator — the normal C band,
+no longer an outlier.
 
 ## Reproduce
 
