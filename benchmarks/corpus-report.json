@@ -1,0 +1,338 @@
+{
+  "summary": {
+    "repos": 15,
+    "scanned_ok": 15,
+    "crashed": [],
+    "timed_out": [],
+    "clone_failed": [],
+    "total_loc": 554790,
+    "total_components": 10127
+  },
+  "rows": [
+    {
+      "name": "flask",
+      "lang": "python",
+      "url": "https://github.com/pallets/flask",
+      "files": 24,
+      "loc": 9502,
+      "scan_ok": true,
+      "seconds": 0.7,
+      "components": 332,
+      "kinds": {
+        "effect_adapter": 8,
+        "pure_function": 225,
+        "state_transformer": 99
+      },
+      "languages": {
+        "python": 332
+      },
+      "pure_pct": 67.8,
+      "resolved_calls": 61,
+      "nodes": 3263
+    },
+    {
+      "name": "requests",
+      "lang": "python",
+      "url": "https://github.com/psf/requests",
+      "files": 19,
+      "loc": 6394,
+      "scan_ok": true,
+      "seconds": 0.6,
+      "components": 237,
+      "kinds": {
+        "pure_function": 119,
+        "state_transformer": 30,
+        "effect_adapter": 73,
+        "orchestrator": 15
+      },
+      "languages": {
+        "python": 237
+      },
+      "pure_pct": 50.2,
+      "resolved_calls": 160,
+      "nodes": 2743
+    },
+    {
+      "name": "click",
+      "lang": "python",
+      "url": "https://github.com/pallets/click",
+      "files": 17,
+      "loc": 12513,
+      "scan_ok": true,
+      "seconds": 0.9,
+      "components": 490,
+      "kinds": {
+        "effect_adapter": 16,
+        "pure_function": 348,
+        "state_transformer": 121,
+        "orchestrator": 5
+      },
+      "languages": {
+        "python": 490
+      },
+      "pure_pct": 71.0,
+      "resolved_calls": 233,
+      "nodes": 5211
+    },
+    {
+      "name": "httpx",
+      "lang": "python",
+      "url": "https://github.com/encode/httpx",
+      "files": 23,
+      "loc": 8827,
+      "scan_ok": true,
+      "seconds": 0.8,
+      "components": 424,
+      "kinds": {
+        "pure_function": 302,
+        "state_transformer": 113,
+        "effect_adapter": 8,
+        "orchestrator": 1
+      },
+      "languages": {
+        "python": 424
+      },
+      "pure_pct": 71.2,
+      "resolved_calls": 240,
+      "nodes": 3903
+    },
+    {
+      "name": "rich",
+      "lang": "python",
+      "url": "https://github.com/Textualize/rich",
+      "files": 100,
+      "loc": 38515,
+      "scan_ok": true,
+      "seconds": 1.7,
+      "components": 821,
+      "kinds": {
+        "state_transformer": 217,
+        "pure_function": 595,
+        "effect_adapter": 9
+      },
+      "languages": {
+        "python": 821
+      },
+      "pure_pct": 72.5,
+      "resolved_calls": 537,
+      "nodes": 9935
+    },
+    {
+      "name": "zod",
+      "lang": "typescript",
+      "url": "https://github.com/colinhacks/zod",
+      "files": 403,
+      "loc": 74118,
+      "scan_ok": true,
+      "seconds": 2.2,
+      "components": 933,
+      "kinds": {
+        "pure_function": 843,
+        "state_transformer": 59,
+        "effect_adapter": 31
+      },
+      "languages": {
+        "typescript": 933
+      },
+      "pure_pct": 90.4,
+      "resolved_calls": 529,
+      "nodes": 9747
+    },
+    {
+      "name": "ky",
+      "lang": "typescript",
+      "url": "https://github.com/sindresorhus/ky",
+      "files": 30,
+      "loc": 4001,
+      "scan_ok": true,
+      "seconds": 0.4,
+      "components": 87,
+      "kinds": {
+        "pure_function": 82,
+        "effect_adapter": 3,
+        "orchestrator": 1,
+        "state_transformer": 1
+      },
+      "languages": {
+        "typescript": 87
+      },
+      "pure_pct": 94.3,
+      "resolved_calls": 61,
+      "nodes": 1061
+    },
+    {
+      "name": "cobra",
+      "lang": "go",
+      "url": "https://github.com/spf13/cobra",
+      "files": 36,
+      "loc": 16765,
+      "scan_ok": true,
+      "seconds": 1.1,
+      "components": 588,
+      "kinds": {
+        "pure_function": 497,
+        "orchestrator": 52,
+        "effect_adapter": 39
+      },
+      "languages": {
+        "go": 588
+      },
+      "pure_pct": 84.5,
+      "resolved_calls": 707,
+      "nodes": 6541
+    },
+    {
+      "name": "gin",
+      "lang": "go",
+      "url": "https://github.com/gin-gonic/gin",
+      "files": 99,
+      "loc": 24099,
+      "scan_ok": true,
+      "seconds": 1.9,
+      "components": 1318,
+      "kinds": {
+        "effect_adapter": 186,
+        "pure_function": 765,
+        "orchestrator": 367
+      },
+      "languages": {
+        "go": 1318
+      },
+      "pure_pct": 58.0,
+      "resolved_calls": 1148,
+      "nodes": 12384
+    },
+    {
+      "name": "ripgrep",
+      "lang": "rust",
+      "url": "https://github.com/BurntSushi/ripgrep",
+      "files": 89,
+      "loc": 48599,
+      "scan_ok": true,
+      "seconds": 2.5,
+      "components": 2272,
+      "kinds": {
+        "pure_function": 2037,
+        "state_transformer": 169,
+        "effect_adapter": 51,
+        "orchestrator": 15
+      },
+      "languages": {
+        "rust": 2272
+      },
+      "pure_pct": 89.7,
+      "resolved_calls": 751,
+      "nodes": 13384
+    },
+    {
+      "name": "clap",
+      "lang": "rust",
+      "url": "https://github.com/clap-rs/clap",
+      "files": 57,
+      "loc": 28932,
+      "scan_ok": true,
+      "seconds": 1.3,
+      "components": 1057,
+      "kinds": {
+        "pure_function": 979,
+        "state_transformer": 75,
+        "effect_adapter": 3
+      },
+      "languages": {
+        "rust": 1057
+      },
+      "pure_pct": 92.6,
+      "resolved_calls": 168,
+      "nodes": 6746
+    },
+    {
+      "name": "tiny-AES-c",
+      "lang": "c",
+      "url": "https://github.com/kokke/tiny-AES-c",
+      "files": 3,
+      "loc": 979,
+      "scan_ok": true,
+      "seconds": 0.3,
+      "components": 24,
+      "kinds": {
+        "pure_function": 12,
+        "effect_adapter": 8,
+        "state_transformer": 2,
+        "orchestrator": 2
+      },
+      "languages": {
+        "python": 6,
+        "c": 18
+      },
+      "pure_pct": 50.0,
+      "resolved_calls": 19,
+      "nodes": 249
+    },
+    {
+      "name": "kilo",
+      "lang": "c",
+      "url": "https://github.com/antirez/kilo",
+      "files": 1,
+      "loc": 1308,
+      "scan_ok": true,
+      "seconds": 0.3,
+      "components": 36,
+      "kinds": {
+        "effect_adapter": 10,
+        "orchestrator": 11,
+        "state_transformer": 7,
+        "pure_function": 8
+      },
+      "languages": {
+        "c": 36
+      },
+      "pure_pct": 22.2,
+      "resolved_calls": 47,
+      "nodes": 858
+    },
+    {
+      "name": "stb",
+      "lang": "c",
+      "url": "https://github.com/nothings/stb",
+      "files": 86,
+      "loc": 106612,
+      "scan_ok": true,
+      "seconds": 1.8,
+      "components": 311,
+      "kinds": {
+        "pure_function": 198,
+        "state_transformer": 39,
+        "orchestrator": 23,
+        "effect_adapter": 51
+      },
+      "languages": {
+        "c": 311
+      },
+      "pure_pct": 63.7,
+      "resolved_calls": 270,
+      "nodes": 6052
+    },
+    {
+      "name": "curl",
+      "lang": "c",
+      "url": "https://github.com/curl/curl",
+      "files": 380,
+      "loc": 173626,
+      "scan_ok": true,
+      "seconds": 3.3,
+      "components": 1197,
+      "kinds": {
+        "orchestrator": 167,
+        "pure_function": 677,
+        "state_transformer": 309,
+        "effect_adapter": 44
+      },
+      "languages": {
+        "c": 1197
+      },
+      "pure_pct": 56.6,
+      "resolved_calls": 1996,
+      "nodes": 21149
+    }
+  ]
+}
