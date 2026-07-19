@@ -1,7 +1,9 @@
 """Rung 4: C -> Rust cross-language regeneration (vision-rewrite.md).
 
 Worklist: SQLite-amalgamation pure *leaf* functions whose ABI surface is
-scalars only. Pipeline per component:
+scalars, or (with --pointers) char*/byte-buffer pointers fuzzed with dual
+buffers + mutation compare. Struct pointers stay out of scope. Pipeline
+per component:
 
     Haiku writes a #[no_mangle] extern "C" Rust implementation
       -> rustc compiles it                     (filter 1: free, deterministic)
@@ -594,7 +596,20 @@ typedef {ret_c} (*fn_t)({sig});
 {chr(10).join(globals_)}
 static sigjmp_buf JB;
 static volatile sig_atomic_t FAULT;
+static char ALTSTK[SIGSTKSZ * 4];
 static void on_fault(int s) {{ FAULT = s; siglongjmp(JB, 1); }}
+static void install_handlers(void) {{
+    stack_t ss;
+    ss.ss_sp = ALTSTK; ss.ss_size = sizeof ALTSTK; ss.ss_flags = 0;
+    sigaltstack(&ss, 0);  /* handler runs on a clean stack even if the fault trashed the main one */
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_fault;
+    sa.sa_flags = SA_ONSTACK | SA_NODEFER;
+    sigemptyset(&sa.sa_mask);
+    int sigs[] = {{SIGSEGV, SIGBUS, SIGABRT, SIGFPE, SIGILL}};
+    for (unsigned k = 0; k < sizeof sigs / sizeof sigs[0]; k++) sigaction(sigs[k], &sa, 0);
+}}
 
 static uint64_t S;
 static uint64_t xr(void) {{ S ^= S<<13; S ^= S>>7; S ^= S<<17; return S ? S : (S=0x9E3779B97F4A7C15ULL); }}
@@ -640,8 +655,7 @@ int main(int argc, char** argv) {{
     fn_t fo = (fn_t)dlsym(ho, "{e.name}");
     fn_t fc = (fn_t)dlsym(hc, "{e.name}");
     if (!fo || !fc) {{ printf("{{\\"status\\":\\"missing_symbol\\"}}\\n"); return 0; }}
-    signal(SIGSEGV, on_fault); signal(SIGBUS, on_fault);
-    signal(SIGABRT, on_fault); signal(SIGFPE, on_fault); signal(SIGILL, on_fault);
+    install_handlers();
 
     long compared=0, mism=0, orig_faults=0, cand_faults=0, both_faults=0;
     char example[600]="";

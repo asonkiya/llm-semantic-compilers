@@ -509,3 +509,46 @@ verify (rustc -> contract -> differential vs compiled original) -> **link
 in place and prove the assembled program is behaviorally identical.**
 Cheap models wrote Rust that is now *running inside SQLite*, and a
 deterministic battery says you can't tell.
+
+## Rung 4+++ : pointer ABIs + a fault-trapping driver (2026-07-19)
+
+Two upgrades widening the C->Rust surface past scalars.
+
+### Fault-trapping compiled differential driver
+
+The ctypes worker was replaced by a self-contained C driver generated per
+function: it `dlopen`s both libraries, installs a `sigaltstack` +
+`sigaction(SA_ONSTACK)` fault handler, and guards every call with
+`sigsetjmp` so a SIGSEGV/SIGABRT becomes a recorded trap, not a process
+death. Two payoffs: (1) no more macOS crash-report spam — functions that
+index a table by their raw argument (`sqlite3ParserFallback`) used to
+segfault the worker; the driver now traps in-process and the altstack
+survives even stack-corrupting faults (re-verified: 0 new crash reports).
+(2) contract-aware semantics — if the C *original* faults on an input,
+that input is out-of-contract (the C itself is UB there) and is skipped;
+only the candidate faulting where the original ran cleanly is a real
+divergence, with a minimum-valid-comparisons guard against vacuous passes.
+
+### Pointer parameters (--pointers)
+
+`const`/mut `char*` (C strings) and `u8`/`unsigned char`/`void*` byte
+buffers are now fuzzed: the original and candidate get *separate* copies
+of an identical random buffer (strings NUL-terminated within 64 bytes,
+binary buffers fully random over 4 KB), and equivalence requires matching
+return value AND matching post-call buffer contents — so a
+write-through-pointer divergence is caught, not just the return. The Rust
+candidate gets `*const u8`/`*mut u8` params and an unsafe-bounds
+instruction. Struct pointers (`sqlite3*`, `Vdbe*` — the other 211 leaves)
+stay excluded; they need real instances.
+
+**Worklist 34 -> 71 (scalar leaves + 37 pointer leaves). Plug-in
+61/71 = 86%** (58 cheap, 3 escalation), $0.52. **Pointer functions
+specifically: 29/37** — `fts5GetU16/U32/U64`, `readInt16/readInt64`,
+`sqlite3Strlen30`, UTF-8 length, and more, each verified by the
+dual-buffer differential. The 10 misses are all caught, none silently
+passed: real byte-exact mismatches on hash/collation functions
+(`strHash`, `binCollFunc`, `fts5HashKey`) that need table context, plus a
+few candidate-quality rustc failures (duplicate-name, snake_case-deny).
+
+Scalars + pointers together, ~80 of SQLite's 400 pure leaves (20%) are
+now addressable end to end; struct-pointer ABIs are the frontier beyond.
