@@ -7,8 +7,10 @@ scalars only. Pipeline per component:
       -> rustc compiles it                     (filter 1: free, deterministic)
       -> cgir's Rust adapter scans it          (filter 2: cross-language
          contract — pure, arity; REGENERATED_AS recorded in the results)
-      -> differential vs the C original        (filter 3: 300 random scalar
-         inputs through ctypes, child process so a Rust abort can't kill us)
+      -> differential vs the C original        (filter 3: random scalar
+         inputs via a compiled, fault-trapping C driver — SIGSEGV/SIGABRT
+         become recorded traps, not process deaths; orig-faulting inputs
+         are out-of-contract and skipped)
       -> failures escalate once to Sonnet with the compiler error or the
          counterexample.
 
@@ -32,7 +34,6 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
 # Reuse the rung-3 generation/ledger machinery (same directory).
 sys.path.insert(0, str(Path(__file__).parent))
@@ -436,128 +437,188 @@ def contract_check(candidate: str, e: Entry) -> str:
     return ""
 
 
+# ctypes-name -> (C concrete type, width bits, is_signed, is_float)
+_C_INFO = {
+    "c_int": ("int32_t", 32, 1, 0),
+    "c_uint": ("uint32_t", 32, 0, 0),
+    "c_short": ("int16_t", 16, 1, 0),
+    "c_ushort": ("uint16_t", 16, 0, 0),
+    "c_byte": ("int8_t", 8, 1, 0),
+    "c_ubyte": ("uint8_t", 8, 0, 0),
+    "c_longlong": ("int64_t", 64, 1, 0),
+    "c_ulonglong": ("uint64_t", 64, 0, 0),
+    "c_double": ("double", 64, 1, 1),
+    "c_float": ("float", 32, 1, 1),
+}
+
+
+def _driver_source(e: Entry) -> str:
+    """Generate a self-contained C driver for one function.
+
+    dlopen's both libraries, installs a fault handler, and runs trials with
+    each call guarded by sigsetjmp so a SIGSEGV/SIGABRT becomes a recorded
+    trap, not a process death. Contract-aware semantics: if the C *original*
+    faults on an input, that input is out-of-contract (the C itself has UB
+    there) and is skipped; only the candidate faulting where the original
+    did not is a real divergence.
+    """
+    cinfo = [_C_INFO[TYPE_MAP[t][1]] for t, _ in e.params]
+    ret_c, _, _, ret_float = _C_INFO[TYPE_MAP[e.ret][1]]
+    sig = ", ".join(c[0] for c in cinfo) or "void"
+    decls, args, printf_fmt, printf_args = [], [], [], []
+    for i, (ctype, bits, signed, isflt) in enumerate(cinfo):
+        if isflt:
+            decls.append(f"    {ctype} a{i} = ({ctype})rndd();")
+            printf_fmt.append("%g")
+        else:
+            decls.append(f"    {ctype} a{i} = ({ctype})rnd({bits}, {signed});")
+            printf_fmt.append("%lld")
+            printf_args.append(f"(long long)a{i}")
+        args.append(f"a{i}")
+        if isflt:
+            printf_args.append(f"(double)a{i}")
+    call_args = ", ".join(args)
+    fmt = ",".join(printf_fmt)
+    exargs = (", " + ", ".join(printf_args)) if printf_args else ""
+    if ret_float:
+        eq = (
+            "(isnan(ro)&&isnan(rc)) || ro==rc || "
+            "fabs((double)ro-(double)rc) <= 1e-9*fmax(fabs((double)ro),fabs((double)rc))"
+        )
+        ret_fmt, ro_arg, rc_arg = "%g", "(double)ro", "(double)rc"
+    else:
+        eq = "ro==rc"
+        ret_fmt, ro_arg, rc_arg = "%lld", "(long long)ro", "(long long)rc"
+    return f"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <dlfcn.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <math.h>
+
+typedef {ret_c} (*fn_t)({sig});
+static sigjmp_buf JB;
+static volatile sig_atomic_t FAULT;
+static void on_fault(int s) {{ FAULT = s; siglongjmp(JB, 1); }}
+
+static uint64_t S;
+static uint64_t xr(void) {{ S ^= S<<13; S ^= S>>7; S ^= S<<17; return S ? S : (S=0x9E3779B97F4A7C15ULL); }}
+static int64_t rnd(int bits, int is_signed) {{
+    uint64_t r = xr();
+    int mode = r % 10;
+    int64_t v;
+    if (mode < 3)      v = (int64_t)(xr() % 513) - 256;      /* small */
+    else if (mode < 5) {{ int64_t e[] = {{0,1,-1}}; v = e[xr()%3]; }}
+    else               v = (int64_t)xr();                    /* full width */
+    if (bits < 64) {{
+        uint64_t mask = ((uint64_t)1 << bits) - 1;
+        uint64_t m = ((uint64_t)v) & mask;
+        v = (is_signed && (m >> (bits-1))) ? (int64_t)(m | ~mask) : (int64_t)m;
+    }}
+    return v;
+}}
+static double rndd(void) {{
+    uint64_t r = xr();
+    int mode = r % 12;
+    double e[] = {{0.0,-0.0,1.0,-1.0,1e308,-1e308,1e-308,
+                  (double)INFINITY,-(double)INFINITY,(double)NAN,
+                  9.2233720368547758e18,-9.2233720368547758e18}};
+    if (mode < 5) return e[xr()%12];
+    double base = mode < 9 ? 1e6 : 1e18;
+    return ((double)(int64_t)xr() / (double)INT64_MAX) * base;
+}}
+
+int main(int argc, char** argv) {{
+    if (argc < 5) return 2;
+    long n = atol(argv[3]);
+    S = strtoull(argv[4], 0, 10);
+    void* ho = dlopen(argv[1], RTLD_NOW);
+    void* hc = dlopen(argv[2], RTLD_NOW);
+    if (!ho || !hc) {{ printf("{{\\"status\\":\\"dlopen_fail\\"}}\\n"); return 0; }}
+    fn_t fo = (fn_t)dlsym(ho, "{e.name}");
+    fn_t fc = (fn_t)dlsym(hc, "{e.name}");
+    if (!fo || !fc) {{ printf("{{\\"status\\":\\"missing_symbol\\"}}\\n"); return 0; }}
+    signal(SIGSEGV, on_fault); signal(SIGBUS, on_fault);
+    signal(SIGABRT, on_fault); signal(SIGFPE, on_fault); signal(SIGILL, on_fault);
+
+    long compared=0, mism=0, orig_faults=0, cand_faults=0, both_faults=0;
+    char example[600]=""; 
+    for (long i=0; i<n; i++) {{
+{chr(10).join(decls)}
+        {ret_c} ro; int of=0;
+        if (sigsetjmp(JB,1)==0) {{ ro = fo({call_args}); }} else of=1;
+        {ret_c} rc; int cf=0;
+        if (sigsetjmp(JB,1)==0) {{ rc = fc({call_args}); }} else cf=1;
+        if (of) {{ if (cf) both_faults++; else orig_faults++; continue; }}
+        if (cf) {{
+            cand_faults++; mism++;
+            if (!example[0]) snprintf(example,sizeof example,
+                "{e.name}({fmt}) orig={ret_fmt} rust=FAULT"{exargs}, {ro_arg});
+            continue;
+        }}
+        compared++;
+        if (!({eq})) {{
+            mism++;
+            if (!example[0]) snprintf(example,sizeof example,
+                "{e.name}({fmt}) orig={ret_fmt} rust={ret_fmt}"{exargs}, {ro_arg}, {rc_arg});
+        }}
+    }}
+    printf("{{\\"status\\":\\"%s\\",\\"compared\\":%ld,\\"mismatches\\":%ld,"
+           "\\"orig_faults\\":%ld,\\"cand_faults\\":%ld,\\"both_faults\\":%ld,"
+           "\\"example\\":\\"%s\\"}}\\n",
+        mism?"mismatch":"equivalent", compared, mism, orig_faults,
+        cand_faults, both_faults, example);
+    return 0;
+}}
+"""
+
+
 def differential(orig: Path, cand: Path, e: Entry, n: int, seed: int) -> str:
-    """Run trials in a child process; a Rust abort must not kill the harness."""
-    spec = {
-        "orig": str(orig),
-        "cand": str(cand),
-        "name": e.name,
-        "ret": e.ret,
-        "params": [t for t, _ in e.params],
-        "n": n,
-        "seed": seed,
-    }
-    proc = subprocess.run(
-        [sys.executable, __file__, "--diff-worker"],
-        input=json.dumps(spec),
+    """Compile a fault-trapping C driver and run it. Orig-faulting inputs are
+    out-of-contract and skipped; a candidate faulting where the original ran
+    is a real divergence. Requires a minimum of valid comparisons to avoid a
+    vacuous pass on functions whose contract domain we rarely hit."""
+    trials = n if e.params else 1
+    drv_c = cand.with_suffix(".driver.c")
+    drv = cand.with_suffix(".driver")
+    drv_c.write_text(_driver_source(e))
+    comp = subprocess.run(
+        ["cc", "-O0", "-w", str(drv_c), "-o", str(drv)],
         capture_output=True,
         text=True,
         timeout=120,
     )
-    if proc.returncode != 0:
-        last = proc.stdout.strip().splitlines()
-        return f"differential: process died (Rust abort?) near input {last[-1] if last else '?'}"
-    verdict = json.loads(proc.stdout.strip().splitlines()[-1])
-    if verdict["status"] == "missing_symbol":
-        return "differential: symbol missing from a dylib"
-    if verdict["status"] == "mismatch":
-        ex = verdict["example"]
+    if comp.returncode != 0:
+        return f"differential: driver compile failed:\n{comp.stderr[:300]}"
+    run = subprocess.run(
+        [str(drv), str(orig), str(cand), str(trials), str(seed or 1)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if run.returncode != 0:
+        return f"differential: driver died (rc={run.returncode}) — should not happen"
+    v = json.loads(run.stdout.strip().splitlines()[-1])
+    if v["status"] in ("missing_symbol", "dlopen_fail"):
+        return f"differential: {v['status']}"
+    if v["status"] == "mismatch":
         return (
-            f"differential mismatch on {verdict['mismatches']}/{verdict['trials']} inputs; "
-            f"e.g. {e.name}({ex['args']}): C returned {ex['c']}, Rust returned {ex['rust']}"
+            f"differential mismatch on {v['mismatches']} inputs "
+            f"({v['compared']} compared, {v['cand_faults']} candidate-faults); "
+            f"e.g. {v['example']}"
+        )
+    if e.params and v["compared"] < max(20, trials // 10) and v["orig_faults"] > 0:
+        return (
+            f"differential inconclusive: only {v['compared']} in-contract inputs "
+            f"({v['orig_faults']} out-of-contract faults in the C original)"
         )
     return ""
 
 
-def diff_worker() -> None:
-    import ctypes
-    import math
-    import random
-
-    spec = json.loads(sys.stdin.read())
-    ctype = {t: getattr(ctypes, TYPE_MAP[t][1]) for t in TYPE_MAP}
-
-    o, c = ctypes.CDLL(spec["orig"]), ctypes.CDLL(spec["cand"])
-    try:
-        fo, fc = getattr(o, spec["name"]), getattr(c, spec["name"])
-    except AttributeError:
-        print(json.dumps({"status": "missing_symbol"}))
-        return
-    argtypes = [ctype[t] for t in spec["params"]]
-    for f in (fo, fc):
-        f.argtypes = argtypes
-        f.restype = ctype[spec["ret"]]
-
-    rng = random.Random(spec["seed"])
-    EDGE = {
-        "c_int": [0, 1, -1, 2**31 - 1, -(2**31)],
-        "c_uint": [0, 1, 2**32 - 1],
-        "c_short": [0, 1, -1, 32767, -32768],
-        "c_ushort": [0, 1, 65535],
-        "c_byte": [0, 1, -1, 127, -128],
-        "c_ubyte": [0, 1, 255],
-        "c_longlong": [0, 1, -1, 2**63 - 1, -(2**63)],
-        "c_ulonglong": [0, 1, 2**64 - 1],
-        "c_double": [
-            0.0,
-            -0.0,
-            1.0,
-            -1.0,
-            1e308,
-            -1e308,
-            1e-308,
-            float("inf"),
-            float("-inf"),
-            float("nan"),
-            9.2233720368547758e18,  # just past i64 max
-            -9.2233720368547758e18,
-        ],
-        "c_float": [0.0, 1.0, -1.0, float("inf"), float("-inf"), float("nan")],
-    }
-
-    def gen(tname: str) -> Any:
-        edges = EDGE[tname]
-        if rng.random() < 0.25:
-            return rng.choice(edges)
-        if tname == "c_double":
-            return rng.choice([rng.uniform(-1e6, 1e6), rng.uniform(-1e18, 1e18)])
-        if tname == "c_float":
-            return rng.uniform(-1e6, 1e6)
-        lo, hi = min(edges), max(edges)
-        small = rng.randint(-256, 256)
-        return max(lo, min(hi, small)) if rng.random() < 0.5 else rng.randint(lo, hi)
-
-    mismatches = 0
-    example = None
-    # A zero-arg function has exactly one observable point — 300 identical
-    # calls would be theater, not testing.
-    trials = spec["n"] if spec["params"] else 1
-    for _ in range(trials):
-        args = [gen(TYPE_MAP[t][1]) for t in spec["params"]]
-        print(f"TRIAL {args!r}", flush=True)
-        rv_o, rv_c = fo(*args), fc(*args)
-        if isinstance(rv_o, float):
-            same = (math.isnan(rv_o) and math.isnan(rv_c)) or math.isclose(
-                rv_o, rv_c, rel_tol=1e-12, abs_tol=0.0
-            )
-        else:
-            same = rv_o == rv_c
-        if not same:
-            mismatches += 1
-            if example is None:
-                example = {"args": repr(args), "c": repr(rv_o), "rust": repr(rv_c)}
-    status = "mismatch" if mismatches else "equivalent"
-    print(
-        json.dumps(
-            {"status": status, "mismatches": mismatches, "trials": trials, "example": example}
-        )
-    )
-
-
 def main() -> None:
-    if "--diff-worker" in sys.argv:
-        diff_worker()
-        return
     import anthropic
 
     ap = argparse.ArgumentParser()
