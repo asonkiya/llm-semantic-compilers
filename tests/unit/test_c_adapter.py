@@ -222,6 +222,66 @@ class TestModuleDeclarations:
         structs = [d for d in decls if isinstance(d, ClassDecl)]
         assert "next" in structs[0].fields
 
+    def test_function_inside_ifdef_extracted(self):
+        """Single-header-library pattern: implementations live inside
+        `#ifdef X_IMPLEMENTATION`. tree-sitter nests them under a
+        preproc_ifdef node, so the walk must descend through it."""
+        src = (
+            b"int declared(int x);\n"
+            b"#ifdef LIB_IMPLEMENTATION\n"
+            b"int declared(int x) { return x + 1; }\n"
+            b"static int helper(int y) { return y * 2; }\n"
+            b"#endif\n"
+        )
+        root = adapter.parse(src)
+        decls = adapter.module_declarations(root, src, "m", "m.c")
+        from cgir.languages.base import FunctionDecl
+
+        names = {d.name for d in decls if isinstance(d, FunctionDecl)}
+        assert "declared" in names
+        assert "helper" in names
+
+    def test_function_inside_nested_ifdef_extracted(self):
+        src = (
+            b"#ifdef OUTER\n"
+            b"#ifdef INNER\n"
+            b"static int deep(int a) { return a; }\n"
+            b"#endif\n"
+            b"static int mid(int b) { return b; }\n"
+            b"#endif\n"
+        )
+        root = adapter.parse(src)
+        decls = adapter.module_declarations(root, src, "m", "m.c")
+        from cgir.languages.base import FunctionDecl
+
+        names = {d.name for d in decls if isinstance(d, FunctionDecl)}
+        assert {"deep", "mid"} <= names
+
+    def test_ifdef_else_branch_deduped(self):
+        """A symbol defined under mutually-exclusive branches yields one decl,
+        not a colliding duplicate."""
+        src = (
+            b"#ifdef X86\n"
+            b"static int cpuid(void) { return 1; }\n"
+            b"#else\n"
+            b"static int cpuid(void) { return 0; }\n"
+            b"#endif\n"
+        )
+        root = adapter.parse(src)
+        decls = adapter.module_declarations(root, src, "m", "m.c")
+        from cgir.languages.base import FunctionDecl
+
+        cpuids = [d for d in decls if isinstance(d, FunctionDecl) and d.name == "cpuid"]
+        assert len(cpuids) == 1
+
+    def test_include_inside_ifdef_extracted(self):
+        src = b'#ifdef USE_ZLIB\n#include "zlib_shim.h"\n#endif\n'
+        root = adapter.parse(src)
+        decls = adapter.module_declarations(root, src, "m", "m.c")
+        from cgir.languages.base import ImportDecl
+
+        assert any(isinstance(d, ImportDecl) for d in decls)
+
 
 class TestCallSites:
     def test_simple_call(self):

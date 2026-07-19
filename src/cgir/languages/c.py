@@ -187,6 +187,22 @@ _NONDETERM_HIGH: frozenset[str] = frozenset(
 # prefix-based high matches (SQLite3, MySQL, libpq)
 _DB_PREFIXES: tuple[str, ...] = ("sqlite3_", "mysql_", "PQ", "pg_")
 
+# Preprocessor-conditional wrappers tree-sitter-c nests top-level decls under.
+_PREPROC_COND: frozenset[str] = frozenset(
+    {"preproc_ifdef", "preproc_if", "preproc_elif", "preproc_elifdef", "preproc_else"}
+)
+
+
+def _iter_top_level(node: TSNode) -> Iterator[TSNode]:
+    """Yield effective top-level declaration nodes, descending transparently
+    through #ifdef/#if conditionals (and their #else/#elif branches) so
+    functions guarded by e.g. `#ifdef X_IMPLEMENTATION` are reached."""
+    for child in node.named_children:
+        if child.type in _PREPROC_COND:
+            yield from _iter_top_level(child)
+        else:
+            yield child
+
 _RAISE_HIGH: frozenset[str] = frozenset(
     {
         "abort",
@@ -433,17 +449,25 @@ class CAdapter(LanguageAdapter):
         pin_index = PinIndex(root, source)
         decls: list[Declaration] = []
 
+        # tree-sitter-c nests conditionally-compiled top-level definitions
+        # inside preproc_ifdef/#if nodes (children of the translation unit,
+        # not of it), so a plain root.named_children walk misses everything in
+        # a single-header library's `#ifdef X_IMPLEMENTATION` block. Flatten
+        # through the conditionals; both branches of an #ifdef/#else are
+        # yielded, so dedup symbols that appear under mutually-exclusive
+        # branches by name (an x86 vs portable variant is one component).
+        decl_nodes = list(_iter_top_level(root))
+        seen_fns: set[str] = set()
+        seen_types: set[str] = set()
+
         # Determine the first non-comment node for module_pins heuristic
         pinnable_types = {"function_definition", "struct_specifier", "type_definition"}
-        first = next(
-            (c for c in root.named_children if c.type not in ("comment",)),
-            None,
-        )
+        first = next((c for c in decl_nodes if c.type not in ("comment",)), None)
         first_row: int | None = (
             first.start_point[0] if first is not None and first.type in pinnable_types else None
         )
 
-        for child in root.named_children:
+        for child in decl_nodes:
             t = child.type
 
             # --- imports ---
@@ -455,19 +479,26 @@ class CAdapter(LanguageAdapter):
             # --- free functions ---
             elif t == "function_definition":
                 fd = self._process_function(child, source, pin_index)
-                if fd is not None:
+                if fd is not None and fd.name not in seen_fns:
+                    seen_fns.add(fd.name)
                     decls.append(fd)
 
             # --- named struct: struct Foo { ... }; ---
             elif t == "struct_specifier":
                 cd = self._process_struct(child, source, pin_index)
-                if cd is not None:
+                if cd is not None and cd.name not in seen_types:
+                    seen_types.add(cd.name)
                     decls.append(cd)
 
             # --- typedef struct { ... } Name; or typedef struct Foo { ... } Alias; ---
             elif t == "type_definition":
-                items = self._process_typedef(child, source, pin_index)
-                decls.extend(items)
+                for item in self._process_typedef(child, source, pin_index):
+                    name = getattr(item, "name", None)
+                    if name and name in seen_types:
+                        continue
+                    if name:
+                        seen_types.add(name)
+                    decls.append(item)
 
             # --- top-level variable / constant ---
             elif t == "declaration":

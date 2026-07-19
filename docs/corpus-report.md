@@ -47,17 +47,26 @@ preproc node, not of the root) are never visited. stb's single-header pattern
 wraps its entire implementation in `#ifdef STB_IMAGE_IMPLEMENTATION`, so ~84%
 of it is invisible; curl's platform/feature `#ifdef`s cause the milder version.
 
-SQLite did *not* hit this (2,663 components extracted) because the amalgamation
-build flattens definitions to the top level — which is exactly why a
-single-file amalgamation looked complete and a real multi-header C library did
-not.
+**Fixed (2026-07-19, `c.py:_iter_top_level`):** treat `preproc_ifdef`/
+`preproc_if`/`preproc_elif`/`preproc_else` as transparent — recurse into them
+when collecting `function_definition` / `struct_specifier` / `type_definition`
+/ `preproc_include`, deduping symbols that appear under mutually-exclusive
+branches (an x86 vs portable variant is one component). After the fix:
 
-**Fix (scoped, C adapter only):** treat `preproc_ifdef`/`preproc_if`/
-`preproc_elif`/`preproc_else` as transparent — recurse into them when
-collecting top-level `function_definition` / `struct_specifier` /
-`type_definition` / `preproc_include`. Needs dedup for symbols defined under
-mutually-exclusive branches (e.g. an x86 vs portable variant). High value: it
-lights up the entire single-header-C ecosystem and any feature-flagged C.
+| repo | before | after | comps/KLOC |
+|---|---|---|---|
+| stb | 311 | **1,513** | 2.9 → 14.2 |
+| curl | 1,197 | **3,511** | 6.9 → 20.2 |
+| stb_image.h alone | 36 / 221 | **219 / 221** | 16% → 99% |
+
+**The correction that matters most:** SQLite was *not* immune, as first
+assumed here. Re-scanned, the amalgamation goes **2,663 → 5,067 components
+(583 → 1,120 pure)** — its `#ifdef SQLITE_ENABLE_*` / `SQLITE_OMIT_*` feature
+guards hid ~47% of its functions. The amalgamation flattens `#include`, not
+feature `#ifdef`s. So the rung-1/rung-4 SQLite figures elsewhere in the docs
+were computed on a ~half-complete graph; the real candidate pool is roughly
+double. This is the corpus test earning its keep — it found a bug that had
+been silently shrinking even our flagship validation.
 
 ## Finding 2 (not a defect): call resolution is in-repo by design
 
