@@ -18,11 +18,22 @@ from cgir.rewrite_c_rust import (
     c_rust_worklist,
     compile_oracle,
     differential,
+    extern_block,
     link_back,
     rust_signature,
     suspect_global_reads,
     try_rustc,
 )
+
+NONLEAF_C = """\
+static int helper(int x) {
+  return x * 2;
+}
+
+static int caller(int x) {
+  return helper(x) + 1;
+}
+"""
 
 CC = shutil.which("cc")
 RUSTC = shutil.which("rustc")
@@ -163,6 +174,57 @@ def test_link_back_puts_rust_inside(tmp_path: Path) -> None:
     assert gate["c_definitions_renamed"] == 1
     assert (out_dir / "unit_linked.c").exists()
     assert "abs32__cgir_replaced" in (out_dir / "unit_linked.c").read_text()
+
+
+def test_nonleaf_worklist_and_topo_order(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "unit.c").write_text(NONLEAF_C)
+    idx = tmp_path / "idx"
+    scan_repo(repo, out=idx)
+    leaf_only, _ = c_rust_worklist(idx, repo / "unit.c", include_nonleaf=False)
+    assert "caller" not in {e.name for e in leaf_only}  # non-leaf excluded by default
+    ents, _ = c_rust_worklist(idx, repo / "unit.c", include_nonleaf=True)
+    by = {e.name: e for e in ents}
+    assert "caller" in by and by["caller"].callees == ["helper"]
+    order = [e.name for e in ents]
+    assert order.index("helper") < order.index("caller")  # callees first
+
+
+def test_extern_block_declares_callees() -> None:
+    helper = CEntry("m.helper", "helper", "int", [("int", "x")], "")
+    block = extern_block([helper])
+    assert 'extern "C"' in block and "fn helper(x: i32) -> i32;" in block
+
+
+@pytest.mark.skipif(not (CC and RUSTC), reason="needs cc + rustc")
+def test_nonleaf_differential_calls_into_original_c(tmp_path: Path) -> None:
+    """A rewritten Rust caller is verified while calling the *original C*
+    callee as an extern symbol (resolved via the oracle, RTLD_GLOBAL)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "unit.c").write_text(NONLEAF_C)
+    idx = tmp_path / "idx"
+    scan_repo(repo, out=idx)
+    wd = tmp_path / "wd"
+    wd.mkdir()
+    ents, _ = c_rust_worklist(idx, repo / "unit.c", include_nonleaf=True)
+    by = {e.name: e for e in ents}
+    caller, helper = by["caller"], by["helper"]
+    orig = compile_oracle(repo / "unit.c", [e.name for e in ents], wd, [])
+
+    good = (
+        '#[no_mangle]\npub extern "C" fn caller(x: i32) -> i32 '
+        "{ unsafe { helper(x).wrapping_add(1) } }"
+    )
+    dl, err = try_rustc(extern_block([helper]) + good, wd, "good", allow_undefined=True)
+    assert dl is not None, err
+    assert differential(orig, dl, caller, 300, seed=1) == ""  # calls real C helper
+
+    wrong = '#[no_mangle]\npub extern "C" fn caller(x: i32) -> i32 { x + 1 }'  # skips helper
+    dl2, err2 = try_rustc(extern_block([helper]) + wrong, wd, "wrong", allow_undefined=True)
+    assert dl2 is not None, err2
+    assert "mismatch" in differential(orig, dl2, caller, 300, seed=1)
 
 
 def test_cc_available_sanity() -> None:

@@ -3,11 +3,18 @@ engine (vision-rewrite.md rung 4).
 
 Given a cgir index and a single compilable C translation unit (an
 amalgamation like ``sqlite3.c``, or any one ``.c`` whose worklist symbols it
-defines), regenerate its pure *leaf* functions in Rust and verify each one
-mechanically:
+defines), regenerate its pure functions in Rust and verify each one
+mechanically. Leaf-only by default; with ``include_nonleaf`` it also
+rewrites functions that call other worklist functions, processed
+callees-first — a rewritten Rust caller reaches its callees as ``extern
+"C"`` symbols (the original C during verification via the oracle +
+RTLD_GLOBAL; the rewritten Rust after link-back). This is the one-pass path:
+a whole dependency subgraph rewritten and assembled with all-Rust internal
+calls.
 
-    worklist (pure leaves with scalar / byte-pointer ABI, from the index)
-      -> cheap-model Rust candidate (source + compiler-probed context)
+    worklist (pure functions with scalar / byte-pointer ABI, from the index)
+      -> cheap-model Rust candidate (source + compiler-probed context
+         + extern "C" decls for in-repo callees)
       -> rustc                       (compile filter)
       -> cgir Rust-adapter scan       (cross-language contract: pure + arity)
       -> differential vs the compiled C original
@@ -31,7 +38,7 @@ import json
 import re
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +115,11 @@ class CEntry:
     ret: str
     params: list[tuple[str, str]]
     source: str
+    # in-repo callees also in the worklist — the non-leaf edges. A rewritten
+    # Rust caller reaches them as `extern "C"` symbols: the original C during
+    # verification (the oracle exports every de-static'd worklist symbol), the
+    # rewritten Rust after link-back.
+    callees: list[str] = field(default_factory=list)
 
 
 def _parse_param(q: str) -> tuple[str, str] | None:
@@ -125,13 +137,17 @@ def _parse_param(q: str) -> tuple[str, str] | None:
 
 
 def c_rust_worklist(
-    index_dir: Path, c_source: Path, pointers: bool = False
+    index_dir: Path, c_source: Path, pointers: bool = False, include_nonleaf: bool = False
 ) -> tuple[list[CEntry], list[tuple[str, str]]]:
-    """Pure leaf functions defined in ``c_source`` with a fuzzable ABI.
+    """Pure functions defined in ``c_source`` with a fuzzable ABI.
 
-    Only components whose defining file is ``c_source`` are eligible — their
+    Only components whose defining file is ``c_source`` are eligible (their
     symbols must be in the one compiled translation unit we build as the
-    behavioral oracle."""
+    behavioral oracle). Leaf-only by default; with ``include_nonleaf`` a
+    function is also eligible if *every* in-repo callee is itself in the
+    worklist — so the callee is de-static'd/exported and a rewritten caller
+    can reach it via ``extern "C"``. Entries carry their ``callees`` and are
+    returned callees-first (topological)."""
     graph = json.loads((index_dir / "repo_graph.json").read_text())
     span: dict[str, tuple[str, int, int]] = {}
     for n in graph["nodes"]:
@@ -140,17 +156,18 @@ def c_rust_worklist(
             span[q] = (n["path"], n.get("start_line") or 0, n.get("end_line") or 0)
     src_root = _source_root(c_source, span)
     file_cache: dict[str, list[str]] = {}
-    entries: list[CEntry] = []
+
+    # Pass 1: every ABI-eligible pure function (leaf or not), plus its calls.
+    candidates: dict[str, CEntry] = {}
+    calls_of: dict[str, list[str]] = {}
     excluded: list[tuple[str, str]] = []
     for p in sorted((index_dir / "components").glob("*.json")):
         s = json.loads(p.read_text())
-        if s["kind"] != "pure_function" or s.get("calls") or set(s.get("effects", [])) - {"raise"}:
+        if s["kind"] != "pure_function" or set(s.get("effects", [])) - {"raise"}:
             continue
-        if s["id"] not in span:
+        if s["id"] not in span or Path(span[s["id"]][0]).name != c_source.name:
             continue
         path, st, en = span[s["id"]]
-        if Path(path).name != c_source.name:
-            continue
         if path not in file_cache:
             file_cache[path] = (src_root / path).read_text().splitlines()
         text = "\n".join(file_cache[path][st - 1 : en])
@@ -182,8 +199,50 @@ def c_rust_worklist(
         if ret == "void" and not has_ptr:
             excluded.append((s["id"], "void return: nothing observable to compare"))
             continue
-        entries.append(CEntry(s["id"], name, ret, params, text))
-    return entries, excluded
+        if s.get("calls") and not include_nonleaf:
+            excluded.append((s["id"], "non-leaf (enable with --non-leaf)"))
+            continue
+        candidates[s["id"]] = CEntry(s["id"], name, ret, params, text)
+        calls_of[s["id"]] = list(s.get("calls", []))
+
+    # Pass 2: keep functions whose every in-repo callee is also a candidate;
+    # record callee *names* for extern generation.
+    keep: dict[str, CEntry] = {}
+    for cid, e in candidates.items():
+        callee_ids = [c for c in calls_of[cid] if c in candidates]
+        if len(callee_ids) != len(calls_of[cid]):
+            excluded.append((cid, "calls a non-candidate in-repo function"))
+            continue
+        e.callees = [candidates[c].name for c in callee_ids]
+        keep[cid] = e
+
+    return _toposort(keep), excluded
+
+
+def _toposort(entries: dict[str, CEntry]) -> list[CEntry]:
+    """Callees before callers; ties by id. Cycles fall back to id order."""
+    name_to_id = {e.name: cid for cid, e in entries.items()}
+    order: list[CEntry] = []
+    seen: set[str] = set()
+    temp: set[str] = set()
+
+    def visit(cid: str) -> None:
+        if cid in seen or cid not in entries:
+            return
+        if cid in temp:  # cycle — leave for id-order fallback
+            return
+        temp.add(cid)
+        for callee_name in entries[cid].callees:
+            cbid = name_to_id.get(callee_name)
+            if cbid is not None:
+                visit(cbid)
+        temp.discard(cid)
+        seen.add(cid)
+        order.append(entries[cid])
+
+    for cid in sorted(entries):
+        visit(cid)
+    return order
 
 
 def _source_root(c_source: Path, span: dict[str, tuple[str, int, int]]) -> Path:
@@ -355,7 +414,22 @@ def rust_signature(e: CEntry) -> str:
     return f'#[no_mangle]\npub extern "C" fn {e.name}({args}){ret}'
 
 
-def build_c_rust_prompt(e: CEntry, context: str = "") -> str:
+def extern_block(callees: list[CEntry]) -> str:
+    """`extern "C"` declarations so a rewritten caller can call its in-repo
+    callees by their C symbol (resolved to the original C during verification,
+    the rewritten Rust after link-back)."""
+    if not callees:
+        return ""
+    lines = ['extern "C" {']
+    for c in callees:
+        args = ", ".join(f"{n}: {_rust_type(t)}" for t, n in c.params)
+        ret = "" if c.ret == "void" else f" -> {TYPE_MAP[c.ret][0]}"
+        lines.append(f"    fn {c.name}({args}){ret};")
+    lines.append("}")
+    return "\n".join(lines) + "\n\n"
+
+
+def build_c_rust_prompt(e: CEntry, context: str = "", callees: list[CEntry] | None = None) -> str:
     ctx = f"\n{context}\n" if context else ""
     ptr_rule = ""
     if any(t.startswith("ptr:") for t, _ in e.params):
@@ -365,6 +439,15 @@ def build_c_rust_prompt(e: CEntry, context: str = "") -> str:
             "explicit bounds — read/write exactly the bytes the C reads/writes, never "
             "past them, and handle a null or zero-length buffer without dereferencing. "
             "A `char*` is a NUL-terminated C string."
+        )
+    callee_rule = ""
+    if callees:
+        sigs = "\n".join(f"  {c.name}({', '.join(t for t, _ in c.params)})" for c in callees)
+        callee_rule = (
+            f"\n- This function calls other functions that are ALREADY available "
+            f'via C FFI (declared for you in an `extern "C"` block above your '
+            f"function — do not redeclare them): \n{sigs}\n  Call them exactly as the "
+            f"C does, inside `unsafe {{ ... }}`. Do NOT reimplement them."
         )
     return f"""Translate this C function into Rust.
 
@@ -386,28 +469,36 @@ Rules:
   could overflow (use wrapping_add/wrapping_mul/wrapping_shl etc.), C
   integer-division/shift behavior, and identical branch conditions.
 - The function must never panic for ANY input (no unwrap, no plain arithmetic
-  that can overflow-panic, no divide-by-zero path C does not have).{ptr_rule}
+  that can overflow-panic, no divide-by-zero path C does not have).{ptr_rule}{callee_rule}
 - If the C references macros or globals you cannot see, translate the visible
   logic faithfully anyway."""
 
 
-def try_rustc(candidate: str, workdir: Path, tag: str) -> tuple[Path | None, str]:
+def try_rustc(
+    candidate: str, workdir: Path, tag: str, allow_undefined: bool = False
+) -> tuple[Path | None, str]:
     rs = workdir / f"cand_{tag}.rs"
     rs.write_text(candidate + "\n")
     out = workdir / f"cand_{tag}.dylib"
-    proc = subprocess.run(
-        ["rustc", "--crate-type=cdylib", "-O", "-o", str(out), str(rs)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    cmd = ["rustc", "--crate-type=cdylib", "-O", "-o", str(out), str(rs)]
+    if allow_undefined:
+        # non-leaf candidates reference callees resolved at load time
+        import sys
+
+        if sys.platform == "darwin":
+            cmd += ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
+        else:
+            cmd += ["-C", "link-arg=-Wl,--allow-shlib-undefined"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if proc.returncode != 0:
         return None, "\n".join(proc.stderr.splitlines()[:25])
     return out, ""
 
 
-def contract_check(candidate: str, e: CEntry) -> str:
-    """Scan the candidate with cgir's Rust adapter: pure + arity must hold."""
+def contract_check(candidate: str, e: CEntry, check_purity: bool = True) -> str:
+    """Scan the candidate with cgir's Rust adapter: arity must hold, and purity
+    unless ``check_purity`` is off (non-leaf callers call known-pure callees
+    the adapter can't see through, so the differential judges them)."""
     from cgir.analyses.effects import classify
     from cgir.analyses.symbols import build_symbol_tables
     from cgir.sources import TreeSitterSource
@@ -429,7 +520,7 @@ def contract_check(candidate: str, e: CEntry) -> str:
         if node is None:
             return f"contract: function `{e.name}` not found in candidate"
         tags = set(effects.get(node.id, {})) - {"raise"}
-        if tags:
+        if check_purity and tags:
             return f"contract: candidate is not pure — effects {sorted(tags)}"
         sig = str(node.attrs.get("signature") or "")
         inner = sig.split("(", 1)[1].rsplit(")", 1)[0] if "(" in sig else ""
@@ -583,7 +674,9 @@ int main(int argc, char** argv) {{
     if (argc < 5) return 2;
     long n = atol(argv[3]);
     S = strtoull(argv[4], 0, 10);
-    void* ho = dlopen(argv[1], RTLD_NOW);
+    /* GLOBAL so the oracle's de-static'd symbols satisfy a non-leaf
+       candidate's extern callees, resolving them to the original C. */
+    void* ho = dlopen(argv[1], RTLD_NOW | RTLD_GLOBAL);
     void* hc = dlopen(argv[2], RTLD_NOW);
     if (!ho || !hc) {{ printf("{{\\"status\\":\\"dlopen_fail\\"}}\\n"); return 0; }}
     fn_t fo = (fn_t)dlsym(ho, "{e.name}");
@@ -726,9 +819,11 @@ def suspect_global_reads(e: CEntry) -> set[str]:
     return accessed - params - locals_ - _C_KEYWORDS - {e.name}
 
 
-def _build_rust_staticlib(winners: dict[str, str], workdir: Path) -> Path:
+def _build_rust_staticlib(winners: dict[str, str], workdir: Path, extern_decls: str = "") -> Path:
     lib_rs = workdir / "cgir_rewrites.rs"
-    lib_rs.write_text("\n\n".join(winners[n] for n in sorted(winners)) + "\n")
+    # extern_decls declares any callee that stayed C so a rewritten caller
+    # links against it; winner-to-winner calls resolve as crate functions.
+    lib_rs.write_text(extern_decls + "\n\n".join(winners[n] for n in sorted(winners)) + "\n")
     out = workdir / "libcgir_rewrites.a"
     subprocess.run(
         ["rustc", "--crate-type=staticlib", "-O", "-o", str(out), str(lib_rs)],
@@ -740,12 +835,22 @@ def _build_rust_staticlib(winners: dict[str, str], workdir: Path) -> Path:
     return out
 
 
-def _patch_source(c_source: Path, names: list[str], workdir: Path) -> Path:
+def _patch_source(
+    c_source: Path, names: list[str], workdir: Path, also_export: set[str] | None = None
+) -> Path:
     """Rename each replaced C definition to ``<name>__cgir_replaced`` (with an
     extern prototype, since plain-static functions have no separate
     declaration) and de-static it, so every call site resolves ``<name>`` to
-    the Rust symbol at link time."""
+    the Rust symbol at link time. ``also_export`` names are de-static'd but
+    *not* renamed — callees that stayed C which a rewritten Rust caller must
+    still reach."""
     text = c_source.read_text()
+    for name in also_export or set():
+        text = re.sub(
+            rf"\bstatic\s+((?:SQLITE_NOINLINE\s+)?(?:const\s+)?{SCALAR_RE}\s+{name}\s*\()",
+            r"\1",
+            text,
+        )
     for name in names:
         text = re.sub(
             rf"\bstatic\s+((?:SQLITE_NOINLINE\s+)?(?:const\s+)?{SCALAR_RE}\s+{name}\s*\()",
@@ -774,19 +879,36 @@ def link_back(
     winners: dict[str, str],
     out_dir: Path,
     flags: list[str],
+    entries: list[CEntry] | None = None,
 ) -> dict[str, Any]:
     """Assemble ``c_source`` with the winning Rust functions linked in place
     of their C originals. Emits the patched C and the Rust staticlib to
     ``out_dir`` and links a shared library to prove it builds and that the
     symbols resolve to Rust (``nm``). Behavioral equivalence per function was
-    already established by the differential."""
+    already established by the differential.
+
+    With ``entries`` (the worklist), a rewritten caller whose callee stayed C
+    still links: those callees are declared ``extern "C"`` in the staticlib
+    and de-static'd (not renamed) in the patched source."""
     import shutil
 
     out_dir.mkdir(parents=True, exist_ok=True)
     workdir = Path(tempfile.mkdtemp(prefix="cgir-linkback-"))
     names = sorted(winners)
-    staticlib = _build_rust_staticlib(winners, workdir)
-    patched = _patch_source(c_source, names, workdir)
+    # callees of winners that were NOT themselves rewritten -> stay C, but
+    # must be reachable (extern-declared in Rust, de-static'd in C).
+    still_c: set[str] = set()
+    if entries is not None:
+        by_name = {e.name: e for e in entries}
+        for w in names:
+            for callee in by_name.get(w, CEntry("", "", "", [], "")).callees:
+                if callee not in winners and callee in by_name:
+                    still_c.add(callee)
+        extern = extern_block([by_name[c] for c in sorted(still_c)])
+    else:
+        extern = ""
+    staticlib = _build_rust_staticlib(winners, workdir, extern)
+    patched = _patch_source(c_source, names, workdir, also_export=still_c)
     shared = out_dir / (c_source.stem + "_rust_inside.dylib")
     # Force the whole Rust archive in even when this TU doesn't itself call
     # the symbol (a linking executable will), so each rewrite is present and
@@ -829,33 +951,51 @@ def run_c_rust(
     k: int = 3,
     n_trials: int = 300,
     pointers: bool = False,
+    include_nonleaf: bool = False,
     budget_usd: float | None = None,
     ledger_path: Path | None = None,
     log: Any = lambda _: None,
 ) -> dict[str, Any]:
-    """Regenerate ``c_source``'s pure leaves in Rust, verified end to end.
-    Rides :func:`cgir.rewrite.run_search_loop`."""
+    """Regenerate ``c_source``'s pure functions in Rust, verified end to end.
+    With ``include_nonleaf`` the worklist covers functions that call other
+    worklist functions, processed callees-first; a rewritten caller reaches
+    its callees as ``extern "C"`` symbols. Rides
+    :func:`cgir.rewrite.run_search_loop`."""
     flags = c_flags or []
     workdir = Path(tempfile.mkdtemp(prefix="cgir-crust-"))
-    entries, excluded = c_rust_worklist(index_dir, c_source, pointers)
+    entries, excluded = c_rust_worklist(index_dir, c_source, pointers, include_nonleaf)
     orig = compile_oracle(c_source, [e.name for e in entries], workdir, flags)
     have = exported_symbols(orig, [e.name for e in entries])
     for e in entries:
         if e.name not in have:
             excluded.append((e.component_id, "original symbol not exported (platform/#ifdef)"))
     entries = [e for e in entries if e.name in have]
+    by_name = {e.name: e for e in entries}
     probe = probe_context(c_source, entries, workdir, flags)
     counter = {"n": 0}
 
+    def _callees(e: CEntry) -> list[CEntry]:
+        return [by_name[c] for c in e.callees if c in by_name]
+
     def make_prompt(e: CEntry) -> str:
-        return build_c_rust_prompt(e, probe.get(e.component_id, ""))
+        return build_c_rust_prompt(e, probe.get(e.component_id, ""), _callees(e))
 
     def evaluate(e: CEntry, cand: str) -> tuple[str, str, dict[str, Any]]:
         counter["n"] += 1
-        dylib, err = try_rustc(cand, workdir, f"{e.name}_{counter['n']}")
+        callees = _callees(e)
+        # Prepend extern "C" decls so the candidate's calls resolve; they bind
+        # to the original C at verify time (oracle, RTLD_GLOBAL) and the
+        # rewritten Rust after link-back.
+        source = extern_block(callees) + cand
+        dylib, err = try_rustc(
+            source, workdir, f"{e.name}_{counter['n']}", allow_undefined=bool(callees)
+        )
         if dylib is None:
             return "rustc", err, {}
-        err = contract_check(cand, e)
+        # Arity always checked; purity only for leaves — a non-leaf's calls to
+        # known-pure callees would look impure to the adapter, and the
+        # differential is the real behavioral judge either way.
+        err = contract_check(cand, e, check_purity=not callees)
         if err:
             return "contract", err, {}
         err = differential(orig, dylib, e, n_trials, seed=42)

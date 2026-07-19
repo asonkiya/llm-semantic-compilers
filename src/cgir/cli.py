@@ -918,6 +918,14 @@ def rewrite_cmd(
     pointers: Annotated[
         bool, typer.Option("--pointers", help="c-rust: include char*/byte-buffer pointer ABIs.")
     ] = False,
+    non_leaf: Annotated[
+        bool,
+        typer.Option(
+            "--non-leaf",
+            help="c-rust: also rewrite functions that call other worklist functions "
+            "(dependency-ordered; a Rust caller reaches its callees via extern C).",
+        ),
+    ] = False,
     out: Annotated[
         Path | None, typer.Option("--out", help="c-rust: write the full results JSON here.")
     ] = None,
@@ -993,6 +1001,7 @@ def rewrite_cmd(
             apply,
             link_out,
             force_link,
+            non_leaf,
         )
         return
     if lang != "python":
@@ -1094,6 +1103,7 @@ def _rewrite_c_rust(
     apply: bool = False,
     link_out: Path | None = None,
     force_link: bool = False,
+    non_leaf: bool = False,
 ) -> None:
     import shutil
 
@@ -1110,11 +1120,13 @@ def _rewrite_c_rust(
     if not c_source.exists():
         raise typer.BadParameter(f"No such C source: {c_source}")
     if not live:
-        entries, _ = c_rust_worklist(index_dir, c_source, pointers)
-        typer.echo(f"dry run: {len(entries)} C leaf function(s) in {c_source.name} regenerable")
+        entries, _ = c_rust_worklist(index_dir, c_source, pointers, non_leaf)
+        kind = "function(s)" if non_leaf else "leaf function(s)"
+        typer.echo(f"dry run: {len(entries)} C {kind} in {c_source.name} regenerable")
         for e in sorted(entries, key=lambda e: e.component_id):
             ptr = " [ptr]" if any(t.startswith("ptr:") for t, _ in e.params) else ""
-            typer.echo(f"  {e.component_id}{ptr}")
+            deps = f" -> {e.callees}" if e.callees else ""
+            typer.echo(f"  {e.component_id}{ptr}{deps}")
         typer.echo(
             f"~{len(entries) * k} cheap calls + escalations, verified by differential vs the "
             "compiled C. Rerun with --live (requires cgir[llm], ANTHROPIC_API_KEY, cc + rustc)."
@@ -1135,6 +1147,7 @@ def _rewrite_c_rust(
         k=k,
         n_trials=n_trials,
         pointers=pointers,
+        include_nonleaf=non_leaf,
         budget_usd=budget_usd,
         ledger_path=ledger,
         log=typer.echo,
@@ -1151,7 +1164,8 @@ def _rewrite_c_rust(
     if not apply:
         return
     # Link the Rust in place of the C originals: the "C with Rust inside" step.
-    by_id = {e.component_id: e for e in c_rust_worklist(index_dir, c_source, pointers)[0]}
+    worklist = c_rust_worklist(index_dir, c_source, pointers, non_leaf)[0]
+    by_id = {e.component_id: e for e in worklist}
     winners: dict[str, str] = {}
     skipped: list[str] = []
     for o in report["outcomes"]:
@@ -1173,7 +1187,7 @@ def _rewrite_c_rust(
         typer.echo("nothing safe to link.")
         return
     dest = link_out or (out.parent / "cgir-link" if out else Path("cgir-link"))
-    gate = link_back(c_source, winners, dest, c_flags)
+    gate = link_back(c_source, winners, dest, c_flags, entries=worklist)
     if not gate["linked"]:
         typer.echo(f"link FAILED:\n{gate['error']}")
         raise typer.Exit(code=1)
