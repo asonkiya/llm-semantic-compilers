@@ -18,7 +18,9 @@ from cgir.rewrite_c_rust import (
     c_rust_worklist,
     compile_oracle,
     differential,
+    link_back,
     rust_signature,
+    suspect_global_reads,
     try_rustc,
 )
 
@@ -131,6 +133,36 @@ def test_pointer_differential_catches_wrong_strlen(tmp_path: Path) -> None:
     dl, err = try_rustc(good, wd, "s")
     assert dl is not None, err
     assert differential(orig, dl, e, 500, seed=1) == ""
+
+
+def test_suspect_global_reads_flags_struct_globals() -> None:
+    reads_global = CEntry(
+        "m.f", "f", "int", [("int", "x")], "static int f(int x){ return x + mem0.cap; }"
+    )
+    assert "mem0" in suspect_global_reads(reads_global)
+    pure = CEntry("m.g", "g", "int", [("int", "x")], "static int g(int x){ return x*2; }")
+    assert suspect_global_reads(pure) == set()
+
+
+@pytest.mark.skipif(not (CC and RUSTC and shutil.which("nm")), reason="needs cc + rustc + nm")
+def test_link_back_puts_rust_inside(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    src = repo / "unit.c"
+    src.write_text(SAMPLE_C)
+    winners = {
+        "abs32": (
+            '#[no_mangle]\npub extern "C" fn abs32(x: i32) -> i32 '
+            "{ if x < 0 { x.wrapping_neg() } else { x } }"
+        )
+    }
+    out_dir = tmp_path / "link"
+    gate = link_back(src, winners, out_dir, [])
+    assert gate["linked"] is True
+    assert gate["symbols_from_rust"] == 1
+    assert gate["c_definitions_renamed"] == 1
+    assert (out_dir / "unit_linked.c").exists()
+    assert "abs32__cgir_replaced" in (out_dir / "unit_linked.c").read_text()
 
 
 def test_cc_available_sanity() -> None:

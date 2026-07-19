@@ -664,6 +664,167 @@ def differential(orig: Path, cand: Path, e: CEntry, n: int, seed: int) -> str:
     return ""
 
 
+_C_KEYWORDS = frozenset(
+    [
+        "if",
+        "else",
+        "for",
+        "while",
+        "do",
+        "switch",
+        "case",
+        "default",
+        "break",
+        "continue",
+        "return",
+        "goto",
+        "sizeof",
+        "int",
+        "unsigned",
+        "signed",
+        "char",
+        "short",
+        "long",
+        "double",
+        "float",
+        "void",
+        "const",
+        "static",
+        "struct",
+        "union",
+        "enum",
+        "typedef",
+        "volatile",
+        "register",
+        "extern",
+        "inline",
+        "NULL",
+    ]
+)
+
+
+def suspect_global_reads(e: CEntry) -> set[str]:
+    """Heuristic: lowercase identifiers read through ``.``/``->``/``[``/``&``
+    that aren't params or locals — the signature of a file-scope global read
+    (e.g. ``mem0.nearlyFull``). Such functions are behaviorally equivalent
+    only in the state the differential happened to see, so ``--apply``
+    excludes them unless ``--force-link``. This is the rung-4-audit
+    HeapNearlyFull class, caught statically."""
+    params = {n for _, n in e.params}
+    # Match a run of type/qualifier tokens then the declared name — so a
+    # `static const unsigned char x[]` local table binds `x`, not `char`.
+    locals_ = set(
+        re.findall(
+            r"\b(?:(?:const|static|volatile|unsigned|signed|struct|union|enum|int|char|short|"
+            r"long|double|float|void|u8|u16|u32|u64|i8|i16|i32|i64|LogEst|tRowcnt|Bool)\s+)+"
+            r"\*?\s*(\w+)",
+            e.source,
+        )
+    )
+    accessed = set(re.findall(r"\b([a-z]\w*)\s*(?:\.|->|\[)", e.source))
+    accessed |= set(re.findall(r"&\s*([a-z]\w*)\b", e.source))
+    return accessed - params - locals_ - _C_KEYWORDS - {e.name}
+
+
+def _build_rust_staticlib(winners: dict[str, str], workdir: Path) -> Path:
+    lib_rs = workdir / "cgir_rewrites.rs"
+    lib_rs.write_text("\n\n".join(winners[n] for n in sorted(winners)) + "\n")
+    out = workdir / "libcgir_rewrites.a"
+    subprocess.run(
+        ["rustc", "--crate-type=staticlib", "-O", "-o", str(out), str(lib_rs)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    return out
+
+
+def _patch_source(c_source: Path, names: list[str], workdir: Path) -> Path:
+    """Rename each replaced C definition to ``<name>__cgir_replaced`` (with an
+    extern prototype, since plain-static functions have no separate
+    declaration) and de-static it, so every call site resolves ``<name>`` to
+    the Rust symbol at link time."""
+    text = c_source.read_text()
+    for name in names:
+        text = re.sub(
+            rf"\bstatic\s+((?:SQLITE_NOINLINE\s+)?(?:const\s+)?{SCALAR_RE}\s+{name}\s*\()",
+            r"\1",
+            text,
+        )
+        pattern = re.compile(
+            rf"\b((?:SQLITE_PRIVATE\s+|SQLITE_API\s+|SQLITE_NOINLINE\s+)*)"
+            rf"({SCALAR_RE})\s+{name}\s*(\([^)]*\))(\s*\{{)"
+        )
+
+        def _rename(m: re.Match[str], _name: str = name) -> str:
+            proto = f"{m.group(2)} {_name}{m.group(3)};\n"
+            return f"{proto}{m.group(1)}{m.group(2)} {_name}__cgir_replaced{m.group(3)}{m.group(4)}"
+
+        text, n_defs = pattern.subn(_rename, text)
+        if n_defs != 1:
+            raise ValueError(f"{name}: expected exactly 1 definition, patched {n_defs}")
+    patched = workdir / (c_source.stem + "_linked.c")
+    patched.write_text(text)
+    return patched
+
+
+def link_back(
+    c_source: Path,
+    winners: dict[str, str],
+    out_dir: Path,
+    flags: list[str],
+) -> dict[str, Any]:
+    """Assemble ``c_source`` with the winning Rust functions linked in place
+    of their C originals. Emits the patched C and the Rust staticlib to
+    ``out_dir`` and links a shared library to prove it builds and that the
+    symbols resolve to Rust (``nm``). Behavioral equivalence per function was
+    already established by the differential."""
+    import shutil
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix="cgir-linkback-"))
+    names = sorted(winners)
+    staticlib = _build_rust_staticlib(winners, workdir)
+    patched = _patch_source(c_source, names, workdir)
+    shared = out_dir / (c_source.stem + "_rust_inside.dylib")
+    # force_load pulls in every Rust object even when this TU doesn't itself
+    # call the symbol (a linking executable will), so each rewrite is present
+    # and nm-verifiable.
+    proc = subprocess.run(
+        [
+            "cc",
+            "-O1",
+            "-w",
+            "-shared",
+            "-fPIC",
+            *flags,
+            str(patched),
+            f"-Wl,-force_load,{staticlib}",
+            "-o",
+            str(shared),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    result: dict[str, Any] = {"functions": names, "linked": proc.returncode == 0}
+    if proc.returncode != 0:
+        result["error"] = proc.stderr[-2000:]
+        return result
+    nm = subprocess.run(["nm", str(shared)], capture_output=True, text=True).stdout
+    result["symbols_from_rust"] = sum(1 for n in names if re.search(rf"\bT _?{n}\b", nm))
+    result["c_definitions_renamed"] = sum(1 for n in names if f"{n}__cgir_replaced" in nm)
+    dst_c = out_dir / patched.name
+    dst_a = out_dir / staticlib.name
+    shutil.copy(patched, dst_c)
+    shutil.copy(staticlib, dst_a)
+    result["patched_source"] = str(dst_c)
+    result["staticlib"] = str(dst_a)
+    result["shared_lib"] = str(shared)
+    return result
+
+
 def run_c_rust(
     index_dir: Path,
     c_source: Path,

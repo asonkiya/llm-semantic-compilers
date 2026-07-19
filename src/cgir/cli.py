@@ -934,7 +934,19 @@ def rewrite_cmd(
     ] = None,
     apply: Annotated[
         bool,
-        typer.Option("--apply", help="Splice winners into the working tree + final gate."),
+        typer.Option(
+            "--apply",
+            help="python: splice winners into the tree + final gate. "
+            "c-rust: link the Rust in place of the C originals (--link-out).",
+        ),
+    ] = False,
+    link_out: Annotated[
+        Path | None,
+        typer.Option("--link-out", help="c-rust --apply: dir for the patched C + Rust staticlib."),
+    ] = None,
+    force_link: Annotated[
+        bool,
+        typer.Option("--force-link", help="c-rust --apply: link even functions that read globals."),
     ] = False,
     no_tests: Annotated[
         bool,
@@ -970,6 +982,9 @@ def rewrite_cmd(
             live,
             budget_usd,
             ledger,
+            apply,
+            link_out,
+            force_link,
         )
         return
     if lang != "python":
@@ -1037,11 +1052,19 @@ def _rewrite_c_rust(
     live: bool,
     budget_usd: float | None,
     ledger: Path | None,
+    apply: bool = False,
+    link_out: Path | None = None,
+    force_link: bool = False,
 ) -> None:
     import shutil
 
     from cgir.rewrite import anthropic_sampler
-    from cgir.rewrite_c_rust import c_rust_worklist, run_c_rust
+    from cgir.rewrite_c_rust import (
+        c_rust_worklist,
+        link_back,
+        run_c_rust,
+        suspect_global_reads,
+    )
 
     if c_source is None:
         raise typer.BadParameter("--lang c-rust needs --c-source <amalgamation.c>")
@@ -1085,6 +1108,42 @@ def _rewrite_c_rust(
         f"(unsolved {totals['unsolved']}) for ${totals['cost_usd']}; "
         f"stage kills: {report['stage_kills']}"
     )
+
+    if not apply:
+        return
+    # Link the Rust in place of the C originals: the "C with Rust inside" step.
+    by_id = {e.component_id: e for e in c_rust_worklist(index_dir, c_source, pointers)[0]}
+    winners: dict[str, str] = {}
+    skipped: list[str] = []
+    for o in report["outcomes"]:
+        if o["status"] != "solved":
+            continue
+        entry = by_id.get(o["component_id"])
+        if entry is None:
+            continue
+        globals_read = suspect_global_reads(entry)
+        if globals_read and not force_link:
+            skipped.append(f"{entry.name} (reads {sorted(globals_read)})")
+            continue
+        winners[entry.name] = next(a["candidate"] for a in o["attempts"] if a["stage"] == "ok")
+    if skipped:
+        typer.echo(
+            f"skipped {len(skipped)} state-reading function(s) (use --force-link): {skipped}"
+        )
+    if not winners:
+        typer.echo("nothing safe to link.")
+        return
+    dest = link_out or (out.parent / "cgir-link" if out else Path("cgir-link"))
+    gate = link_back(c_source, winners, dest, c_flags)
+    if not gate["linked"]:
+        typer.echo(f"link FAILED:\n{gate['error']}")
+        raise typer.Exit(code=1)
+    typer.echo(
+        f"linked {len(gate['functions'])} Rust function(s) into {c_source.name}: "
+        f"{gate['symbols_from_rust']} symbols provided by Rust, "
+        f"{gate['c_definitions_renamed']} C definitions sidelined."
+    )
+    typer.echo(f"artifacts in {dest}/ (patched C, Rust staticlib, linked shared lib)")
 
 
 @app.command(name="regenerate")
