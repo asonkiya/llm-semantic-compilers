@@ -552,3 +552,51 @@ few candidate-quality rustc failures (duplicate-name, snake_case-deny).
 
 Scalars + pointers together, ~80 of SQLite's 400 pure leaves (20%) are
 now addressable end to end; struct-pointer ABIs are the frontier beyond.
+
+## Rung 4++++ : the at-scale non-leaf sweep — SQLite's pure subgraph in one pass
+
+The founding vision, exercised at scale (2026-07-19). `cgir rewrite --lang
+c-rust --non-leaf --pointers --apply` over SQLite's pure-function subgraph:
+rewrite each to Rust, verify by differential vs the compiled original, and
+link the winners back in — including functions that call other rewritten
+functions.
+
+**Sweep: 116/147 solved (79%) for $1.17**, k=3 Haiku + Sonnet escalation.
+**25 of the 36 in-scope non-leaf functions** rewritten — notably the whole
+FTS Porter-stemmer cluster (`fts5Porter_Vowel`, `fts5Porter_Ostar`,
+`doubleConsonant`, `hasVowel`, `m_gt_0` …), a genuine connected subgraph.
+
+**Assembled proof: 92 Rust functions link into a real sqlite3 that passes a
+byte-identical SQL battery** (recursive CTEs, LIKE, CAST edges, ORDER BY
+planning, FTS5 `MATCH`, FTS3 `MATCH 'stem*'` which drives the Porter stemmer,
+`PRAGMA integrity_check`). Of those, **19 are non-leaf — Rust calling Rust
+inside SQLite** (e.g. `fts5Porter_Ostar -> fts5PorterIsVowel`,
+`sqlite3_stricmp -> sqlite3StrICmp`, `estLog -> sqlite3LogEst`), each verified
+against the original C and correct as an assembled whole.
+`benchmarks/rung4_nonleaf_battery.py` builds both shells and diffs them.
+
+### The honest finding: per-function verification ≠ whole-program correctness
+
+Linking all 104 non-state-reading winners *crashed* SQLite. Bisection +
+category analysis pinned it on ~12 engine-internal functions —
+`sqlite3MemSize` and the allocation/btree/pager metadata readers. These pass
+the differential: it feeds the C original and the Rust candidate *identical*
+random buffers, so both read the same garbage from the (absent) allocation
+header and agree — but in a live engine a wrong `sqlite3MemSize` corrupts
+malloc tracking and segfaults. Their contract depends on hidden state (the
+size word *before* the pointer) that random-input fuzzing cannot model.
+
+This is the rung-5 lesson, now measured at scale: **the differential is
+necessary but not sufficient. Whole-program assembly + a behavioral battery
+(or, better, capture/replay of real allocations) is the actual gate**, and
+memory-introspection functions should be excluded until it exists. Excluding
+that class, the remaining 92 assemble cleanly and pass. A robustness fix
+landed alongside: `_patch_source` now handles symbols with several
+`#ifdef`-guarded definitions (SQLite's allocator variants) instead of
+asserting exactly one.
+
+**Takeaway:** cheap models rewrote a connected chunk of a 150k-LOC C engine
+to Rust in one pass — 92 functions, 19 of them calling each other in Rust —
+and a real SQLite built from them is behaviorally indistinguishable. The
+sweep also drew a precise line around where per-function verification stops
+being enough.

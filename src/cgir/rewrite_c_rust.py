@@ -862,13 +862,25 @@ def _patch_source(
             rf"({SCALAR_RE})\s+{name}\s*(\([^)]*\))(\s*\{{)"
         )
 
-        def _rename(m: re.Match[str], _name: str = name) -> str:
+        # A symbol can have several textual definitions behind mutually
+        # exclusive #ifdefs (e.g. sqlite3MemInit's allocator variants). Rename
+        # each to a unique sideline so whichever branch compiles no longer
+        # exports `name`; the emitted prototype (identical across variants)
+        # keeps call sites resolving `name` to the Rust symbol.
+        counter = {"n": 0}
+
+        def _rename(m: re.Match[str], _name: str = name, _c: dict[str, int] = counter) -> str:
+            _c["n"] += 1
+            suffix = "" if _c["n"] == 1 else f"_{_c['n']}"
             proto = f"{m.group(2)} {_name}{m.group(3)};\n"
-            return f"{proto}{m.group(1)}{m.group(2)} {_name}__cgir_replaced{m.group(3)}{m.group(4)}"
+            return (
+                f"{proto}{m.group(1)}{m.group(2)} "
+                f"{_name}__cgir_replaced{suffix}{m.group(3)}{m.group(4)}"
+            )
 
         text, n_defs = pattern.subn(_rename, text)
-        if n_defs != 1:
-            raise ValueError(f"{name}: expected exactly 1 definition, patched {n_defs}")
+        if n_defs < 1:
+            raise ValueError(f"{name}: no definition found to replace")
     patched = workdir / (c_source.stem + "_linked.c")
     patched.write_text(text)
     return patched
