@@ -218,6 +218,7 @@ def _iter_top_level(node: TSNode) -> Iterator[TSNode]:
         else:
             yield child
 
+
 _RAISE_HIGH: frozenset[str] = frozenset(
     {
         "abort",
