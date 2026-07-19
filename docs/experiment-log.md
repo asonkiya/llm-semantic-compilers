@@ -413,3 +413,41 @@ escalate with evidence. Failures are not noise: they map one-to-one onto
 the vision doc's stated ceilings (the preprocessor, invisible sizeof,
 generated tables), which means the next unlock is *context enrichment*
 (macro expansion + sizeof provisioning in the pack), not better models.
+
+### Rung 4 post-run audit (2026-07-19, user-prompted)
+
+Four suspicions checked; one solve demoted, the rest strengthened.
+
+1. **Harsher differential: 0/26 winners flipped.** All winners re-verified
+   at n=2000 with NaN/±Inf/just-past-i64-max doubles added to the edge
+   set (the original run tested no NaN — `sqlite3RealToI64` and
+   `sqlite3IntFloatCompare` turn out genuinely correct on those edges).
+   `--recheck` is now a harness mode: re-verifies stored winners against
+   the current differential, no API cost.
+2. **One vacuous solve, demoted: `sqlite3HeapNearlyFull`.** It reads
+   global state (`AtomicLoad(&mem0.nearlyFull)`) that the harness never
+   mutates, so *no* trial count can falsify a constant-returning Rust.
+   The upstream cause is cgir's C purity ceiling (global read missed —
+   the documented aliasing limit) — here it produced an untestable
+   "equivalence". Headline correction: **25 substantive + 1 vacuous of
+   34 (73.5% substantive)**. Related but legit: `sqlite3_threadsafe`,
+   `sqlite3_keyword_count`, `sqlite3_libversion_number`,
+   `sqlite3_release_memory` are constant-under-config — real
+   equivalences, just trivial ones (4 of the 25).
+3. **Zero-arg theater fixed.** A no-argument function has one observable
+   point; the worker now runs 1 trial for those instead of 300 identical
+   calls dressed up as coverage.
+4. **Silent drops now recorded.** The worklist builder was skipping
+   sqlite3.c pure leaves with pointer/array ABIs or unparseable
+   declarations without a trace. Full accounting: **400 pure leaf
+   functions → 258 pointer/array ABI, 60 not scalar-parseable, 45
+   shell.c statics, 2 void → 35 scalar candidates → 34 callable.** The
+   scalar worklist is the easy 8.5% of SQLite's pure leaves; the pointer
+   mass is where rung 4's next phase lives.
+
+Also noted: the escalation-extracts-constants mechanism (celebrated
+above) is double-edged — it is *overfitting to the oracle*, which is
+correct exactly when the function is a true constant and dangerous for
+state-dependent functions like `HeapNearlyFull`. An orchestrator should
+gate constant-hardcoding escalations on the function being genuinely
+closed over visible inputs.

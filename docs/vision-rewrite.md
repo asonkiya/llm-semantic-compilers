@@ -75,12 +75,15 @@ useful — and it funds the credibility of the flagship.
 4. **Cross-language regeneration (C → Rust)** *(✅ first artifact landed
    — experiment-log "Rung 4")*. SQLite scalar-ABI pure leaves, Haiku →
    rustc → cgir Rust-adapter contract scan → differential vs the real
-   compiled SQLite: **26/34 (76.5%) verified equivalent at ~$0.0066 per
-   solved component**; REGENERATED_AS recorded in the results. All 8
-   misses caught deterministically and map onto the stated ceilings
-   (invisible sizeof/macros/tables, one i16-saturation edge case found
-   at input 1-in-300). Next unlock: macro/sizeof context enrichment in
-   the pack, then pointer/struct ABIs.
+   compiled SQLite: **25 substantive + 1 vacuous of 34 (73.5%) at
+   ~$0.0066 per solved component** (post-audit numbers: winners held at
+   n=2000 with NaN/Inf edges; one solve demoted — HeapNearlyFull reads
+   global state the harness can't falsify, a C-purity-ceiling artifact).
+   REGENERATED_AS recorded in the results. All 8 misses caught
+   deterministically and map onto the stated ceilings. Scalars are the
+   easy 8.5% of SQLite's 400 pure leaves — 258 are pointer/array ABIs.
+   Next unlock: macro/sizeof context enrichment, then pointer/struct
+   marshaling.
 5. **Differential harness** — contract equivalence ≠ behavioral
    equivalence. Capture/replay at the component boundary: record real
    inputs/outputs of the old implementation, replay against the new one.

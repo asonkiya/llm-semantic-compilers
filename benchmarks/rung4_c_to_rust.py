@@ -152,9 +152,11 @@ def build_worklist(index: Path, src: Path) -> tuple[list[Entry], list[tuple[str,
         header = re.sub(r"\s+", " ", text.split("{")[0]) + "{"
         m = DECL.match(header)
         if not m:
+            excluded.append((s["id"], "declaration not scalar-parseable"))
             continue
         ret, name, raw = m.group(1), m.group(2), m.group(3).strip()
         if "*" in raw or "[" in raw or "..." in raw:
+            excluded.append((s["id"], "non-scalar parameters (pointer/array/vararg ABI)"))
             continue
         if ret == "void":
             excluded.append((s["id"], "void return: nothing observable to compare"))
@@ -169,6 +171,7 @@ def build_worklist(index: Path, src: Path) -> tuple[list[Entry], list[tuple[str,
                     break
                 params.append((pm.group(1), pm.group(2)))
         if not ok:
+            excluded.append((s["id"], "non-scalar parameters (pointer/array/vararg ABI)"))
             continue
         entries.append(Entry(s["id"], name, ret, params, text, en - st + 1))
     return entries, excluded
@@ -358,8 +361,21 @@ def diff_worker() -> None:
         "c_ubyte": [0, 1, 255],
         "c_longlong": [0, 1, -1, 2**63 - 1, -(2**63)],
         "c_ulonglong": [0, 1, 2**64 - 1],
-        "c_double": [0.0, -0.0, 1.0, -1.0, 1e308, -1e308, 1e-308],
-        "c_float": [0.0, 1.0, -1.0],
+        "c_double": [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            1e308,
+            -1e308,
+            1e-308,
+            float("inf"),
+            float("-inf"),
+            float("nan"),
+            9.2233720368547758e18,  # just past i64 max
+            -9.2233720368547758e18,
+        ],
+        "c_float": [0.0, 1.0, -1.0, float("inf"), float("-inf"), float("nan")],
     }
 
     def gen(tname: str) -> Any:
@@ -376,7 +392,9 @@ def diff_worker() -> None:
 
     mismatches = 0
     example = None
-    trials = spec["n"]
+    # A zero-arg function has exactly one observable point — 300 identical
+    # calls would be theater, not testing.
+    trials = spec["n"] if spec["params"] else 1
     for _ in range(trials):
         args = [gen(TYPE_MAP[t][1]) for t in spec["params"]]
         print(f"TRIAL {args!r}", flush=True)
@@ -412,10 +430,37 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--n-trials", type=int, default=300)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument(
+        "--recheck",
+        type=Path,
+        default=None,
+        help="Re-verify the winners in a prior results file under the current "
+        "(harsher) differential; no generation, no API cost.",
+    )
     args = ap.parse_args()
 
     workdir = Path(tempfile.mkdtemp(prefix="cgir-rung4-"))
     entries, excluded = build_worklist(args.index, args.src)
+
+    if args.recheck:
+        prior = json.loads(args.recheck.read_text())
+        by_id = {e.component_id: e for e in entries}
+        orig = compile_original(args.src, [e.name for e in entries], workdir)
+        flips = []
+        for r in prior["results"]:
+            if not r["solved_by"]:
+                continue
+            e = by_id[r["component_id"]]
+            winner = next(a["candidate"] for a in r["attempts"] if a["stage"] == "ok")
+            dylib, err = try_rustc(winner, workdir, f"rc_{e.name}")
+            verdict = err or differential(orig, dylib, e, args.n_trials, seed=7)
+            status = "still-equivalent" if not verdict else "FLIPPED"
+            if verdict:
+                flips.append((r["component_id"], verdict))
+            print(f"{status:17s} {r['component_id']:55s} {verdict[:90]}", flush=True)
+        print(f"\n{len(flips)} winner(s) flipped under the harsher differential")
+        args.out.write_text(json.dumps({"rechecked": True, "flips": flips}, indent=2) + "\n")
+        return
     if args.limit:
         entries = entries[: args.limit]
     print(f"worklist: {len(entries)} scalar-ABI pure leaves; compiling C oracle...", flush=True)
