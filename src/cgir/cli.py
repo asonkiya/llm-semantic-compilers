@@ -891,6 +891,10 @@ def trace(
 def rewrite_cmd(
     index_dir: Annotated[Path, typer.Option("--index")] = Path(".cgir"),
     repo: Annotated[Path, typer.Option("--repo", help="Repo root.")] = Path("."),
+    lang: Annotated[
+        str,
+        typer.Option("--lang", help="Target: python (same-language) or c-rust (C->Rust rewrite)."),
+    ] = "python",
     query: Annotated[
         str, typer.Option("--query", help="Worklist search query (contract predicates).")
     ] = "kind:pure covered:true",
@@ -898,6 +902,25 @@ def rewrite_cmd(
     mode: Annotated[
         str, typer.Option("--mode", help="translate (source in context) or spec (contract only).")
     ] = "translate",
+    c_source: Annotated[
+        Path | None,
+        typer.Option(
+            "--c-source", help="c-rust: the compilable C translation unit (e.g. an amalgamation)."
+        ),
+    ] = None,
+    c_flags: Annotated[
+        list[str] | None,
+        typer.Option("--c-flag", help="c-rust: a compile flag for the oracle build (repeatable)."),
+    ] = None,
+    n_trials: Annotated[
+        int, typer.Option("--n-trials", help="c-rust: differential inputs per candidate.")
+    ] = 300,
+    pointers: Annotated[
+        bool, typer.Option("--pointers", help="c-rust: include char*/byte-buffer pointer ABIs.")
+    ] = False,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="c-rust: write the full results JSON here.")
+    ] = None,
     model: Annotated[str | None, typer.Option("--model", help="Cheap model override.")] = None,
     escalation_model: Annotated[
         str | None, typer.Option("--escalation-model", help="Escalation model override.")
@@ -934,6 +957,23 @@ def rewrite_cmd(
         anthropic_sampler,
         rewrite_repo,
     )
+
+    if lang == "c-rust":
+        _rewrite_c_rust(
+            index_dir,
+            c_source,
+            list(c_flags or []),
+            k,
+            n_trials,
+            pointers,
+            out,
+            live,
+            budget_usd,
+            ledger,
+        )
+        return
+    if lang != "python":
+        raise typer.BadParameter(f"--lang must be python or c-rust, got {lang!r}")
 
     specs = _load_specs(index_dir)
     worklist = [s for s in search_specs(specs, query, limit=None) if not _is_test_spec(s)]
@@ -984,6 +1024,67 @@ def rewrite_cmd(
         )
         if not gate["contract_clean"] or gate["tests_ok"] is False:
             raise typer.Exit(code=1)
+
+
+def _rewrite_c_rust(
+    index_dir: Path,
+    c_source: Path | None,
+    c_flags: list[str],
+    k: int,
+    n_trials: int,
+    pointers: bool,
+    out: Path | None,
+    live: bool,
+    budget_usd: float | None,
+    ledger: Path | None,
+) -> None:
+    import shutil
+
+    from cgir.rewrite import anthropic_sampler
+    from cgir.rewrite_c_rust import c_rust_worklist, run_c_rust
+
+    if c_source is None:
+        raise typer.BadParameter("--lang c-rust needs --c-source <amalgamation.c>")
+    if not c_source.exists():
+        raise typer.BadParameter(f"No such C source: {c_source}")
+    if not live:
+        entries, _ = c_rust_worklist(index_dir, c_source, pointers)
+        typer.echo(f"dry run: {len(entries)} C leaf function(s) in {c_source.name} regenerable")
+        for e in sorted(entries, key=lambda e: e.component_id):
+            ptr = " [ptr]" if any(t.startswith("ptr:") for t, _ in e.params) else ""
+            typer.echo(f"  {e.component_id}{ptr}")
+        typer.echo(
+            f"~{len(entries) * k} cheap calls + escalations, verified by differential vs the "
+            "compiled C. Rerun with --live (requires cgir[llm], ANTHROPIC_API_KEY, cc + rustc)."
+        )
+        return
+    for tool in ("cc", "rustc"):
+        if shutil.which(tool) is None:
+            raise typer.BadParameter(f"c-rust needs `{tool}` on PATH")
+    try:
+        sampler = anthropic_sampler()
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    report = run_c_rust(
+        index_dir,
+        c_source,
+        sampler=sampler,
+        c_flags=c_flags,
+        k=k,
+        n_trials=n_trials,
+        pointers=pointers,
+        budget_usd=budget_usd,
+        ledger_path=ledger,
+        log=typer.echo,
+    )
+    if out is not None:
+        out.write_text(json.dumps(report, indent=2) + "\n")
+    totals = report["totals"]
+    typer.echo(
+        f"solved {totals['solved']}/{totals['components']} C->Rust "
+        f"(unsolved {totals['unsolved']}) for ${totals['cost_usd']}; "
+        f"stage kills: {report['stage_kills']}"
+    )
 
 
 @app.command(name="regenerate")

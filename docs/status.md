@@ -92,6 +92,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | MCP server (`cgir mcp`, stdio; `cgir[mcp]` extra) — now serves `verify` too | done | `src/cgir/api/mcp_server.py` |
 | Verify loop (`cgir verify`: splice → rescan → contract-diff → tests) | done | `src/cgir/verify.py` |
 | Rewrite orchestrator (`cgir rewrite`: query worklist → k cheap candidates → contract verify → shadow tests → escalation → resumable ledger, budget cap, `--apply` + final gate) | done | `src/cgir/rewrite.py` |
+| C→Rust rewrite (`cgir rewrite --lang c-rust`: pure C leaves → cheap-model Rust → rustc → adapter contract-scan → differential vs the compiled C, fault-trapping + pointer ABIs; compiler-probed context) | done | `src/cgir/rewrite_c_rust.py` |
 | Architecture rules (`cgir lint`: forbid-effect / require-kind / forbid-call) | done | `src/cgir/report/lint.py` |
 | Shared pipeline driver (CLI + API call the same function) | done | `src/cgir/pipeline.py:scan_repo` |
 | HTTP API (`/scan`, `/components`, `/trace`, `/regenerate`, `/stats`) | done | `src/cgir/api/server.py` |

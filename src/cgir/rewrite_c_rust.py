@@ -1,55 +1,41 @@
-"""Rung 4: C -> Rust cross-language regeneration (vision-rewrite.md).
+"""C -> Rust cross-language regeneration — the ``cgir rewrite --lang c-rust``
+engine (vision-rewrite.md rung 4).
 
-NOTE: the maintained engine now lives in the product at
-``cgir.rewrite_c_rust`` and is exposed as ``cgir rewrite --lang c-rust``.
-This script is retained as the SQLite reproducibility harness (it carries
---recheck, --limit, and the committed results-JSON format the link-back
-demo consumes); prefer the product module for new work.
+Given a cgir index and a single compilable C translation unit (an
+amalgamation like ``sqlite3.c``, or any one ``.c`` whose worklist symbols it
+defines), regenerate its pure *leaf* functions in Rust and verify each one
+mechanically:
 
-Worklist: SQLite-amalgamation pure *leaf* functions whose ABI surface is
-scalars, or (with --pointers) char*/byte-buffer pointers fuzzed with dual
-buffers + mutation compare. Struct pointers stay out of scope. Pipeline
-per component:
+    worklist (pure leaves with scalar / byte-pointer ABI, from the index)
+      -> cheap-model Rust candidate (source + compiler-probed context)
+      -> rustc                       (compile filter)
+      -> cgir Rust-adapter scan       (cross-language contract: pure + arity)
+      -> differential vs the compiled C original
+         (a fault-trapping C driver; orig-faulting inputs are out-of-contract
+          and skipped; pointer params fuzzed with dual buffers + mutation
+          compare)
+      -> one escalation carrying the compiler error or counterexample
 
-    Haiku writes a #[no_mangle] extern "C" Rust implementation
-      -> rustc compiles it                     (filter 1: free, deterministic)
-      -> cgir's Rust adapter scans it          (filter 2: cross-language
-         contract — pure, arity; REGENERATED_AS recorded in the results)
-      -> differential vs the C original        (filter 3: random scalar
-         inputs via a compiled, fault-trapping C driver — SIGSEGV/SIGABRT
-         become recorded traps, not process deaths; orig-faulting inputs
-         are out-of-contract and skipped)
-      -> failures escalate once to Sonnet with the compiler error or the
-         counterexample.
+Rides the shared :func:`cgir.rewrite.run_search_loop`, so it inherits the
+same k-sampling / escalation / ledger / budget machinery as the Python
+``cgir rewrite`` path. Struct-pointer ABIs stay out of scope (they need real
+instances); the addressable set is scalar and char*/byte-buffer leaves.
 
-The C oracle is the amalgamation itself compiled once with
--DSQLITE_PRIVATE= (plus de-static'ing worklist symbols) so originals are
-callable directly — no source extraction, no reimplementation drift.
-
-Run from the cgir repo venv:
-    .venv/bin/python benchmarks/rung4_c_to_rust.py \
-        --src <sqlite-src> --index <sqlite-idx> --out results.json
+Toolchain: ``cc`` and ``rustc`` on PATH. Network only via the injected
+sampler (``--live``).
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import subprocess
-import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-# The C->Rust harness rides cgir's shared rewrite-as-search core.
-from cgir.rewrite import run_search_loop
-
-# rung-3 (a sibling benchmark, not an installed package) supplies model IDs,
-# prices, and the cost ledger — needs the script dir on the path first.
-sys.path.insert(0, str(Path(__file__).parent))
-from rung3_rewrite import CHEAP_MODEL, ESCALATION_MODEL, PRICES, Ledger
+from cgir.rewrite import Sampler, run_search_loop
 
 SCALAR_RE = (
     r"(?:const\s+)?(?:unsigned\s+|signed\s+)?"
@@ -63,15 +49,14 @@ DECL = re.compile(
     re.DOTALL,
 )
 PARAM = re.compile(rf"^({SCALAR_RE})\s+(\w+)$")
-# Read-or-write pointer parameters we can fuzz with a byte buffer: const/mut
-# `char*` (C strings) and `u8/unsigned char/void*` (binary buffers). Struct
-# and multi-level pointers stay out of scope (need real instances).
+# Read-or-write pointer params fuzzable with a byte buffer: const/mut char*
+# (C strings) and u8/unsigned char/void* (binary). Struct and multi-level
+# pointers stay out of scope (need real instances).
 _PTR_ELEM = r"(?:char|unsigned\s+char|signed\s+char|u8|i8|void)"
 PTR_PARAM = re.compile(rf"^(const\s+)?{_PTR_ELEM}\s*\*\s*(\w+)$")
 
-# C type -> (rust type, ctypes name). Typedefs resolved against the
-# amalgamation: LogEst=short, tRowcnt=u64, Bool=unsigned, u64=8-byte.
-TYPE_MAP = {
+# C type -> (rust type, ctypes name).
+TYPE_MAP: dict[str, tuple[str, str]] = {
     "int": ("i32", "c_int"),
     "i32": ("i32", "c_int"),
     "unsigned": ("u32", "c_uint"),
@@ -101,21 +86,31 @@ TYPE_MAP = {
     "sqlite_uint64": ("u64", "c_ulonglong"),
     "tRowcnt": ("u64", "c_ulonglong"),
 }
+# ctypes-name -> (C concrete type, width bits, is_signed, is_float)
+_C_INFO: dict[str, tuple[str, int, int, int]] = {
+    "c_int": ("int32_t", 32, 1, 0),
+    "c_uint": ("uint32_t", 32, 0, 0),
+    "c_short": ("int16_t", 16, 1, 0),
+    "c_ushort": ("uint16_t", 16, 0, 0),
+    "c_byte": ("int8_t", 8, 1, 0),
+    "c_ubyte": ("uint8_t", 8, 0, 0),
+    "c_longlong": ("int64_t", 64, 1, 0),
+    "c_ulonglong": ("uint64_t", 64, 0, 0),
+    "c_double": ("double", 64, 1, 1),
+    "c_float": ("float", 32, 1, 1),
+}
 
 
 @dataclass
-class Entry:
+class CEntry:
     component_id: str
     name: str
     ret: str
     params: list[tuple[str, str]]
     source: str
-    lines: int
 
 
 def _parse_param(q: str) -> tuple[str, str] | None:
-    """(type_token, name) or None if unfuzzable. Pointer tokens encode the
-    element+constness: ``ptr:str:const``, ``ptr:buf:mut`` etc."""
     q = q.strip()
     pm = PARAM.match(q)
     if pm:
@@ -129,31 +124,35 @@ def _parse_param(q: str) -> tuple[str, str] | None:
     return None
 
 
-def build_worklist(
-    index: Path, src: Path, pointers: bool = False
-) -> tuple[list[Entry], list[tuple[str, str]]]:
-    graph = json.loads((index / "repo_graph.json").read_text())
+def c_rust_worklist(
+    index_dir: Path, c_source: Path, pointers: bool = False
+) -> tuple[list[CEntry], list[tuple[str, str]]]:
+    """Pure leaf functions defined in ``c_source`` with a fuzzable ABI.
+
+    Only components whose defining file is ``c_source`` are eligible — their
+    symbols must be in the one compiled translation unit we build as the
+    behavioral oracle."""
+    graph = json.loads((index_dir / "repo_graph.json").read_text())
     span: dict[str, tuple[str, int, int]] = {}
     for n in graph["nodes"]:
         q = (n.get("attrs") or {}).get("qualname")
         if q and n.get("path"):
             span[q] = (n["path"], n.get("start_line") or 0, n.get("end_line") or 0)
+    src_root = _source_root(c_source, span)
     file_cache: dict[str, list[str]] = {}
-    entries: list[Entry] = []
+    entries: list[CEntry] = []
     excluded: list[tuple[str, str]] = []
-    for p in sorted((index / "components").glob("*.json")):
+    for p in sorted((index_dir / "components").glob("*.json")):
         s = json.loads(p.read_text())
         if s["kind"] != "pure_function" or s.get("calls") or set(s.get("effects", [])) - {"raise"}:
             continue
         if s["id"] not in span:
             continue
         path, st, en = span[s["id"]]
-        if path != "sqlite3.c":
-            if path == "shell.c":
-                excluded.append((s["id"], "shell.c statics are not exportable"))
+        if Path(path).name != c_source.name:
             continue
         if path not in file_cache:
-            file_cache[path] = (src / path).read_text().splitlines()
+            file_cache[path] = (src_root / path).read_text().splitlines()
         text = "\n".join(file_cache[path][st - 1 : en])
         header = re.sub(r"\s+", " ", text.split("{")[0]) + "{"
         m = DECL.match(header)
@@ -164,7 +163,7 @@ def build_worklist(
         if "[" in raw or "..." in raw:
             excluded.append((s["id"], "array/vararg ABI"))
             continue
-        params = []
+        params: list[tuple[str, str]] = []
         ok = True
         if raw not in ("", "void"):
             for q in raw.split(","):
@@ -180,43 +179,41 @@ def build_worklist(
         if has_ptr and not pointers:
             excluded.append((s["id"], "pointer ABI (enable with --pointers)"))
             continue
-        # A void return with no pointer buffer to inspect has nothing
-        # observable; with a pointer, the buffer mutation IS the observable.
         if ret == "void" and not has_ptr:
             excluded.append((s["id"], "void return: nothing observable to compare"))
             continue
-        entries.append(Entry(s["id"], name, ret, params, text, en - st + 1))
+        entries.append(CEntry(s["id"], name, ret, params, text))
     return entries, excluded
 
 
-def compile_original(src: Path, names: list[str], workdir: Path) -> Path:
-    """Amalgamation -> dylib with worklist symbols exported."""
-    text = (src / "sqlite3.c").read_text()
+def _source_root(c_source: Path, span: dict[str, tuple[str, int, int]]) -> Path:
+    """The repo root the index paths are relative to — the parent of the
+    directory chain implied by ``c_source``'s indexed path."""
+    for path, _, _ in span.values():
+        if Path(path).name == c_source.name:
+            rel = Path(path)
+            root = c_source.resolve().parent
+            for _ in range(len(rel.parts) - 1):
+                root = root.parent
+            return root
+    return c_source.resolve().parent
+
+
+def compile_oracle(c_source: Path, names: list[str], workdir: Path, flags: list[str]) -> Path:
+    """Compile ``c_source`` into a shared library, with the worklist symbols
+    de-static'd so they export and are callable as the behavioral oracle."""
+    text = c_source.read_text()
     for name in names:
         text = re.sub(
             rf"\bstatic\s+((?:SQLITE_NOINLINE\s+)?(?:const\s+)?{SCALAR_RE}\s+{name}\s*\()",
             r"\1",
             text,
         )
-    patched = workdir / "sqlite3_patched.c"
+    patched = workdir / "oracle_src.c"
     patched.write_text(text)
     out = workdir / "original.dylib"
     subprocess.run(
-        [
-            "cc",
-            "-O1",
-            "-w",
-            "-shared",
-            "-fPIC",
-            "-DSQLITE_PRIVATE=",
-            # optional subsystems whose pure leaves are on the worklist
-            "-DSQLITE_ENABLE_FTS3",
-            "-DSQLITE_ENABLE_FTS5",
-            "-DSQLITE_ENABLE_RTREE",
-            str(patched),
-            "-o",
-            str(out),
-        ],
+        ["cc", "-O1", "-w", "-shared", "-fPIC", *flags, str(patched), "-o", str(out)],
         check=True,
         capture_output=True,
         timeout=600,
@@ -231,24 +228,16 @@ def exported_symbols(dylib: Path, names: list[str]) -> set[str]:
     return {n for n in names if hasattr(lib, n)}
 
 
-def probe_compile_time_context(src: Path, entries: list[Entry], workdir: Path) -> dict[str, str]:
-    """The C compiler as context oracle.
+def probe_context(
+    c_source: Path, entries: list[CEntry], workdir: Path, flags: list[str]
+) -> dict[str, str]:
+    """The C compiler as context oracle: probe the real build for macro
+    values, ``sizeof``s, and file-scope tables the worklist references, so
+    the model never has to guess invisible compile-time facts."""
+    probe_src = workdir / "probe_src.c"
+    probe_src.write_text(c_source.read_text())
+    all_text = probe_src.read_text()
 
-    Rung 4's misses were invisible compile-time facts: macro values,
-    ``sizeof`` of internal structs, file-scope lookup tables. Instead of
-    modeling the preprocessor, ask the build itself: generate one probe
-    program that ``#include``s the amalgamation and prints every value the
-    worklist references, iteratively dropping probes the compiler rejects
-    (locals, non-macros, function-like uses). Returns component_id ->
-    rendered context block for the prompt.
-    """
-    amalg = workdir / "sqlite3_probe.c"
-    amalg.write_text((src / "sqlite3.c").read_text())
-    all_text = amalg.read_text()
-
-    # #define texts (with backslash continuations) for names used
-    # function-like or where a numeric probe fails — the definition itself
-    # is context.
     define_text: dict[str, str] = {}
     for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+(\w+)(.*(?:\\\n.*)*)", all_text, re.M):
         define_text.setdefault(m.group(1), f"#define {m.group(1)}{m.group(2)}"[:300])
@@ -262,8 +251,6 @@ def probe_compile_time_context(src: Path, entries: list[Entry], workdir: Path) -
             re.findall(r"\b(?:(?!return\b|case\b|goto\b)[a-z]\w*\s+)+(\w+)\s*(?:=|;|\[)", e.source)
         )
         caps = set(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", e.source)) - {"NULL"}
-        # mixed-case macros (IdChar, ROUND8-style) — anything the amalgamation
-        # #defines that this source mentions
         caps |= {w for w in re.findall(r"\b[A-Za-z_]\w*\b", e.source) if w in define_text}
         arrs = {
             a
@@ -271,8 +258,6 @@ def probe_compile_time_context(src: Path, entries: list[Entry], workdir: Path) -
             if a not in {n for _, n in e.params} and a not in local_names and not a.isupper()
         }
         szs = set(re.findall(r"sizeof\(\s*(\w+)\s*\)", e.source))
-        # One level of macro recursion: names inside the matched #define
-        # bodies (IdChar -> sqlite3CtypeMap) are context too.
         for name in list(caps):
             body = define_text.get(name, "")
             arrs |= set(re.findall(r"\b([A-Za-z_]\w*)\s*\[", body)) - {"C", "X", "x"}
@@ -281,7 +266,7 @@ def probe_compile_time_context(src: Path, entries: list[Entry], workdir: Path) -
         arrays |= arrs
         sizeofs |= szs
 
-    probes: list[tuple[str, str, str]] = []  # (kind, name, C line)
+    probes: list[tuple[str, str, str]] = []
     for name in sorted(macros):
         probes.append(("MACRO", name, f'printf("MACRO {name} %lld\\n", (long long)({name}));'))
     for name in sorted(sizeofs):
@@ -298,24 +283,14 @@ def probe_compile_time_context(src: Path, entries: list[Entry], workdir: Path) -
             )
         )
 
-    header = ['#include "sqlite3_probe.c"', "#include <stdio.h>", "int main(void) {"]
+    header = [f'#include "{probe_src.name}"', "#include <stdio.h>", "int main(void) {"]
     values: dict[tuple[str, str], str] = {}
     for _ in range(8):
         lines = header + [p[2] for p in probes] + ["return 0; }"]
         probe_c = workdir / "probe.c"
         probe_c.write_text("\n".join(lines) + "\n")
         proc = subprocess.run(
-            [
-                "cc",
-                "-O0",
-                "-w",
-                "-DSQLITE_ENABLE_FTS3",
-                "-DSQLITE_ENABLE_FTS5",
-                "-DSQLITE_ENABLE_RTREE",
-                str(probe_c),
-                "-o",
-                str(workdir / "probe"),
-            ],
+            ["cc", "-O0", "-w", *flags, str(probe_c), "-o", str(workdir / "probe")],
             capture_output=True,
             text=True,
             timeout=300,
@@ -329,7 +304,7 @@ def probe_compile_time_context(src: Path, entries: list[Entry], workdir: Path) -
         }
         bad_idx = {ln - len(header) - 1 for ln in bad_lines}
         kept = [p for i, p in enumerate(probes) if i not in bad_idx]
-        if len(kept) == len(probes):  # can't attribute the error; give up on probing
+        if len(kept) == len(probes):
             probes = []
             break
         probes = kept
@@ -374,13 +349,13 @@ def _rust_type(token: str) -> str:
     return TYPE_MAP[token][0]
 
 
-def rust_signature(e: Entry) -> str:
+def rust_signature(e: CEntry) -> str:
     args = ", ".join(f"{n}: {_rust_type(t)}" for t, n in e.params)
     ret = "" if e.ret == "void" else f" -> {TYPE_MAP[e.ret][0]}"
     return f'#[no_mangle]\npub extern "C" fn {e.name}({args}){ret}'
 
 
-def build_prompt(e: Entry, context: str = "") -> str:
+def build_c_rust_prompt(e: CEntry, context: str = "") -> str:
     ctx = f"\n{context}\n" if context else ""
     ptr_rule = ""
     if any(t.startswith("ptr:") for t, _ in e.params):
@@ -391,7 +366,7 @@ def build_prompt(e: Entry, context: str = "") -> str:
             "past them, and handle a null or zero-length buffer without dereferencing. "
             "A `char*` is a NUL-terminated C string."
         )
-    return f"""Translate this C function from SQLite into Rust.
+    return f"""Translate this C function into Rust.
 
 ```c
 {e.source}
@@ -431,13 +406,13 @@ def try_rustc(candidate: str, workdir: Path, tag: str) -> tuple[Path | None, str
     return out, ""
 
 
-def contract_check(candidate: str, e: Entry) -> str:
+def contract_check(candidate: str, e: CEntry) -> str:
     """Scan the candidate with cgir's Rust adapter: pure + arity must hold."""
     from cgir.analyses.effects import classify
     from cgir.analyses.symbols import build_symbol_tables
     from cgir.sources import TreeSitterSource
 
-    with tempfile.TemporaryDirectory(prefix="cgir-rung4-") as td:
+    with tempfile.TemporaryDirectory(prefix="cgir-crust-") as td:
         d = Path(td)
         (d / "lib.rs").write_text(candidate + "\n")
         graph = TreeSitterSource().ingest(d)
@@ -464,35 +439,15 @@ def contract_check(candidate: str, e: Entry) -> str:
     return ""
 
 
-# ctypes-name -> (C concrete type, width bits, is_signed, is_float)
-_C_INFO = {
-    "c_int": ("int32_t", 32, 1, 0),
-    "c_uint": ("uint32_t", 32, 0, 0),
-    "c_short": ("int16_t", 16, 1, 0),
-    "c_ushort": ("uint16_t", 16, 0, 0),
-    "c_byte": ("int8_t", 8, 1, 0),
-    "c_ubyte": ("uint8_t", 8, 0, 0),
-    "c_longlong": ("int64_t", 64, 1, 0),
-    "c_ulonglong": ("uint64_t", 64, 0, 0),
-    "c_double": ("double", 64, 1, 1),
-    "c_float": ("float", 32, 1, 1),
-}
+def _driver_source(e: CEntry) -> str:
+    """Self-contained fault-trapping differential driver for one function.
 
-
-def _driver_source(e: Entry) -> str:
-    """Generate a self-contained C driver for one function.
-
-    dlopen's both libraries, installs a fault handler, and runs trials with
-    each call guarded by sigsetjmp so a SIGSEGV/SIGABRT becomes a recorded
-    trap, not a process death. Contract-aware semantics: if the C *original*
-    faults on an input, that input is out-of-contract (the C itself has UB
-    there) and is skipped; only the candidate faulting where the original
-    ran cleanly is a real divergence.
-
-    Pointer params are fuzzed with byte buffers: the original and candidate
-    get *separate* copies of an identical random buffer, and equivalence
-    requires matching return value AND matching post-call buffer contents —
-    so a write-through-pointer divergence is caught, not just the return.
+    dlopen's both libraries; a sigaltstack + sigaction(SA_ONSTACK) handler
+    guarded by sigsetjmp turns SIGSEGV/SIGABRT into a recorded trap. If the C
+    *original* faults on an input, that input is out-of-contract and skipped;
+    a candidate faulting where the original ran cleanly is a real divergence.
+    Pointer params get separate identical buffers for orig and candidate, and
+    equivalence requires matching return AND matching post-call buffer bytes.
     """
     sig_types: list[str] = []
     globals_: list[str] = []
@@ -539,8 +494,7 @@ def _driver_source(e: Entry) -> str:
         call_o = f"fo({', '.join(orig_args)});"
         call_c = f"fc({', '.join(cand_args)});"
         ret_eq = "1"
-        ex_fault = f'"{e.name}({fmt}) buffers differ"'
-        ex_mism = f'"{e.name}({fmt}) buffers differ"'
+        ex_fault = ex_mism = f'"{e.name}({fmt}) buffers differ"'
         ex_fault_args = ex_mism_args = exargs
     else:
         ret_c, _, _, ret_float = _C_INFO[TYPE_MAP[e.ret][1]]
@@ -581,7 +535,7 @@ static void on_fault(int s) {{ FAULT = s; siglongjmp(JB, 1); }}
 static void install_handlers(void) {{
     stack_t ss;
     ss.ss_sp = ALTSTK; ss.ss_size = sizeof ALTSTK; ss.ss_flags = 0;
-    sigaltstack(&ss, 0);  /* handler runs on a clean stack even if the fault trashed the main one */
+    sigaltstack(&ss, 0);
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = on_fault;
@@ -670,11 +624,9 @@ int main(int argc, char** argv) {{
 """
 
 
-def differential(orig: Path, cand: Path, e: Entry, n: int, seed: int) -> str:
-    """Compile a fault-trapping C driver and run it. Orig-faulting inputs are
-    out-of-contract and skipped; a candidate faulting where the original ran
-    is a real divergence. Requires a minimum of valid comparisons to avoid a
-    vacuous pass on functions whose contract domain we rarely hit."""
+def differential(orig: Path, cand: Path, e: CEntry, n: int, seed: int) -> str:
+    """Compile the fault-trapping driver and run it; returns "" on
+    equivalence or a human-readable divergence/inconclusive reason."""
     trials = n if e.params else 1
     drv_c = cand.with_suffix(".driver.c")
     drv = cand.with_suffix(".driver")
@@ -694,7 +646,7 @@ def differential(orig: Path, cand: Path, e: Entry, n: int, seed: int) -> str:
         timeout=120,
     )
     if run.returncode != 0:
-        return f"differential: driver died (rc={run.returncode}) — should not happen"
+        return f"differential: driver died (rc={run.returncode})"
     v = json.loads(run.stdout.strip().splitlines()[-1])
     if v["status"] in ("missing_symbol", "dlopen_fail"):
         return f"differential: {v['status']}"
@@ -712,98 +664,37 @@ def differential(orig: Path, cand: Path, e: Entry, n: int, seed: int) -> str:
     return ""
 
 
-def main() -> None:
-    import anthropic
-
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--src", type=Path, required=True)
-    ap.add_argument("--index", type=Path, required=True)
-    ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--k", type=int, default=3)
-    ap.add_argument("--n-trials", type=int, default=300)
-    ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument(
-        "--recheck",
-        type=Path,
-        default=None,
-        help="Re-verify the winners in a prior results file under the current "
-        "(harsher) differential; no generation, no API cost.",
-    )
-    ap.add_argument(
-        "--pointers",
-        action="store_true",
-        help="Include const/mut char* and byte-buffer pointer params (fuzzed "
-        "with dual buffers + mutation compare). Struct pointers stay excluded.",
-    )
-    args = ap.parse_args()
-
-    workdir = Path(tempfile.mkdtemp(prefix="cgir-rung4-"))
-    entries, excluded = build_worklist(args.index, args.src, pointers=args.pointers)
-
-    if args.recheck:
-        prior = json.loads(args.recheck.read_text())
-        by_id = {e.component_id: e for e in entries}
-        orig = compile_original(args.src, [e.name for e in entries], workdir)
-        flips = []
-        for r in prior["results"]:
-            if not r["solved_by"]:
-                continue
-            e = by_id[r["component_id"]]
-            winner = next(a["candidate"] for a in r["attempts"] if a["stage"] == "ok")
-            dylib, err = try_rustc(winner, workdir, f"rc_{e.name}")
-            verdict = err or differential(orig, dylib, e, args.n_trials, seed=7)
-            status = "still-equivalent" if not verdict else "FLIPPED"
-            if verdict:
-                flips.append((r["component_id"], verdict))
-            print(f"{status:17s} {r['component_id']:55s} {verdict[:90]}", flush=True)
-        print(f"\n{len(flips)} winner(s) flipped under the harsher differential")
-        args.out.write_text(json.dumps({"rechecked": True, "flips": flips}, indent=2) + "\n")
-        return
-    if args.limit:
-        entries = entries[: args.limit]
-    kind = "scalar+pointer" if args.pointers else "scalar-ABI"
-    print(f"worklist: {len(entries)} {kind} pure leaves; compiling C oracle...", flush=True)
-    t0 = time.monotonic()
-    orig = compile_original(args.src, [e.name for e in entries], workdir)
+def run_c_rust(
+    index_dir: Path,
+    c_source: Path,
+    *,
+    sampler: Sampler,
+    c_flags: list[str] | None = None,
+    k: int = 3,
+    n_trials: int = 300,
+    pointers: bool = False,
+    budget_usd: float | None = None,
+    ledger_path: Path | None = None,
+    log: Any = lambda _: None,
+) -> dict[str, Any]:
+    """Regenerate ``c_source``'s pure leaves in Rust, verified end to end.
+    Rides :func:`cgir.rewrite.run_search_loop`."""
+    flags = c_flags or []
+    workdir = Path(tempfile.mkdtemp(prefix="cgir-crust-"))
+    entries, excluded = c_rust_worklist(index_dir, c_source, pointers)
+    orig = compile_oracle(c_source, [e.name for e in entries], workdir, flags)
     have = exported_symbols(orig, [e.name for e in entries])
     for e in entries:
         if e.name not in have:
             excluded.append((e.component_id, "original symbol not exported (platform/#ifdef)"))
     entries = [e for e in entries if e.name in have]
-    print(
-        f"oracle compiled in {time.monotonic() - t0:.0f}s; {len(entries)} originals callable",
-        flush=True,
-    )
-    t0 = time.monotonic()
-    probe_ctx = probe_compile_time_context(args.src, entries, workdir)
-    print(
-        f"compile-time context probed in {time.monotonic() - t0:.0f}s "
-        f"({len(probe_ctx)}/{len(entries)} components enriched)",
-        flush=True,
-    )
-
-    # The C->Rust pipeline now rides the SAME orchestrator as `cgir rewrite`
-    # (cgir.rewrite.run_search_loop): identical k-sampling / escalation /
-    # ledger / budget machinery, with C-specific prompt + evaluate injected.
-    client = anthropic.Anthropic()
-    ledger = Ledger()
+    probe = probe_context(c_source, entries, workdir, flags)
     counter = {"n": 0}
 
-    def sampler(prompt: str, model: str) -> tuple[str, float]:
-        msg = client.messages.create(
-            model=model,
-            max_tokens=3000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        ledger.add(model, msg.usage)
-        u = msg.usage
-        cost = u.input_tokens * PRICES[model][0] / 1e6 + u.output_tokens * PRICES[model][1] / 1e6
-        return "".join(b.text for b in msg.content if b.type == "text"), cost
+    def make_prompt(e: CEntry) -> str:
+        return build_c_rust_prompt(e, probe.get(e.component_id, ""))
 
-    def make_prompt(e: Entry) -> str:
-        return build_prompt(e, probe_ctx.get(e.component_id, ""))
-
-    def evaluate(e: Entry, cand: str) -> tuple[str, str, dict[str, object]]:
+    def evaluate(e: CEntry, cand: str) -> tuple[str, str, dict[str, Any]]:
         counter["n"] += 1
         dylib, err = try_rustc(cand, workdir, f"{e.name}_{counter['n']}")
         if dylib is None:
@@ -811,7 +702,7 @@ def main() -> None:
         err = contract_check(cand, e)
         if err:
             return "contract", err, {}
-        err = differential(orig, dylib, e, args.n_trials, seed=42)
+        err = differential(orig, dylib, e, n_trials, seed=42)
         if err:
             return "differential", err, {}
         return "ok", "", {"regenerated_as": f"rust:{e.name}"}
@@ -822,45 +713,19 @@ def main() -> None:
         evaluate=evaluate,
         sampler=sampler,
         id_of=lambda e: e.component_id,
-        k=args.k,
-        cheap_model=CHEAP_MODEL,
-        escalation_model=ESCALATION_MODEL,
-        log=lambda m: print(m, flush=True),
+        k=k,
+        budget_usd=budget_usd,
+        ledger_path=ledger_path,
+        report_meta={"lang": "c-rust", "c_source": str(c_source), "n_trials": n_trials},
+        log=log,
     )
-
     outcomes = loop["outcomes"]
-    solved_cheap = sum(o["solved_by"] == "cheap" for o in outcomes)
-    solved_esc = sum(o["solved_by"] == "escalation" for o in outcomes)
     stage_kills: dict[str, int] = {}
     for o in outcomes:
         for a in o["attempts"]:
             if a["stage"] != "ok":
                 stage_kills[a["stage"]] = stage_kills.get(a["stage"], 0) + 1
-    report = {
-        "src": str(args.src),
-        "k": args.k,
-        "n_trials": args.n_trials,
-        "models": {"cheap": CHEAP_MODEL, "escalation": ESCALATION_MODEL},
-        "worklist": len(entries),
-        "excluded": [{"id": i, "reason": r} for i, r in excluded],
-        "solved_cheap": solved_cheap,
-        "solved_escalation": solved_esc,
-        "unsolved": len(entries) - solved_cheap - solved_esc,
-        "plug_in_rate": round((solved_cheap + solved_esc) / len(entries), 3) if entries else None,
-        "stage_kills": stage_kills,
-        "cost_usd": {
-            "cheap": round(ledger.cost(CHEAP_MODEL), 4),
-            "escalation": round(ledger.cost(ESCALATION_MODEL), 4),
-            "total": round(ledger.cost(), 4),
-        },
-        "tokens": ledger.tokens,
-        "results": outcomes,
-    }
-    args.out.write_text(json.dumps(report, indent=2) + "\n")
-    print(
-        json.dumps({k: v for k, v in report.items() if k not in ("results", "excluded")}, indent=2)
-    )
-
-
-if __name__ == "__main__":
-    main()
+    loop["excluded"] = [{"id": i, "reason": r} for i, r in excluded]
+    loop["stage_kills"] = stage_kills
+    loop["results"] = outcomes
+    return loop
