@@ -83,8 +83,12 @@ useful — and it funds the credibility of the flagship.
    deterministically and map onto the stated ceilings. Scalars are the
    easy 8.5% of SQLite's 400 pure leaves — 258 are pointer/array ABIs.
    Next unlock: macro/sizeof context enrichment, then pointer/struct
-   marshaling. **Compiler-probe context (2026-07-19) lifted this to
-   29/34 (85.3%)** by probing macros/sizeof/tables from the real build —
+   marshaling. **Compiler-probe context (2026-07-19) lifted scalars to
+   29/34 (85.3%); pointer/string ABIs (char*/byte buffers, fuzzed with
+   dual buffers + a fault-trapping driver) took the worklist to 71
+   functions at 86% (29/37 pointer functions) — ~80 of SQLite's 400 pure
+   leaves now addressable, and 60 Rust functions link into SQLite with a
+   byte-identical battery.** Original scalar milestone: by probing macros/sizeof/tables from the real build —
    the misses were invisible compile-time facts, not model limits.
    **Link-back landed the same day: sqlite3 rebuilt with all 29 Rust
    functions linked in place of the C originals passes a byte-identical
