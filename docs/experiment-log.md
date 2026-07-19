@@ -451,3 +451,61 @@ correct exactly when the function is a true constant and dangerous for
 state-dependent functions like `HeapNearlyFull`. An orchestrator should
 gate constant-hardcoding escalations on the function being genuinely
 closed over visible inputs.
+
+## Rung 4++ : compiler-probe context, then SQLite with Rust *inside* (2026-07-19)
+
+Two upgrades aimed straight at the founding vision ("map a C codebase,
+rewrite components in Rust, plug them in seamlessly").
+
+### Compiler as context oracle (benchmarks/rung4_c_to_rust.py)
+
+Rung 4's misses were invisible *compile-time facts*, not model failures.
+So instead of modeling the C preprocessor, ask the build itself: for each
+function's referenced ALL-CAPS/mixed-case macros, `sizeof` targets, and
+file-scope tables, generate one probe program that `#include`s the
+amalgamation and prints every value, iteratively dropping probes the
+compiler rejects (locals, function-like macros — their `#define` text is
+supplied instead), one level of macro recursion (`IdChar` ->
+`sqlite3CtypeMap`). 26/35 components enriched with real values:
+`TK_*` token codes, `sizeof(BtCursor)=296`, the 256-byte
+`sqlite3CtypeMap`, the 187-entry `yyFallback` table.
+
+Rerun, same worklist and filters: **plug-in 76.5% -> 85.3% (26 -> 29 of
+34)**, and the wins are exactly the previously-"invisible-context"
+failures: `sqlite3IsIdChar` (needed the ctype table — was failing on
+`'$'`), `sqlite3HeaderSizeBtree` and the `sizeof` cases, `allowedOp`
+(the fabricated `TK_*` constants, now probed). Cost unchanged (~$0.20).
+Residual 5: genuine edge-case semantics (`LogEstAdd` i16 saturation) and
+two functions indexing tables too large for the leaf abstraction. Same
+harsh differential (NaN/Inf, n>=300); `HeapNearlyFull` now correctly
+*fails* (the probe removed the vacuous pass — it reads global state).
+
+### Link-back: sqlite3 rebuilt with the Rust inside (benchmarks/rung4_linkback.py)
+
+The step that makes "plugged in" literal rather than simulated. Compile
+the 29 winners into one Rust staticlib; patch the amalgamation to rename
+each C definition to `<name>__cgir_replaced` and emit an extern prototype
+(plain-static functions had no separate declaration), so every existing
+call site resolves `<name>` to the Rust symbol at link time; build two
+real `sqlite3` shells (stock vs Rust-inside) with identical flags; run a
+27-line SQL battery chosen to exercise the replaced functions (tokenizer
+identifier classing on `$`-idents, hex literals, LIKE, FTS5 MATCH,
+int/float comparison edges, `CAST double->int`, varint-heavy 500-row
+storage, ORDER BY planning, `integrity_check`).
+
+**Result: byte-identical output, and `PRAGMA integrity_check` returns
+`ok` on the Rust-inside build.** `nm` confirms all 29 symbols resolve to
+Rust text (`T _allowedOp`) with the C originals sidelined
+(`T _allowedOp__cgir_replaced`) — the calls genuinely reach the Rust.
+The state-dependent `HeapNearlyFull` is on an explicit DO_NOT_LINK list
+(rung-4 audit): its Rust is only equivalent in the untouched state, so it
+must never be linked. The 29 rewritten functions are saved at
+benchmarks/rung4-artifacts/sqlite_rust_functions.rs.
+
+**What this demonstrates:** the entire vision loop, end to end, on a real
+150k-LOC C database engine — map (scan) -> select scalar-ABI pure leaves
+-> regenerate in Rust with a cheap model + compiler-probed context ->
+verify (rustc -> contract -> differential vs compiled original) -> **link
+in place and prove the assembled program is behaviorally identical.**
+Cheap models wrote Rust that is now *running inside SQLite*, and a
+deterministic battery says you can't tell.

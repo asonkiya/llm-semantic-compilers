@@ -1,0 +1,2097 @@
+{
+  "src": "/Users/aryaman/.claude/jobs/8a8bcefc/tmp/sqlite-src",
+  "k": 3,
+  "n_trials": 300,
+  "models": {
+    "cheap": "claude-haiku-4-5-20251001",
+    "escalation": "claude-sonnet-4-6"
+  },
+  "worklist": 34,
+  "excluded": [
+    {
+      "id": "shell.KeccakF1600Step",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.anyOfInStr",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.cli_strcmp",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.cli_strncmp",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.decimal_cmp",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.fileTail",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.hash_init",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.hexDigitValue",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.initText",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.intckGetToken",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.intckIsSpace",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.lockName",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.memtraceInit",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.memtraceRoundup",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.memtraceShutdown",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.memtraceSize",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.modeTitleDsply",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.putcs",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.qrfEqpNextRow",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.qrfIsVt100",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.qrfJsonbQuickCheck",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.qrfRelaxable",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.qrfStringInArray",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.quickscan",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.rePeek",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.re_add_state",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.re_digit_char",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.re_maxnfa",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.re_space_char",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.re_word_char",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.sayAbnormalExit",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.shellScreenWidth",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.shell_strcpy",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.skipNonB64",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.skipNonB85",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.sqlite3_intck_error",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.sqlite3_qrf_wcwidth",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.strlen30",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.uintCollFunc",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.vfstraceGetSystemCall",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.vfstraceNextSystemCall",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.vfstraceSetSystemCall",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.vfstrace_errcode_name",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.wsToEol",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "shell.zSkipValidUtf8",
+      "reason": "shell.c statics are not exportable"
+    },
+    {
+      "id": "sqlite3.anotherValidCursor",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.appendText",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.binCollFunc",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.btreeCellSizeCheck",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.btreeGetHasContent",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.btreePageFromDbPage",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.btreePagecount",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.btreeParseCell",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.btreePayloadToLocal",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.cellArea",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.cellContains",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.cellMargin",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.cellOverlap",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.cellSizePtr",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.cellSizePtrIdxLeaf",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.cellSizePtrNoPayload",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.cellSizePtrTableLeaf",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.chacha_block",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.compare2pow63",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.computeCellSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.constraintCompatibleWithOuterJoin",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.copyPayload",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.countLookasideSlots",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.createMask",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.cursorOnLastPage",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.databaseName",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.disableLookaside",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.disconnectAllVtab",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.dupedExprStructSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.exprCodeSubselect",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.exprEvalRhsFirst",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.exprNodePatternLengthEst",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.exprStructSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.findLeftmostExprlist",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.findRightmost",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.fts3CommitMethod",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts3ReleaseMethod",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts3RollbackMethod",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts3RollbackToMethod",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts3UpdateMethod",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.fts5ApiColumnCount",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5ApiColumnTotalSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5ApiRowCount",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5ApiUserData",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.fts5AppendPoslist",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5AppendRowid",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5BufferCompare",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5ColumnSizeCb",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5CommitMethod",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5CountCb",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5CsrNewrow",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5CursorFromCsrid",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.fts5DlidxExtractFirstRowid",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5DlidxIterEof",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5DlidxIterPgno",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5DlidxIterRowid",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5EofMethod",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5ExprAssignXNext",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5ExprColsetTest",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5ExprCountChar",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5ExprSynonymRowid",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5GetU16",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5GetU32",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5GetU64",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5HashEntryMerge",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.fts5HashKey",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5HashKey2",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5IndexCharlen",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5IndexColsetTest",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5IndexFindDeleteMerge",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5IsContentless",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5IsTokendataPrefix",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5IterSetOutputs_Noop",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5LeafFirstTermOff",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5MultiIterEof",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5MultiIterIsEmpty",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5MultiIterRowid",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5NewTransaction",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5PoslistCallback",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5PoslistPrefix",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5PrefixCompress",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5QueryTerm",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5RenameMethod",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5RollbackMethod",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5RowidCmp",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5SegmentSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5StmtType",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5StructureRef",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5TokendataMerge",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5TokendataSetTermIfEof",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5TripCursors",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5UsePatternMatch",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.fts5V1toV2Tokenize",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.fts5V2toV1Tokenize",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.fts5yy_find_reduce_action",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.hasColumn",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.icuCollationColl",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.icuCollationDel",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.identLength",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.incrAggDepth",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.indexCellCompare",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.indexColumnNotNull",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.isAllZero",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.isSimpleCount",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.lookasideMallocSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.matchQuality",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.memjrnlRead",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.memjrnlSync",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.n",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.nocaseCollatingFunc",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.nodeReference",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.parserStackSizeLimit",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.populateCellCache",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuEditErrmsg",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuGetU32",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsCheckReservedLock",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsCurrentTime",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsDelete",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsDeviceCharacteristics",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsFullPathname",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsGetLastError",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsLock",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsRandomness",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsSectorSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsShmBarrier",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsShmLock",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsSleep",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsSync",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rbuVfsUnlock",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.readCoord",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.readInt16",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.readInt64",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rtreeBeginTransaction",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rtreeEof",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rtreeReference",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rtreeSearchPointCompare",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.rtreeSearchPointFirst",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.rtreeTokenLength",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.selectRefLeave",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3AddInt64",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeBeginStmt",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeClearCache",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeCommitPhaseOne",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeCursorHasHint",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeCursorIsValidNN",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeCursorZero",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeEof",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeFakeValidCursor",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeGetAutoVacuum",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeGetFilename",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeGetJournalname",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeGetPageSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeIsReadonly",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeMaxPageCount",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeMaxRecordSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreePager",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeSetAutoVacuum",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3BtreeUpdateMeta",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3ColumnType",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3DeferForeignKey",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3DeleteTable",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3ErrStr",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3ExprCanBeNull",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3ExprColUsed",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3ExprListFlags",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3ExprListSetSortOrder",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3ExprNeedsNoAffinityChange",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3ExprSkipCollate",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3ExprSkipCollateAndLikely",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3ExprVectorSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3ExprWalkNoop",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts3PutVarint",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5AuxInit",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5ExprEof",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5ExprPhraseCount",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5ExprPhraseSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5ExprRowid",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5Get32",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5HashIsEmpty",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5HashScanEof",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5IndexCharlenToBytelen",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5IndexEntryCksum",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5IndexIterClearTokendata",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5IndexReads",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5ParserInit",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5SetLocale",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Fts5StructureTest",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Get4byte",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3GetFuncCollSeq",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3GetTempReg",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3IndexHasDuplicateRootPage",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3IsBinary",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3JournalIsInMemory",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3JournalSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3KeyInfoRef",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3MallocEnd",
+      "reason": "void return: nothing observable to compare"
+    },
+    {
+      "id": "sqlite3.sqlite3MallocMutex",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3MallocSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3MayAbort",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3MulInt64",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3MultiWrite",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Multiply128",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Multiply160",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3NoopDestructor",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsAccess",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsCheckReservedLock",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsDelete",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsDeviceCharacteristics",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsFileControl",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsFileControlHint",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsFileSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsGetLastError",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsLock",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsOpen",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsRandomness",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsRead",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsSectorSize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsSleep",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsSync",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsTruncate",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsUnlock",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3OsWrite",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3ParserInit",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3PrimaryKeyIndex",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3Put4byte",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3RCStrRef",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3ReadOnlyShadowTables",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3ReleaseTempReg",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3SelectOpName",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3SelectWalkNoop",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3SrcItemColumnUsed",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3StrICmp",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3StrIHash",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Strlen30",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3TableColumnAffinity",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3TableColumnToIndex",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3TempInMemory",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3TestExtInit",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3TouchRegister",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Utf8CharLen",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3Utf8Read",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3VListNameToNum",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3VListNumToName",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3ValueIsOfClass",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbeChangeP5",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbeCurrentAddr",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbeDb",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbeFrameMemDel",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbeGetOp",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbeHasSubProgram",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbeMakeLabel",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbeMemTooBig",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbeParser",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbePrepareFlags",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3VdbeUsesBtree",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WalkWinDefnDummyCallback",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WalkerDepthDecrease",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WalkerDepthIncrease",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WhereBreakLabel",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WhereContinueLabel",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WhereGetMask",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3WhereIsDistinct",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WhereIsOrdered",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WhereIsSorted",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WhereOkOnePass",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WhereOrderByLimitOptLabel",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WhereOutputRowCount",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WhereUsesDeferredSeek",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3WritableSchema",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_backup_pagecount",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_backup_remaining",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_bind_parameter_count",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_column_count",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_context_db_handle",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3_data_count",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_db_handle",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3_libversion",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3_msize",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_sql",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3_stmt_busy",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_stmt_isexplain",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_stmt_readonly",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_str_errcode",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_str_length",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_str_value",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3_strnicmp",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_user_data",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3_value_encoding",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_value_frombind",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_value_nochange",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_value_pointer",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3_value_subtype",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_value_type",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3_win32_sleep",
+      "reason": "void return: nothing observable to compare"
+    },
+    {
+      "id": "sqlite3.sqlite3rbu_db",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3rbu_progress",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3rbu_state",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.sqlite3rbu_temp_size",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.strContainsChar",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.strHash",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.vdbeMergeEngineCompare",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.vdbeRecordDecodeInt",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.vdbeSkipField",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.vdbeSorterGetCompare",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.vdbeSorterMapFile",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.vdbeSorterMerge",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.whereLoopCheaperProperSubset",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.whereLoopFindLesser",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.whereLoopIsNoBetter",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.whereLoopIsOneRow",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.whereNthSubterm",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.whereOrInsert",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.winGetSystemCall",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.winHandleSeek",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.winLockFile",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.winNextSystemCall",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.winUnlockFile",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.writeCoord",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.writeInt64",
+      "reason": "non-scalar parameters (pointer/array/vararg ABI)"
+    },
+    {
+      "id": "sqlite3.yy_find_reduce_action",
+      "reason": "declaration not scalar-parseable"
+    },
+    {
+      "id": "sqlite3.sqlite3_win32_is_nt",
+      "reason": "original symbol not exported (platform/#ifdef)"
+    }
+  ],
+  "solved_cheap": 28,
+  "solved_escalation": 1,
+  "unsolved": 5,
+  "plug_in_rate": 0.853,
+  "stage_kills": {
+    "rustc": 9,
+    "differential": 16
+  },
+  "cost_usd": {
+    "cheap": 0.1406,
+    "escalation": 0.0606,
+    "total": 0.2012
+  },
+  "tokens": {
+    "claude-haiku-4-5-20251001": [
+      51633,
+      17784
+    ],
+    "claude-sonnet-4-6": [
+      4679,
+      3105
+    ]
+  },
+  "results": [
+    {
+      "component_id": "sqlite3.allowedOp",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn allowedOp(op: i32) -> i32 {\n    const TK_EQ: i32 = 54;\n    const TK_GE: i32 = 58;\n    const TK_IN: i32 = 50;\n    const TK_IS: i32 = 45;\n    const TK_ISNULL: i32 = 51;\n\n    if op > TK_GE {\n        return 0;\n    }\n    if op >= TK_EQ {\n        return 1;\n    }\n    if op == TK_IN || op == TK_ISNULL || op == TK_IS {\n        1\n    } else {\n        0\n    }\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:allowedOp"
+    },
+    {
+      "component_id": "sqlite3.countLeadingZeros",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn countLeadingZeros(m: u64) -> i32 {\n    m.leading_zeros() as i32\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:countLeadingZeros"
+    },
+    {
+      "component_id": "sqlite3.fts5ExprIsspace",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn fts5ExprIsspace(t: i8) -> i32 {\n    if t == b' ' as i8 || t == b'\\t' as i8 || t == b'\\n' as i8 || t == b'\\r' as i8 {\n        1\n    } else {\n        0\n    }\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:fts5ExprIsspace"
+    },
+    {
+      "component_id": "sqlite3.fts5_isdigit",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn fts5_isdigit(a: i8) -> i32 {\n    if a >= b'0' as i8 && a <= b'9' as i8 {\n        1\n    } else {\n        0\n    }\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:fts5_isdigit"
+    },
+    {
+      "component_id": "sqlite3.fts5_isopenquote",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn fts5_isopenquote(x: i8) -> i32 {\n    if x == b'\"' as i8 || x == b'\\'' as i8 || x == b'[' as i8 || x == b'`' as i8 {\n        1\n    } else {\n        0\n    }\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:fts5_isopenquote"
+    },
+    {
+      "component_id": "sqlite3.fts5_iswhitespace",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn fts5_iswhitespace(x: i8) -> i32 {\n    if x == b' ' as i8 {\n        1\n    } else {\n        0\n    }\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:fts5_iswhitespace"
+    },
+    {
+      "component_id": "sqlite3.isFatalError",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn isFatalError(rc: i32) -> i32 {\n    if rc != 0 && rc != 5 && rc != 6 {\n        1\n    } else {\n        0\n    }\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:isFatalError"
+    },
+    {
+      "component_id": "sqlite3.nodeHash",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn nodeHash(iNode: i64) -> u32 {\n    ((iNode as u32) % 97)\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:nodeHash"
+    },
+    {
+      "component_id": "sqlite3.pwr10to2",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn pwr10to2(p: i32) -> i32 {\n    ((p.wrapping_mul(108853)) >> 15) as i32\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:pwr10to2"
+    },
+    {
+      "component_id": "sqlite3.pwr2to10",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn pwr2to10(p: i32) -> i32 {\n    (p.wrapping_mul(78913)) >> 18\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:pwr2to10"
+    },
+    {
+      "component_id": "sqlite3.sqlite3AbsInt32",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3AbsInt32(x: i32) -> i32 {\n    if x >= 0 {\n        return x;\n    }\n    if x == -2147483648i32 {\n        return 2147483647i32;\n    }\n    -x\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3AbsInt32"
+    },
+    {
+      "component_id": "sqlite3.sqlite3BtreeCursorSize",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3BtreeCursorSize() -> i32 {\n    (((296i32 + 7) & !7))\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3BtreeCursorSize"
+    },
+    {
+      "component_id": "sqlite3.sqlite3Fts3VarintLen",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3Fts3VarintLen(mut v: u64) -> i32 {\n    let mut i: i32 = 0;\n    loop {\n        i += 1;\n        v >>= 7;\n        if v == 0 {\n            break;\n        }\n    }\n    i\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3Fts3VarintLen"
+    },
+    {
+      "component_id": "sqlite3.sqlite3Fts5IsBareword",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3Fts5IsBareword(t: i8) -> i32 {\n    const BAREWORD: [u8; 128] = [\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 1, 0, 0, 0, 0, 0,\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 0, 0, 0, 0, 0, 0,\n        0, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 1, 1, 1, 1, 1,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 0, 0, 0, 0, 1,\n        0, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 1, 1, 1, 1, 1,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 0, 0, 0, 0, 0\n    ];\n\n    if (t & 0x80) != 0 {\n        1\n    } else {\n        BAREWORD[(t as u8) as usize] as i32\n    }\n}\n",
+          "stage": "rustc",
+          "feedback": "error: literal out of range for `i8`\n  --> /var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/cand_13_1_0.rs:14:13\n   |\n14 |     if (t & 0x80) != 0 {\n   |             ^^^^\n   |\n   = note: the literal `0x80` (decimal `128`) does not fit into the type `i8` and will become `-128i8`\n   = help: consider using the type `u8` instead\n   = note: `#[deny(overflowing_literals)]` on by default\nhelp: to use as a negative number (decimal `-128`), consider using the type `u8` for the literal and cast it to `i8`\n   |\n14 |     if (t & 0x80u8 as i8) != 0 {\n   |                 ++++++++\n\nerror: aborting due to 1 previous error\n"
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3Fts5IsBareword(t: i8) -> i32 {\n    const BAREWORD: [u8; 128] = [\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 1, 0, 0, 0, 0, 0,\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 0, 0, 0, 0, 0, 0,\n        0, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 1, 1, 1, 1, 1,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 0, 0, 0, 0, 1,\n        0, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 1, 1, 1, 1, 1,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 0, 0, 0, 0, 0\n    ];\n\n    if (t & 0x80) != 0 {\n        1\n    } else {\n        BAREWORD[(t as usize) & 0x7f] as i32\n    }\n}",
+          "stage": "rustc",
+          "feedback": "error: literal out of range for `i8`\n  --> /var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/cand_13_2_1.rs:14:13\n   |\n14 |     if (t & 0x80) != 0 {\n   |             ^^^^\n   |\n   = note: the literal `0x80` (decimal `128`) does not fit into the type `i8` and will become `-128i8`\n   = help: consider using the type `u8` instead\n   = note: `#[deny(overflowing_literals)]` on by default\nhelp: to use as a negative number (decimal `-128`), consider using the type `u8` for the literal and cast it to `i8`\n   |\n14 |     if (t & 0x80u8 as i8) != 0 {\n   |                 ++++++++\n\nerror: aborting due to 1 previous error\n"
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3Fts5IsBareword(t: i8) -> i32 {\n    const BAREWORD: [u8; 128] = [\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 1, 0, 0, 0, 0, 0,\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 0, 0, 0, 0, 0, 0,\n        0, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 1, 1, 1, 1, 1,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 0, 0, 0, 0, 1,\n        0, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 1, 1, 1, 1, 1,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 0, 0, 0, 0, 0\n    ];\n    \n    let high_bit = (t & 0x80) as i32;\n    let index = (t as u8) as usize;\n    let lookup = if index < 128 { BAREWORD[index] as i32 } else { 0 };\n    \n    if high_bit != 0 { 1 } else { lookup }\n}\n",
+          "stage": "rustc",
+          "feedback": "error: literal out of range for `i8`\n  --> /var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/cand_13_3_2.rs:14:25\n   |\n14 |     let high_bit = (t & 0x80) as i32;\n   |                         ^^^^\n   |\n   = note: the literal `0x80` (decimal `128`) does not fit into the type `i8` and will become `-128i8`\n   = help: consider using the type `u8` instead\n   = note: `#[deny(overflowing_literals)]` on by default\nhelp: to use as a negative number (decimal `-128`), consider using the type `u8` for the literal and cast it to `i8`\n   |\n14 |     let high_bit = (t & 0x80u8 as i8) as i32;\n   |                             ++++++++\n\nerror: aborting due to 1 previous error\n"
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3Fts5IsBareword(t: i8) -> i32 {\n    let bare_word: [u8; 128] = [\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 1, 0, 0, 0, 0, 0,\n        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 0, 0, 0, 0, 0, 0,\n        0, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 1, 1, 1, 1, 1,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 0, 0, 0, 0, 1,\n        0, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 1, 1, 1, 1, 1,\n        1, 1, 1, 1, 1, 1, 1, 1,    1, 1, 1, 0, 0, 0, 0, 0,\n    ];\n    let tu = t as u8;\n    let high_bit = (tu & 0x80u8) as i32;\n    if high_bit != 0 {\n        return high_bit;\n    }\n    bare_word[tu as usize] as i32\n}",
+          "stage": "differential",
+          "feedback": "differential mismatch on 136/300 inputs; e.g. sqlite3Fts5IsBareword([-3]): C returned 1, Rust returned 128"
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": ""
+    },
+    {
+      "component_id": "sqlite3.sqlite3Fts5ParserFallback",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3Fts5ParserFallback(iToken: i32) -> i32 {\n    #[cfg(feature = \"fts5YYFALLBACK\")]\n    {\n        // In the C code, fts5yyFallback is a static array. Since we don't have\n        // access to it, we return 0 as a safe default that matches the behavior\n        // when the feature is disabled.\n        0\n    }\n    #[cfg(not(feature = \"fts5YYFALLBACK\"))]\n    {\n        0\n    }\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3Fts5ParserFallback"
+    },
+    {
+      "component_id": "sqlite3.sqlite3HeaderSizeBtree",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3HeaderSizeBtree() -> i32 {\n    ((136 + 7) & !7) as i32\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3HeaderSizeBtree"
+    },
+    {
+      "component_id": "sqlite3.sqlite3HeapNearlyFull",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3HeapNearlyFull() -> i32 {\n    unsafe {\n        let mem0_ptr = &crate::mem0 as *const _ as *const i32;\n        std::ptr::read_volatile(mem0_ptr)\n    }\n}\n",
+          "stage": "rustc",
+          "feedback": "error[E0425]: cannot find value `mem0` in the crate root\n --> /var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/cand_16_1_0.rs:4:32\n  |\n4 |         let mem0_ptr = &crate::mem0 as *const _ as *const i32;\n  |                                ^^^^ not found in the crate root\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0425`."
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3HeapNearlyFull() -> i32 {\n    unsafe {\n        std::sync::atomic::AtomicI32::load(\n            &mem0.nearlyFull as *const i32 as *const std::sync::atomic::AtomicI32,\n            std::sync::atomic::Ordering::Relaxed,\n        )\n    }\n}\n",
+          "stage": "rustc",
+          "feedback": "error[E0425]: cannot find value `mem0` in this scope\n --> /var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/cand_16_2_1.rs:5:14\n  |\n5 |             &mem0.nearlyFull as *const i32 as *const std::sync::atomic::AtomicI32,\n  |              ^^^^ not found in this scope\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0425`."
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3HeapNearlyFull() -> i32 {\n    unsafe {\n        let mem0_ptr = &crate::mem0 as *const _ as *const i32;\n        std::sync::atomic::AtomicI32::from_ptr(mem0_ptr as *mut i32)\n            .load(std::sync::atomic::Ordering::Relaxed)\n    }\n}\n",
+          "stage": "rustc",
+          "feedback": "error[E0425]: cannot find value `mem0` in the crate root\n --> /var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/cand_16_3_2.rs:4:32\n  |\n4 |         let mem0_ptr = &crate::mem0 as *const _ as *const i32;\n  |                                ^^^^ not found in the crate root\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0425`."
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3HeapNearlyFull() -> i32 {\n    extern \"C\" {\n        static mut mem0: [u8; 0];\n    }\n    unsafe {\n        let base = &mem0 as *const _ as *const u8;\n        // nearlyFull is an int field in struct Mem0Global; we read it via FFI symbol\n        // by linking against the actual mem0 global and performing an atomic relaxed load.\n        // The nearlyFull field offset: we use a dedicated extern symbol if available,\n        // otherwise we must rely on the C linker providing sqlite3HeapNearlyFull itself.\n        // Since we cannot replicate the global, call the real C implementation via a\n        // trampoline \u2014 but that would be circular. Instead, expose the field via a\n        // separately-linked C helper that returns the value.\n        //\n        // Given constraints: the contract says no globals visible to caller,\n        // but the C function does read a global. We faithfully translate by\n        // reading the same global through an extern declaration of the field.\n        let _ = base;\n\n        // Declare the actual mem0 global with its C linkage name\n        extern \"C\" {\n            #[link_name = \"mem0\"]\n            static mem0_global: core::sync::atomic::AtomicI32;\n        }\n        // nearlyFull is the first int field; treat mem0_global as pointer to struct start\n        // and read nearlyFull at the correct offset.\n        // Without knowing exact offset, we use a separate extern for nearlyFull field\n        // via a known pattern: sqlite3 exposes mem0.nearlyFull through the global.\n        // We read it with relaxed atomic semantics matching __ATOMIC_RELAXED.\n        mem0_global.load(core::sync::atomic::Ordering::Relaxed)\n    }\n}",
+          "stage": "rustc",
+          "feedback": "warning: creating a shared reference to mutable static\n --> /var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/cand_16_4_0.rs:7:20\n  |\n7 |         let base = &mem0 as *const _ as *const u8;\n  |                    ^^^^^ shared reference to mutable static\n  |\n  = note: shared references to mutable statics are dangerous; it's undefined behavior if the static is mutated or if a mutable reference is created for it while the shared reference lives\n  = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/static-mut-references.html>\n  = note: `#[warn(static_mut_refs)]` (part of `#[warn(rust_2024_compatibility)]`) on by default\nhelp: use `&raw const` instead to create a raw pointer\n  |\n7 |         let base = &raw const mem0 as *const _ as *const u8;\n  |                     +++++++++\n\nerror: linking with `cc` failed: exit status: 1\n  |\n  = note:  \"cc\" \"-Wl,-exported_symbols_list\" \"-Wl,/var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/rustc299LH4/list\" \"/var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/rustc299LH4/symbols.o\" \"<2 object files omitted>\" \"<sysroot>/lib/rustlib/aarch64-apple-darwin/lib/{libstd-*,libpanic_unwind-*,libobject-*,libmemchr-*,libaddr2line-*,libgimli-*,libcfg_if-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libminiz_oxide-*,libadler2-*,libunwind-*,liblibc-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib\" \"-lSystem\" \"-lc\" \"-lm\" \"-arch\" \"arm64\" \"-mmacosx-version-min=11.0.0\" \"-o\" \"/var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/cand_16_4_0.dylib\" \"-Wl,-dead_strip\" \"-dynamiclib\" \"-nodefaultlibs\"\n  = note: some arguments are omitted. use `--verbose` to show all linker arguments\n  = note: ld: warning: object file (/opt/homebrew/Cellar/rust/1.96.0/lib/rustlib/aarch64-apple-darwin/lib/libstd-cc9b12538d143830.rlib[3](std-cc9b12538d143830.std.c33759237183c8b4-cgu.0.rcgu.o)) was built for newer 'macOS' version (26.0) than being linked (11.0)\n          ld: warning: object file (/opt/homebrew/Cellar/rust/1.96.0/lib/rustlib/aarch64-apple-darwin/lib/libpanic_unwind-cd972899c3046148.rlib[3](panic_unwind-cd972899c3046148.panic_unwind.2ba835581695215d-cgu.0.rcgu.o)) was built for newer 'macOS' version (26.0) than being linked (11.0)\n          ld: warning: object file (/opt/homebrew/Cellar/rust/1.96.0/lib/rustlib/aarch64-apple-darwin/lib/libobject-4add5eb2cae66b76.rlib[3](object-4add5eb2cae66b76.object.e0d24967a9b99662-cgu.0.rcgu.o)) was built for newer 'macOS' version (26.0) than being linked (11.0)\n          ld: warning: object file (/opt/homebrew/Cellar/rust/1.96.0/lib/rustlib/aarch64-apple-darwin/lib/libaddr2line-fda65f5d7f2615cc.rlib[3](addr2line-fda65f5d7f2615cc.addr2line.872b8852d21bf7fc-cgu.0.rcgu.o)) was built for newer 'macOS' version (26.0) than being linked (11.0)\n          ld: warning: object file (/opt/homebrew/Cellar/rust/1.96.0/lib/rustlib/aarch64-apple-darwin/lib/libgimli-63a8931d90f026f6.rlib[3](gimli-63a8931d90f026f6.gimli.10cbf4cc077ba848-cgu.0.rcgu.o)) was built for newer 'macOS' version (26.0) than being linked (11.0)\n          ld: warning: object file (/opt/homebrew/Cellar/rust/1.96.0/lib/rustlib/aarch64-apple-darwin/lib/librustc_demangle-ca4687f84ba3e680.rlib[3](rustc_demangle-ca4687f84ba3e680.rustc_demangle.df2aea47a408bfb3-cgu.0.rcgu.o)) was built for newer 'macOS' version (26.0) than being linked (11.0)\n          ld: warning: object file (/opt/homebrew/Cellar/rust/1.96.0/lib/rustlib/aarch64-apple-darwin/lib/liballoc-5bf869af80bcc693.rlib[3](alloc-5bf869af80bcc693.alloc.fbf9223668f5aeee-cgu.0.rcgu.o)) was built for newer 'macOS' version (26.0) than being linked (11.0)"
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": ""
+    },
+    {
+      "component_id": "sqlite3.sqlite3HexToInt",
+      "solved_by": "escalation",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3HexToInt(h: i32) -> u8 {\n    let mut h = h;\n    h = h.wrapping_add(9 * (1 & (h >> 6)));\n    h = h.wrapping_add(9 * (1 & !(h >> 4)));\n    (h & 0xf) as u8\n}",
+          "stage": "differential",
+          "feedback": "differential mismatch on 186/300 inputs; e.g. sqlite3HexToInt([0]): C returned 0, Rust returned 9"
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3HexToInt(mut h: i32) -> u8 {\n    // SQLITE_ASCII branch (h += 9*(1&(h>>6)))\n    h = h.wrapping_add(9 * (1 & (h >> 6)));\n    \n    // SQLITE_EBCDIC branch (h += 9*(1&~(h>>4)))\n    h = h.wrapping_add(9 * (1 & !(h >> 4)));\n    \n    (h & 0xf) as u8\n}",
+          "stage": "differential",
+          "feedback": "differential mismatch on 186/300 inputs; e.g. sqlite3HexToInt([0]): C returned 0, Rust returned 9"
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3HexToInt(h: i32) -> u8 {\n    let mut h = h;\n    \n    // SQLITE_ASCII is defined (value 1)\n    h = h.wrapping_add(9 * ((1 & (h >> 6)) as i32));\n    \n    // SQLITE_EBCDIC is also defined (value 1)\n    h = h.wrapping_add(9 * ((1 & (!(h >> 4))) as i32));\n    \n    (h & 0xf) as u8\n}\n",
+          "stage": "differential",
+          "feedback": "differential mismatch on 186/300 inputs; e.g. sqlite3HexToInt([0]): C returned 0, Rust returned 9"
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3HexToInt(h: i32) -> u8 {\n    let h = h.wrapping_add(9i32.wrapping_mul(1 & (h >> 6)));\n    (h & 0xf) as u8\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3HexToInt"
+    },
+    {
+      "component_id": "sqlite3.sqlite3IntFloatCompare",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3IntFloatCompare(i: i64, r: f64) -> i32 {\n    if r.is_nan() {\n        return 1;\n    }\n    \n    if r < -9223372036854775808.0 {\n        return 1;\n    }\n    if r >= 9223372036854775808.0 {\n        return -1;\n    }\n    \n    let y = r as i64;\n    if i < y {\n        return -1;\n    }\n    if i > y {\n        return 1;\n    }\n    \n    let i_as_f64 = i as f64;\n    if i_as_f64 < r {\n        -1\n    } else if i_as_f64 > r {\n        1\n    } else {\n        0\n    }\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3IntFloatCompare"
+    },
+    {
+      "component_id": "sqlite3.sqlite3IsIdChar",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3IsIdChar(c: u8) -> i32 {\n    const SQLITE_CTYPE_MAP: [u8; 256] = [\n        0,0,0,0,0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,128,0,64,0,0,128,0,0,0,0,0,0,0,0,12,12,12,12,12,12,12,12,12,12,0,0,0,0,0,0,0,10,10,10,10,10,10,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,128,0,0,0,64,128,42,42,42,42,42,42,34,34,34,34,34,34,34,34,34,34,34,34,34,34,34,34,34,34,34,34,0,0,0,0,0,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,\n    ];\n    \n    let idx = c as usize;\n    if (SQLITE_CTYPE_MAP[idx] & 0x46) != 0 { 1 } else { 0 }\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3IsIdChar"
+    },
+    {
+      "component_id": "sqlite3.sqlite3LogEst",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3LogEst(mut x: u64) -> i16 {\n    const A: &[i16] = &[0, 2, 3, 5, 6, 7, 8, 9];\n    let mut y: i16 = 40;\n    \n    if x < 8 {\n        if x < 2 {\n            return 0;\n        }\n        while x < 8 {\n            y -= 10;\n            x <<= 1;\n        }\n    } else {\n        // GCC_VERSION = 4002001, which is < 5004000, so else branch\n        while x > 255 {\n            y += 40;\n            x >>= 4;\n        }\n        while x > 15 {\n            y += 10;\n            x >>= 1;\n        }\n    }\n    \n    A[(x & 7) as usize].wrapping_add(y).wrapping_sub(10)\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3LogEst"
+    },
+    {
+      "component_id": "sqlite3.sqlite3LogEstAdd",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3LogEstAdd(a: i16, b: i16) -> i16 {\n    const X: &[u8] = &[\n        10, 10,                   // 0,1\n        9, 9,                     // 2,3\n        8, 8,                     // 4,5\n        7, 7, 7,                  // 6,7,8\n        6, 6, 6,                  // 9,10,11\n        5, 5, 5,                  // 12-14\n        4, 4, 4, 4,               // 15-18\n        3, 3, 3, 3, 3, 3,         // 19-24\n        2, 2, 2, 2, 2, 2, 2,      // 25-31\n    ];\n\n    if a >= b {\n        if a > b.wrapping_add(49) {\n            return a;\n        }\n        if a > b.wrapping_add(31) {\n            return a.wrapping_add(1);\n        }\n        let idx = (a.wrapping_sub(b)) as usize;\n        return a.wrapping_add(X[idx] as i16);\n    } else {\n        if b > a.wrapping_add(49) {\n            return b;\n        }\n        if b > a.wrapping_add(31) {\n            return b.wrapping_add(1);\n        }\n        let idx = (b.wrapping_sub(a)) as usize;\n        return b.wrapping_add(X[idx] as i16);\n    }\n}",
+          "stage": "differential",
+          "feedback": "differential mismatch on 1/300 inputs; e.g. sqlite3LogEstAdd([32767, 32767]): C returned -32759, Rust returned 32767"
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3LogEstAdd(a: i16, b: i16) -> i16 {\n    const X: &[u8] = &[\n        10, 10,                         /* 0,1 */\n        9, 9,                          /* 2,3 */\n        8, 8,                          /* 4,5 */\n        7, 7, 7,                       /* 6,7,8 */\n        6, 6, 6,                       /* 9,10,11 */\n        5, 5, 5,                       /* 12-14 */\n        4, 4, 4, 4,                    /* 15-18 */\n        3, 3, 3, 3, 3, 3,              /* 19-24 */\n        2, 2, 2, 2, 2, 2, 2,           /* 25-31 */\n    ];\n    \n    if a >= b {\n        if a > b + 49 {\n            return a;\n        }\n        if a > b + 31 {\n            return a + 1;\n        }\n        let diff = (a - b) as usize;\n        return a + X[diff] as i16;\n    } else {\n        if b > a + 49 {\n            return b;\n        }\n        if b > a + 31 {\n            return b + 1;\n        }\n        let diff = (b - a) as usize;\n        return b + X[diff] as i16;\n    }\n}",
+          "stage": "differential",
+          "feedback": "differential mismatch on 1/300 inputs; e.g. sqlite3LogEstAdd([32767, 32767]): C returned -32759, Rust returned 32767"
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3LogEstAdd(a: i16, b: i16) -> i16 {\n    const X: &[u8] = &[\n        10, 10,                    // 0,1\n        9, 9,                      // 2,3\n        8, 8,                      // 4,5\n        7, 7, 7,                   // 6,7,8\n        6, 6, 6,                   // 9,10,11\n        5, 5, 5,                   // 12-14\n        4, 4, 4, 4,                // 15-18\n        3, 3, 3, 3, 3, 3,          // 19-24\n        2, 2, 2, 2, 2, 2, 2,       // 25-31\n    ];\n\n    if a >= b {\n        if a > b + 49 {\n            a\n        } else if a > b + 31 {\n            a + 1\n        } else {\n            let idx = (a - b) as usize;\n            a + X[idx] as i16\n        }\n    } else {\n        if b > a + 49 {\n            b\n        } else if b > a + 31 {\n            b + 1\n        } else {\n            let idx = (b - a) as usize;\n            b + X[idx] as i16\n        }\n    }\n}\n",
+          "stage": "differential",
+          "feedback": "differential mismatch on 1/300 inputs; e.g. sqlite3LogEstAdd([32767, 32767]): C returned -32759, Rust returned 32767"
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3LogEstAdd(a: i16, b: i16) -> i16 {\n    static X: [u8; 32] = [\n        10, 10, // 0,1\n         9,  9, // 2,3\n         8,  8, // 4,5\n         7,  7,  7, // 6,7,8\n         6,  6,  6, // 9,10,11\n         5,  5,  5, // 12-14\n         4,  4,  4,  4, // 15-18\n         3,  3,  3,  3,  3,  3, // 19-24\n         2,  2,  2,  2,  2,  2,  2, // 25-31\n    ];\n    if a >= b {\n        if a > b.wrapping_add(49) { return a; }\n        if a > b.wrapping_add(31) { return a.wrapping_add(1); }\n        return a.wrapping_add(X[(a - b) as usize] as i16);\n    } else {\n        if b > a.wrapping_add(49) { return b; }\n        if b > a.wrapping_add(31) { return b.wrapping_add(1); }\n        return b.wrapping_add(X[(b - a) as usize] as i16);\n    }\n}",
+          "stage": "differential",
+          "feedback": "differential mismatch on 1/300 inputs; e.g. sqlite3LogEstAdd([32767, 32767]): C returned -32759, Rust returned 32767"
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": ""
+    },
+    {
+      "component_id": "sqlite3.sqlite3LogEstToInt",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3LogEstToInt(mut x: i16) -> u64 {\n    let mut n: i16;\n    n = x % 10;\n    x /= 10;\n    if n >= 5 {\n        n -= 2;\n    } else if n >= 1 {\n        n -= 1;\n    }\n    if x > 60 {\n        return 9223372036854775807u64;\n    }\n    let n_plus_8 = (n as u64).wrapping_add(8);\n    if x >= 3 {\n        n_plus_8 << (x as u32 - 3)\n    } else {\n        n_plus_8 >> (3 - x as u32)\n    }\n}",
+          "stage": "differential",
+          "feedback": "differential mismatch on 38/300 inputs; e.g. sqlite3LogEstToInt([-32768]): C returned 562949953421311, Rust returned 0"
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3LogEstToInt(mut x: i16) -> u64 {\n    let mut n: u64 = (x % 10) as u64;\n    x /= 10;\n    if n >= 5 {\n        n -= 2;\n    } else if n >= 1 {\n        n -= 1;\n    }\n    if x > 60 {\n        return 9223372036854775807u64;\n    }\n    if x >= 3 {\n        (n + 8) << (x - 3)\n    } else {\n        (n + 8) >> (3 - x)\n    }\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3LogEstToInt"
+    },
+    {
+      "component_id": "sqlite3.sqlite3ParserFallback",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3ParserFallback(iToken: i32) -> i32 {\n    const YY_FALLBACK: [i32; 187] = [\n        0, 0, 60, 60, 60, 60, 0, 60, 60, 60, 0, 60, 60, 60, 60, 0, 0, 0, 60, 0, 0, 60, 0, 0, 0, 0, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 0, 0, 0, 0, 60, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,\n    ];\n    \n    if iToken >= 0 && iToken < YY_FALLBACK.len() as i32 {\n        YY_FALLBACK[iToken as usize]\n    } else {\n        0\n    }\n}\n",
+          "stage": "rustc",
+          "feedback": "error[E0308]: mismatched types\n --> /var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/cand_23_1_0.rs:3:37\n  |\n3 |       const YY_FALLBACK: [i32; 187] = [\n  |  ________________________----------___^\n  | |                        |\n  | |                        expected because of the type of the constant\n4 | |         0, 0, 60, 60, 60, 60, 0, 60, 60, 60, 0, 60, 60, 60, 60, 0, 0, 0, 60, 0, 0, 60, 0, 0, 0, 0, 60, 60, 60, 60, 60, 60, 60, 60, ...\n5 | |     ];\n  | |_____^ expected an array with a size of 187, found one with a size of 179\n  |\nhelp: consider specifying the actual array length\n  |\n3 -     const YY_FALLBACK: [i32; 187] = [\n3 +     const YY_FALLBACK: [i32; 179] = [\n  |\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0308`."
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3ParserFallback(iToken: i32) -> i32 {\n    const YY_FALLBACK: &[i32] = &[0,0,60,60,60,60,0,60,60,60,0,60,60,60,60,0,0,0,60,0,0,60,0,0,0,0,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,0,0,0,0,60,60,0,0,0,0,0,0,0,0,0,0,0,0,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];\n    \n    if iToken >= 0 && (iToken as usize) < YY_FALLBACK.len() {\n        YY_FALLBACK[iToken as usize]\n    } else {\n        0\n    }\n}\n",
+          "stage": "differential",
+          "feedback": "differential: process died (Rust abort?) near input TRIAL [-1095681136]"
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3ParserFallback(iToken: i32) -> i32 {\n    const YY_FALLBACK: &[i32] = &[0,0,60,60,60,60,0,60,60,60,0,60,60,60,60,0,0,0,60,0,0,60,0,0,0,0,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,0,0,0,0,60,60,0,0,0,0,0,0,0,0,0,0,0,0,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];\n    \n    if iToken >= 0 && (iToken as usize) < YY_FALLBACK.len() {\n        YY_FALLBACK[iToken as usize]\n    } else {\n        0\n    }\n}\n",
+          "stage": "differential",
+          "feedback": "differential: process died (Rust abort?) near input TRIAL [-1095681136]"
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3ParserFallback(iToken: i32) -> i32 {\n    static YY_FALLBACK: [i32; 187] = [0,0,60,60,60,60,0,60,60,60,0,60,60,60,60,0,0,0,60,0,0,60,0,0,0,0,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,0,0,0,0,60,60,0,0,0,0,0,0,0,0,0,0,0,0,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];\n    if iToken < 0 || iToken >= 187 {\n        return 0;\n    }\n    YY_FALLBACK[iToken as usize]\n}",
+          "stage": "differential",
+          "feedback": "differential: process died (Rust abort?) near input TRIAL [-1095681136]"
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": ""
+    },
+    {
+      "component_id": "sqlite3.sqlite3RealSameAsInt",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3RealSameAsInt(r1: f64, i: i64) -> i32 {\n    let r2 = i as f64;\n    let result = r1 == 0.0\n        || (r1.to_bits() == r2.to_bits()\n            && i >= -2251799813685248i64\n            && i < 2251799813685248i64);\n    if result { 1 } else { 0 }\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3RealSameAsInt"
+    },
+    {
+      "component_id": "sqlite3.sqlite3RealToI64",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3RealToI64(r: f64) -> i64 {\n    if r < -9223372036854774784.0 {\n        -9223372036854775808\n    } else if r > 9223372036854774784.0 {\n        9223372036854775807\n    } else {\n        r as i64\n    }\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3RealToI64"
+    },
+    {
+      "component_id": "sqlite3.sqlite3VarintLen",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3VarintLen(mut v: u64) -> i32 {\n    let mut i: i32 = 1;\n    while (v >>= 7) != 0 {\n        i += 1;\n    }\n    i\n}",
+          "stage": "rustc",
+          "feedback": "error[E0308]: mismatched types\n --> /var/folders/v1/_mthq7_n3s12sb5zkspgcfs40000gn/T/cgir-rung4-ve2t9jid/cand_26_1_0.rs:4:24\n  |\n4 |     while (v >>= 7) != 0 {\n  |           ---------    ^ expected `()`, found integer\n  |           |\n  |           expected because this is `()`\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0308`."
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3VarintLen(mut v: u64) -> i32 {\n    let mut i: i32 = 1;\n    while {\n        v >>= 7;\n        v != 0\n    } {\n        i += 1;\n    }\n    i\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3VarintLen"
+    },
+    {
+      "component_id": "sqlite3.sqlite3VdbeOneByteSerialTypeLen",
+      "solved_by": null,
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3VdbeOneByteSerialTypeLen(serial_type: u8) -> u8 {\n    const SQLITE_SMALL_TYPE_SIZES: [u8; 128] = [\n        0, 1, 2, 3, 4, 6, 8, 8, 0, 0, 0, 0, 0, 0, 1, 1,\n        2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9,\n        10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17,\n        18, 18, 19, 19, 20, 20, 21, 21, 22, 22, 23, 23, 24, 24, 25, 25,\n        26, 26, 27, 27, 28, 28, 29, 29, 30, 30, 31, 31, 32, 32, 33, 33,\n        34, 34, 35, 35, 36, 36, 37, 37, 38, 38, 39, 39, 40, 40, 41, 41,\n        42, 42, 43, 43, 44, 44, 45, 45, 46, 46, 47, 47, 48, 48, 49, 49,\n        50, 50, 51, 51, 52, 52, 53, 53, 54, 54, 55, 55, 56, 56, 57, 57,\n    ];\n    \n    SQLITE_SMALL_TYPE_SIZES[(serial_type & 0x7F) as usize]\n}\n",
+          "stage": "differential",
+          "feedback": "differential mismatch on 108/300 inputs; e.g. sqlite3VdbeOneByteSerialTypeLen([255]): C returned 0, Rust returned 57"
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3VdbeOneByteSerialTypeLen(serial_type: u8) -> u8 {\n    const SQLITE_SMALL_TYPE_SIZES: [u8; 128] = [\n        0,1,2,3,4,6,8,8,0,0,0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,\n        10,10,11,11,12,12,13,13,14,14,15,15,16,16,17,17,18,18,19,19,20,20,21,21,22,22,23,23,24,24,25,25,\n        26,26,27,27,28,28,29,29,30,30,31,31,32,32,33,33,34,34,35,35,36,36,37,37,38,38,39,39,40,40,41,41,\n        42,42,43,43,44,44,45,45,46,46,47,47,48,48,49,49,50,50,51,51,52,52,53,53,54,54,55,55,56,56,57,57\n    ];\n    SQLITE_SMALL_TYPE_SIZES[(serial_type & 0x7f) as usize]\n}\n",
+          "stage": "differential",
+          "feedback": "differential mismatch on 108/300 inputs; e.g. sqlite3VdbeOneByteSerialTypeLen([255]): C returned 0, Rust returned 57"
+        },
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3VdbeOneByteSerialTypeLen(serial_type: u8) -> u8 {\n    const SQLITE_SMALL_TYPE_SIZES: &[u8; 128] = &[0,1,2,3,4,6,8,8,0,0,0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14,15,15,16,16,17,17,18,18,19,19,20,20,21,21,22,22,23,23,24,24,25,25,26,26,27,27,28,28,29,29,30,30,31,31,32,32,33,33,34,34,35,35,36,36,37,37,38,38,39,39,40,40,41,41,42,42,43,43,44,44,45,45,46,46,47,47,48,48,49,49,50,50,51,51,52,52,53,53,54,54,55,55,56,56,57,57];\n    SQLITE_SMALL_TYPE_SIZES[serial_type as usize]\n}\n",
+          "stage": "differential",
+          "feedback": "differential: process died (Rust abort?) near input TRIAL [255]"
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3VdbeOneByteSerialTypeLen(serial_type: u8) -> u8 {\n    const SQLITE_SMALL_TYPE_SIZES: [u8; 128] = [\n        0,1,2,3,4,6,8,8,0,0,0,0,0,0,1,1,\n        2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,\n        10,10,11,11,12,12,13,13,14,14,15,15,16,16,17,17,\n        18,18,19,19,20,20,21,21,22,22,23,23,24,24,25,25,\n        26,26,27,27,28,28,29,29,30,30,31,31,32,32,33,33,\n        34,34,35,35,36,36,37,37,38,38,39,39,40,40,41,41,\n        42,42,43,43,44,44,45,45,46,46,47,47,48,48,49,49,\n        50,50,51,51,52,52,53,53,54,54,55,55,56,56,57,57,\n    ];\n    // The C code asserts serial_type < 128, but we must not panic for any input.\n    // For inputs >= 128, we mask to stay in bounds, matching the assert behavior\n    // without panicking.\n    let index = (serial_type & 0x7f) as usize;\n    SQLITE_SMALL_TYPE_SIZES[index]\n}",
+          "stage": "differential",
+          "feedback": "differential mismatch on 108/300 inputs; e.g. sqlite3VdbeOneByteSerialTypeLen([255]): C returned 0, Rust returned 57"
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": ""
+    },
+    {
+      "component_id": "sqlite3.sqlite3VdbeSerialTypeLen",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3VdbeSerialTypeLen(serial_type: u32) -> u32 {\n    const SQLITE_SMALL_TYPE_SIZES: [u32; 128] = [\n        0, 1, 2, 3, 4, 6, 8, 8, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9,\n        10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17, 18, 18, 19, 19, 20, 20, 21, 21, 22, 22, 23, 23, 24, 24, 25, 25,\n        26, 26, 27, 27, 28, 28, 29, 29, 30, 30, 31, 31, 32, 32, 33, 33, 34, 34, 35, 35, 36, 36, 37, 37, 38, 38, 39, 39, 40, 40, 41, 41,\n        42, 42, 43, 43, 44, 44, 45, 45, 46, 46, 47, 47, 48, 48, 49, 49, 50, 50, 51, 51, 52, 52, 53, 53, 54, 54, 55, 55, 56, 56, 57, 57,\n    ];\n\n    if serial_type >= 128 {\n        (serial_type.wrapping_sub(12)) / 2\n    } else {\n        SQLITE_SMALL_TYPE_SIZES[serial_type as usize]\n    }\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3VdbeSerialTypeLen"
+    },
+    {
+      "component_id": "sqlite3.sqlite3_keyword_count",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3_keyword_count() -> i32 {\n    147\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3_keyword_count"
+    },
+    {
+      "component_id": "sqlite3.sqlite3_libversion_number",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3_libversion_number() -> i32 {\n    3053003\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3_libversion_number"
+    },
+    {
+      "component_id": "sqlite3.sqlite3_release_memory",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3_release_memory(n: i32) -> i32 {\n    let _ = n;\n    0\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3_release_memory"
+    },
+    {
+      "component_id": "sqlite3.sqlite3_threadsafe",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn sqlite3_threadsafe() -> i32 {\n    1\n}",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:sqlite3_threadsafe"
+    },
+    {
+      "component_id": "sqlite3.vdbeSorterTreeDepth",
+      "solved_by": "cheap",
+      "attempts": [
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "candidate": "#[no_mangle]\npub extern \"C\" fn vdbeSorterTreeDepth(nPMA: i32) -> i32 {\n    let mut nDepth: i32 = 0;\n    let mut nDiv: i64 = 16;\n    while nDiv < (nPMA as i64) {\n        nDiv = nDiv.wrapping_mul(16);\n        nDepth = nDepth.wrapping_add(1);\n    }\n    nDepth\n}\n",
+          "stage": "ok",
+          "feedback": ""
+        }
+      ],
+      "excluded": "",
+      "regenerated_as": "rust:vdbeSorterTreeDepth"
+    }
+  ]
+}

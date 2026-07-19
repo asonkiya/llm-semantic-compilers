@@ -83,7 +83,14 @@ useful — and it funds the credibility of the flagship.
    deterministically and map onto the stated ceilings. Scalars are the
    easy 8.5% of SQLite's 400 pure leaves — 258 are pointer/array ABIs.
    Next unlock: macro/sizeof context enrichment, then pointer/struct
-   marshaling.
+   marshaling. **Compiler-probe context (2026-07-19) lifted this to
+   29/34 (85.3%)** by probing macros/sizeof/tables from the real build —
+   the misses were invisible compile-time facts, not model limits.
+   **Link-back landed the same day: sqlite3 rebuilt with all 29 Rust
+   functions linked in place of the C originals passes a byte-identical
+   SQL battery and `PRAGMA integrity_check` — cheap-model Rust running
+   *inside* SQLite, provably indistinguishable.** This is the founding
+   vision demonstrated at one rung's scale.
 5. **Differential harness** — contract equivalence ≠ behavioral
    equivalence. Capture/replay at the component boundary: record real
    inputs/outputs of the old implementation, replay against the new one.

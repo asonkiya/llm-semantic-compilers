@@ -219,18 +219,155 @@ def exported_symbols(dylib: Path, names: list[str]) -> set[str]:
     return {n for n in names if hasattr(lib, n)}
 
 
+def probe_compile_time_context(src: Path, entries: list[Entry], workdir: Path) -> dict[str, str]:
+    """The C compiler as context oracle.
+
+    Rung 4's misses were invisible compile-time facts: macro values,
+    ``sizeof`` of internal structs, file-scope lookup tables. Instead of
+    modeling the preprocessor, ask the build itself: generate one probe
+    program that ``#include``s the amalgamation and prints every value the
+    worklist references, iteratively dropping probes the compiler rejects
+    (locals, non-macros, function-like uses). Returns component_id ->
+    rendered context block for the prompt.
+    """
+    amalg = workdir / "sqlite3_probe.c"
+    amalg.write_text((src / "sqlite3.c").read_text())
+    all_text = amalg.read_text()
+
+    # #define texts (with backslash continuations) for names used
+    # function-like or where a numeric probe fails — the definition itself
+    # is context.
+    define_text: dict[str, str] = {}
+    for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+(\w+)(.*(?:\\\n.*)*)", all_text, re.M):
+        define_text.setdefault(m.group(1), f"#define {m.group(1)}{m.group(2)}"[:300])
+
+    wants: dict[str, tuple[set[str], set[str], set[str]]] = {}
+    macros: set[str] = set()
+    arrays: set[str] = set()
+    sizeofs: set[str] = set()
+    for e in entries:
+        local_names = set(
+            re.findall(r"\b(?:(?!return\b|case\b|goto\b)[a-z]\w*\s+)+(\w+)\s*(?:=|;|\[)", e.source)
+        )
+        caps = set(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", e.source)) - {"NULL"}
+        # mixed-case macros (IdChar, ROUND8-style) — anything the amalgamation
+        # #defines that this source mentions
+        caps |= {w for w in re.findall(r"\b[A-Za-z_]\w*\b", e.source) if w in define_text}
+        arrs = {
+            a
+            for a in re.findall(r"\b([A-Za-z_]\w*)\s*\[", e.source)
+            if a not in {n for _, n in e.params} and a not in local_names and not a.isupper()
+        }
+        szs = set(re.findall(r"sizeof\(\s*(\w+)\s*\)", e.source))
+        # One level of macro recursion: names inside the matched #define
+        # bodies (IdChar -> sqlite3CtypeMap) are context too.
+        for name in list(caps):
+            body = define_text.get(name, "")
+            arrs |= set(re.findall(r"\b([A-Za-z_]\w*)\s*\[", body)) - {"C", "X", "x"}
+        wants[e.component_id] = (caps, arrs, szs)
+        macros |= caps
+        arrays |= arrs
+        sizeofs |= szs
+
+    probes: list[tuple[str, str, str]] = []  # (kind, name, C line)
+    for name in sorted(macros):
+        probes.append(("MACRO", name, f'printf("MACRO {name} %lld\\n", (long long)({name}));'))
+    for name in sorted(sizeofs):
+        probes.append(("SIZEOF", name, f'printf("SIZEOF {name} %zu\\n", sizeof({name}));'))
+    for name in sorted(arrays):
+        probes.append(
+            (
+                "ARRAY",
+                name,
+                f"{{ size_t n = sizeof({name})/sizeof({name}[0]); "
+                f'printf("ARRAY {name} %zu ", n); '
+                f'for (size_t i = 0; i < n && i < 512; i++) printf("%lld,", (long long)({name}[i])); '
+                f'printf("\\n"); }}',
+            )
+        )
+
+    header = ['#include "sqlite3_probe.c"', "#include <stdio.h>", "int main(void) {"]
+    values: dict[tuple[str, str], str] = {}
+    for _ in range(8):
+        lines = header + [p[2] for p in probes] + ["return 0; }"]
+        probe_c = workdir / "probe.c"
+        probe_c.write_text("\n".join(lines) + "\n")
+        proc = subprocess.run(
+            [
+                "cc",
+                "-O0",
+                "-w",
+                "-DSQLITE_ENABLE_FTS3",
+                "-DSQLITE_ENABLE_FTS5",
+                "-DSQLITE_ENABLE_RTREE",
+                str(probe_c),
+                "-o",
+                str(workdir / "probe"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=workdir,
+        )
+        if proc.returncode == 0:
+            break
+        bad_lines = {
+            int(m.group(1))
+            for m in re.finditer(rf"{re.escape(probe_c.name)}:(\d+):\d+:\s*error", proc.stderr)
+        }
+        bad_idx = {ln - len(header) - 1 for ln in bad_lines}
+        kept = [p for i, p in enumerate(probes) if i not in bad_idx]
+        if len(kept) == len(probes):  # can't attribute the error; give up on probing
+            probes = []
+            break
+        probes = kept
+    else:
+        probes = []
+    if probes:
+        run = subprocess.run([str(workdir / "probe")], capture_output=True, text=True, timeout=60)
+        for line in run.stdout.splitlines():
+            parts = line.split(" ", 2)
+            if len(parts) >= 3 and parts[0] in ("MACRO", "SIZEOF", "ARRAY"):
+                values[(parts[0], parts[1])] = line
+
+    context: dict[str, str] = {}
+    for e in entries:
+        caps, arrs, szs = wants[e.component_id]
+        out: list[str] = []
+        for name in sorted(caps):
+            if ("MACRO", name) in values:
+                out.append(f"{name} = {values[('MACRO', name)].split(' ', 2)[2]}")
+            elif name in define_text:
+                out.append(define_text[name])
+        for name in sorted(szs):
+            if ("SIZEOF", name) in values:
+                out.append(f"sizeof({name}) = {values[('SIZEOF', name)].split(' ', 2)[2]}")
+        for name in sorted(arrs):
+            if ("ARRAY", name) in values:
+                _, _, rest = values[("ARRAY", name)].partition(f"ARRAY {name} ")
+                n, _, elems = rest.partition(" ")
+                out.append(f"static table {name}[{n}] = {{{elems.rstrip(',')}}}")
+        if out:
+            context[e.component_id] = (
+                "Known compile-time values, probed from the real build "
+                "(trust these over guesses):\n" + "\n".join(f"  {line}" for line in out)
+            )
+    return context
+
+
 def rust_signature(e: Entry) -> str:
     args = ", ".join(f"{n}: {TYPE_MAP[t][0]}" for t, n in e.params)
     return f'#[no_mangle]\npub extern "C" fn {e.name}({args}) -> {TYPE_MAP[e.ret][0]}'
 
 
-def build_prompt(e: Entry) -> str:
+def build_prompt(e: Entry, context: str = "") -> str:
+    ctx = f"\n{context}\n" if context else ""
     return f"""Translate this C function from SQLite into Rust.
 
 ```c
 {e.source}
 ```
-
+{ctx}
 Contract: pure function — deterministic, no I/O, no globals, no allocation
 visible to the caller. It is called through C FFI; the exact item you must
 produce is:
@@ -475,13 +612,20 @@ def main() -> None:
         f"oracle compiled in {time.monotonic() - t0:.0f}s; {len(entries)} originals callable",
         flush=True,
     )
+    t0 = time.monotonic()
+    probe_ctx = probe_compile_time_context(args.src, entries, workdir)
+    print(
+        f"compile-time context probed in {time.monotonic() - t0:.0f}s "
+        f"({len(probe_ctx)}/{len(entries)} components enriched)",
+        flush=True,
+    )
 
     client = anthropic.Anthropic()
     ledger = Ledger()
     results: list[Rung4Result] = []
     for i, e in enumerate(entries):
         res = Rung4Result(component_id=e.component_id)
-        prompt = build_prompt(e)
+        prompt = build_prompt(e, probe_ctx.get(e.component_id, ""))
         t0 = time.monotonic()
         for model, tier, n in ((CHEAP_MODEL, "cheap", args.k), (ESCALATION_MODEL, "escalation", 1)):
             if tier == "escalation":
