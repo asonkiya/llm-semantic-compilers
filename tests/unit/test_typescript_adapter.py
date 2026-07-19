@@ -198,3 +198,20 @@ def test_adapter_direct_effects_unit() -> None:
     fn = a.locate_function(root, "f", 0)
     assert fn is not None
     assert "db" in a.direct_effects(fn, b"function f(db){ return db.query('x'); }", {})
+
+
+def test_js_files_are_ingested(tmp_path: Path) -> None:
+    """JavaScript is parseable by the TS grammar (a JS superset); .js/.mjs/.cjs
+    must be ingested, not silently skipped (corpus finding: axios 0/159)."""
+    assert adapter_for_extension(".js") is not None
+    assert adapter_for_extension(".mjs") is not None
+    assert adapter_for_extension(".cjs") is not None
+    (tmp_path / "util.js").write_text(
+        "export function addTax(price, rate) {\n  return price * (1 + rate);\n}\n"
+    )
+    (tmp_path / "helper.mjs").write_text("export const double = (x) => x * 2;\n")
+    graph = TreeSitterSource().ingest(tmp_path)
+    qualnames = {n.attrs.get("qualname") for n in graph.nodes()}
+    assert any(q and q.endswith("addTax") for q in qualnames)
+    langs = {n.attrs.get("language") for n in graph.nodes() if n.attrs.get("language")}
+    assert "typescript" in langs

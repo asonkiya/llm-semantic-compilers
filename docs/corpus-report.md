@@ -46,9 +46,10 @@ not a parser limit. The old count-only harness showed "0 components" with no
 denominator and no way to know it was wrong; the ground-truth check flags it
 immediately.
 
-*Proposed fix (adapter surface — needs sign-off):* add `.js` / `.mjs` / `.cjs`
-to the TS adapter's `file_extensions` (`.jsx` needs the TSX grammar). Low risk;
-lights up the large JS-only ecosystem.
+**Fixed (2026-07-19):** added `.js` / `.mjs` / `.cjs` to the TS adapter's
+`file_extensions` (the TS grammar is a JS superset; `.jsx` needs the TSX
+grammar and stays out of scope). axios: **0.0 → 1.26 (0 → 200 components)**;
+zod/ky unchanged (no regression).
 
 ## Finding 2 (real bug): functions buried in tree-sitter `ERROR` nodes
 

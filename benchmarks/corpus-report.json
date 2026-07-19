@@ -10,14 +10,13 @@
     "low_extraction": [
       "sqlalchemy (0.836)",
       "pydantic (0.831)",
-      "zod (0.781)",
-      "axios (0.0)",
+      "zod (0.782)",
       "ripgrep (0.812)",
       "clap (0.797)",
       "stb (0.821)"
     ],
     "total_loc": 1413719,
-    "total_components": 45906,
+    "total_components": 46107,
     "total_defs": 51180
   },
   "rows": [
@@ -248,18 +247,18 @@
       "lang": "typescript",
       "url": "https://github.com/colinhacks/zod",
       "scan_ok": true,
-      "seconds": 2.1,
-      "components": 933,
+      "seconds": 2.2,
+      "components": 934,
       "ground_truth_defs": 1194,
-      "extraction_ratio": 0.781,
+      "extraction_ratio": 0.782,
       "loc": 74521,
       "kinds": {
-        "pure_function": 843,
+        "pure_function": 844,
         "state_transformer": 59,
         "effect_adapter": 31
       },
       "languages": {
-        "typescript": 933
+        "typescript": 934
       },
       "resolved_calls": 529,
       "deterministic": true,
@@ -303,19 +302,26 @@
       "lang": "typescript",
       "url": "https://github.com/axios/axios",
       "scan_ok": true,
-      "seconds": 0.2,
-      "components": 0,
+      "seconds": 0.6,
+      "components": 200,
       "ground_truth_defs": 159,
-      "extraction_ratio": 0.0,
+      "extraction_ratio": 1.258,
       "loc": 8111,
-      "kinds": {},
-      "languages": {},
-      "resolved_calls": 0,
+      "kinds": {
+        "pure_function": 183,
+        "state_transformer": 12,
+        "effect_adapter": 5
+      },
+      "languages": {
+        "typescript": 200
+      },
+      "resolved_calls": 98,
       "deterministic": true,
       "downstream_ok": true,
       "downstream": {
         "stats": true,
-        "search": true
+        "search": true,
+        "impact": true
       }
     },
     {

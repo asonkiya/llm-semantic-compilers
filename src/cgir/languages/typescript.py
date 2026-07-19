@@ -163,7 +163,10 @@ _FUNCTION_VALUES: frozenset[str] = frozenset({"arrow_function", "function_expres
 
 class TypeScriptAdapter(LanguageAdapter):
     name = "typescript"
-    file_extensions = (".ts", ".tsx")
+    # The TypeScript grammar is a superset of JavaScript, so plain JS
+    # (.js/.mjs/.cjs) parses cleanly here. (.jsx needs the separate TSX
+    # grammar for JSX syntax and stays out of scope.)
+    file_extensions = (".ts", ".tsx", ".js", ".mjs", ".cjs")
 
     def __init__(self) -> None:
         self._parser = Parser(Language(tsts.language_typescript()))
