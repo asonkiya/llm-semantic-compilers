@@ -36,6 +36,11 @@ from cgir.report.search import search_specs
 from cgir.verify import _find_node, _hard_drift, _splice, verify
 
 Sampler = Callable[[str, str], tuple[str, float]]
+# Behavioral oracle seam: given (component_id, candidate), return
+# (passed, feedback). Injected to swap the default pytest oracle for a
+# differential or capture/replay one — the C->Rust harness plugs its
+# differential-vs-original here. Feedback flows into the escalation prompt.
+BehavioralOracle = Callable[[str, str], tuple[bool, str]]
 
 DEFAULT_QUERY = "kind:pure covered:true"
 DEFAULT_CHEAP_MODEL = "claude-haiku-4-5-20251001"
@@ -126,9 +131,20 @@ def _build_prompt(index_dir: Path, repo: Path, spec: ComponentSpec, mode: str) -
 
 
 def _check(
-    index_dir: Path, repo: Path, component_id: str, candidate: str, run_tests: bool
+    index_dir: Path,
+    repo: Path,
+    component_id: str,
+    candidate: str,
+    run_tests: bool,
+    oracle: BehavioralOracle | None,
 ) -> tuple[str, str, bool]:
-    """Returns (stage, feedback, tests_ran). stage == "ok" means accepted."""
+    """Returns (stage, feedback, behavioral_ran). stage == "ok" means accepted.
+
+    Stage 1 is always the cgir contract check. Stage 2 is the behavioral
+    oracle: the injected ``oracle`` if given (differential, capture/replay,
+    ...), else the default pytest-in-a-shadow path. ``run_tests=False`` with
+    no oracle is contract-only gating (measured ~6% false-pass — a
+    pre-filter, not a judge)."""
     try:
         contract = verify(index_dir, component_id, candidate, repo, run_tests=False)
     except Exception as exc:
@@ -136,6 +152,9 @@ def _check(
     if not contract.contract_ok or contract.violations:
         fb = f"contract drift: {contract.drift} violations: {contract.violations}"
         return "contract", fb, False
+    if oracle is not None:
+        ok, feedback = oracle(component_id, candidate)
+        return ("ok", "", True) if ok else ("behavioral", feedback, True)
     if not run_tests:
         return "ok", "", False
     tested = verify(index_dir, component_id, candidate, repo, run_tests=True)
@@ -155,12 +174,18 @@ def rewrite_repo(
     cheap_model: str = DEFAULT_CHEAP_MODEL,
     escalation_model: str = DEFAULT_ESCALATION_MODEL,
     run_tests: bool = True,
+    oracle: BehavioralOracle | None = None,
     budget_usd: float | None = None,
     ledger_path: Path | None = None,
     apply: bool = False,
     log: Callable[[str], None] = lambda _: None,
 ) -> dict[str, Any]:
-    """Run the rewrite loop over every component matching ``query``."""
+    """Run the rewrite loop over every component matching ``query``.
+
+    ``oracle`` swaps the default pytest behavioral check for an injected one
+    (differential, capture/replay) — the seam that lets one orchestrator
+    drive both the Python-with-tests and the C->Rust-with-differential
+    pipelines over the same worklist/escalation/ledger/budget machinery."""
     specs = read_specs(index_dir)
     # Test components are the oracle; the loop must never rewrite them.
     worklist = [s for s in search_specs(specs, query, limit=None) if not _is_test_spec(s)]
@@ -222,13 +247,18 @@ def rewrite_repo(
                 candidate = _extract_code(text)
                 attempt = RewriteAttempt(tier=tier, model=model, candidate=candidate)
                 out.attempts.append(attempt)
-                attempt.stage, attempt.feedback, tests_ran = _check(
-                    index_dir, repo, spec.id, candidate, run_tests
+                attempt.stage, attempt.feedback, behavioral_ran = _check(
+                    index_dir, repo, spec.id, candidate, run_tests, oracle
                 )
                 if attempt.stage == "ok":
                     out.status = "solved"
                     out.solved_by = tier
-                    out.oracle = "contract+tests" if tests_ran else "contract-only"
+                    if not behavioral_ran:
+                        out.oracle = "contract-only"
+                    elif oracle is not None:
+                        out.oracle = "contract+behavioral"
+                    else:
+                        out.oracle = "contract+tests"
                     break
             if out.status == "solved":
                 break

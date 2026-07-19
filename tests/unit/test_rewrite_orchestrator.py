@@ -205,6 +205,37 @@ def test_ledger_resume_skips_solved(tmp_path: Path) -> None:
     assert all(o["status"] == "solved" for o in report["outcomes"])
 
 
+def test_injected_oracle_replaces_tests(tmp_path: Path) -> None:
+    """A behavioral oracle (differential, capture/replay) can replace pytest.
+    Contract stage still runs first; the oracle judges what passes it."""
+    repo, idx = _repo(tmp_path)
+    seen: list[str] = []
+
+    def oracle(component_id: str, candidate: str) -> tuple[bool, str]:
+        seen.append(component_id)
+        # accept only the GOOD rewrite; reject anything mentioning "42"
+        if "42" in candidate:
+            return False, "differential mismatch: returned 42"
+        return True, ""
+
+    sampler = _sampler({"cheap": [WRONG, GOOD, GOOD_HELPER]})
+    report = rewrite_repo(
+        idx,
+        repo,
+        sampler=sampler,
+        cheap_model="cheap",
+        escalation_model="esc",
+        k=3,
+        oracle=oracle,
+    )
+    out = next(o for o in report["outcomes"] if o["component_id"] == "pkg.core.add_tax")
+    assert out["status"] == "solved"
+    assert out["oracle"] == "contract+behavioral"
+    # WRONG (returns 42) was contract-clean but the oracle rejected it
+    assert out["attempts"][0]["stage"] == "behavioral"
+    assert "pkg.core.add_tax" in seen
+
+
 def test_apply_splices_winners_and_passes_final_gate(tmp_path: Path) -> None:
     repo, idx = _repo(tmp_path)
     sampler = _sampler({"cheap": [GOOD, GOOD_HELPER]})

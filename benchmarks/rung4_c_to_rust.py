@@ -64,6 +64,11 @@ DECL = re.compile(
     re.DOTALL,
 )
 PARAM = re.compile(rf"^({SCALAR_RE})\s+(\w+)$")
+# Read-or-write pointer parameters we can fuzz with a byte buffer: const/mut
+# `char*` (C strings) and `u8/unsigned char/void*` (binary buffers). Struct
+# and multi-level pointers stay out of scope (need real instances).
+_PTR_ELEM = r"(?:char|unsigned\s+char|signed\s+char|u8|i8|void)"
+PTR_PARAM = re.compile(rf"^(const\s+)?{_PTR_ELEM}\s*\*\s*(\w+)$")
 
 # C type -> (rust type, ctypes name). Typedefs resolved against the
 # amalgamation: LogEst=short, tRowcnt=u64, Bool=unsigned, u64=8-byte.
@@ -126,7 +131,25 @@ class Rung4Result:
     regenerated_as: str = ""
 
 
-def build_worklist(index: Path, src: Path) -> tuple[list[Entry], list[tuple[str, str]]]:
+def _parse_param(q: str) -> tuple[str, str] | None:
+    """(type_token, name) or None if unfuzzable. Pointer tokens encode the
+    element+constness: ``ptr:str:const``, ``ptr:buf:mut`` etc."""
+    q = q.strip()
+    pm = PARAM.match(q)
+    if pm:
+        return (pm.group(1), pm.group(2))
+    pp = PTR_PARAM.match(q)
+    if pp:
+        is_const = bool(pp.group(1))
+        is_str = "char" in q and "unsigned" not in q and "u8" not in q
+        kind = "str" if is_str else "buf"
+        return (f"ptr:{kind}:{'const' if is_const else 'mut'}", pp.group(2))
+    return None
+
+
+def build_worklist(
+    index: Path, src: Path, pointers: bool = False
+) -> tuple[list[Entry], list[tuple[str, str]]]:
     graph = json.loads((index / "repo_graph.json").read_text())
     span: dict[str, tuple[str, int, int]] = {}
     for n in graph["nodes"]:
@@ -156,23 +179,29 @@ def build_worklist(index: Path, src: Path) -> tuple[list[Entry], list[tuple[str,
             excluded.append((s["id"], "declaration not scalar-parseable"))
             continue
         ret, name, raw = m.group(1), m.group(2), m.group(3).strip()
-        if "*" in raw or "[" in raw or "..." in raw:
-            excluded.append((s["id"], "non-scalar parameters (pointer/array/vararg ABI)"))
+        if "[" in raw or "..." in raw:
+            excluded.append((s["id"], "array/vararg ABI"))
             continue
-        if ret == "void":
-            excluded.append((s["id"], "void return: nothing observable to compare"))
-            continue
-        params: list[tuple[str, str]] = []
+        params = []
         ok = True
         if raw not in ("", "void"):
             for q in raw.split(","):
-                pm = PARAM.match(q.strip())
-                if not pm:
+                parsed = _parse_param(q)
+                if parsed is None:
                     ok = False
                     break
-                params.append((pm.group(1), pm.group(2)))
+                params.append(parsed)
+        has_ptr = any(t.startswith("ptr:") for t, _ in params)
         if not ok:
-            excluded.append((s["id"], "non-scalar parameters (pointer/array/vararg ABI)"))
+            excluded.append((s["id"], "unfuzzable parameter (struct/multi-level pointer)"))
+            continue
+        if has_ptr and not pointers:
+            excluded.append((s["id"], "pointer ABI (enable with --pointers)"))
+            continue
+        # A void return with no pointer buffer to inspect has nothing
+        # observable; with a pointer, the buffer mutation IS the observable.
+        if ret == "void" and not has_ptr:
+            excluded.append((s["id"], "void return: nothing observable to compare"))
             continue
         entries.append(Entry(s["id"], name, ret, params, text, en - st + 1))
     return entries, excluded
@@ -356,22 +385,38 @@ def probe_compile_time_context(src: Path, entries: list[Entry], workdir: Path) -
     return context
 
 
+def _rust_type(token: str) -> str:
+    if token.startswith("ptr:"):
+        _, _kind, constness = token.split(":")
+        return "*const u8" if constness == "const" else "*mut u8"
+    return TYPE_MAP[token][0]
+
+
 def rust_signature(e: Entry) -> str:
-    args = ", ".join(f"{n}: {TYPE_MAP[t][0]}" for t, n in e.params)
-    return f'#[no_mangle]\npub extern "C" fn {e.name}({args}) -> {TYPE_MAP[e.ret][0]}'
+    args = ", ".join(f"{n}: {_rust_type(t)}" for t, n in e.params)
+    ret = "" if e.ret == "void" else f" -> {TYPE_MAP[e.ret][0]}"
+    return f'#[no_mangle]\npub extern "C" fn {e.name}({args}){ret}'
 
 
 def build_prompt(e: Entry, context: str = "") -> str:
     ctx = f"\n{context}\n" if context else ""
+    ptr_rule = ""
+    if any(t.startswith("ptr:") for t, _ in e.params):
+        ptr_rule = (
+            "\n- Pointer params are raw C pointers into a caller-owned byte buffer "
+            "(`*const u8` read-only, `*mut u8` may be written). Use `unsafe` with "
+            "explicit bounds — read/write exactly the bytes the C reads/writes, never "
+            "past them, and handle a null or zero-length buffer without dereferencing. "
+            "A `char*` is a NUL-terminated C string."
+        )
     return f"""Translate this C function from SQLite into Rust.
 
 ```c
 {e.source}
 ```
 {ctx}
-Contract: pure function — deterministic, no I/O, no globals, no allocation
-visible to the caller. It is called through C FFI; the exact item you must
-produce is:
+Contract: deterministic, no I/O, no globals, no heap allocation visible to
+the caller. It is called through C FFI; the exact item you must produce is:
 
 {rust_signature(e)} {{
     ...
@@ -384,7 +429,7 @@ Rules:
   could overflow (use wrapping_add/wrapping_mul/wrapping_shl etc.), C
   integer-division/shift behavior, and identical branch conditions.
 - The function must never panic for ANY input (no unwrap, no plain arithmetic
-  that can overflow-panic, no divide-by-zero path C does not have).
+  that can overflow-panic, no divide-by-zero path C does not have).{ptr_rule}
 - If the C references macros or globals you cannot see, translate the visible
   logic faithfully anyway."""
 
@@ -460,35 +505,80 @@ def _driver_source(e: Entry) -> str:
     trap, not a process death. Contract-aware semantics: if the C *original*
     faults on an input, that input is out-of-contract (the C itself has UB
     there) and is skipped; only the candidate faulting where the original
-    did not is a real divergence.
+    ran cleanly is a real divergence.
+
+    Pointer params are fuzzed with byte buffers: the original and candidate
+    get *separate* copies of an identical random buffer, and equivalence
+    requires matching return value AND matching post-call buffer contents —
+    so a write-through-pointer divergence is caught, not just the return.
     """
-    cinfo = [_C_INFO[TYPE_MAP[t][1]] for t, _ in e.params]
-    ret_c, _, _, ret_float = _C_INFO[TYPE_MAP[e.ret][1]]
-    sig = ", ".join(c[0] for c in cinfo) or "void"
-    decls, args, printf_fmt, printf_args = [], [], [], []
-    for i, (ctype, bits, signed, isflt) in enumerate(cinfo):
-        if isflt:
-            decls.append(f"    {ctype} a{i} = ({ctype})rndd();")
-            printf_fmt.append("%g")
+    sig_types: list[str] = []
+    globals_: list[str] = []
+    fills: list[str] = []
+    decls: list[str] = []
+    orig_args: list[str] = []
+    cand_args: list[str] = []
+    buf_cmps: list[str] = []
+    printf_fmt: list[str] = []
+    printf_args: list[str] = []
+    for i, (token, _name) in enumerate(e.params):
+        if token.startswith("ptr:"):
+            _, kind, constness = token.split(":")
+            cty = "const uint8_t*" if constness == "const" else "uint8_t*"
+            sig_types.append(cty)
+            globals_.append(f"static uint8_t BO_{i}[BUFSZ]; static uint8_t BC_{i}[BUFSZ];")
+            filler = "fill_str" if kind == "str" else "fill_buf"
+            fills.append(f"        {filler}(BO_{i}); memcpy(BC_{i}, BO_{i}, BUFSZ);")
+            orig_args.append(f"({cty})BO_{i}")
+            cand_args.append(f"({cty})BC_{i}")
+            buf_cmps.append(f"memcmp(BO_{i}, BC_{i}, BUFSZ)==0")
+            printf_fmt.append("buf")
         else:
-            decls.append(f"    {ctype} a{i} = ({ctype})rnd({bits}, {signed});")
-            printf_fmt.append("%lld")
-            printf_args.append(f"(long long)a{i}")
-        args.append(f"a{i}")
-        if isflt:
-            printf_args.append(f"(double)a{i}")
-    call_args = ", ".join(args)
+            ctype, bits, signed, isflt = _C_INFO[TYPE_MAP[token][1]]
+            if isflt:
+                decls.append(f"        {ctype} a{i} = ({ctype})rndd();")
+                printf_fmt.append("%g")
+                printf_args.append(f"(double)a{i}")
+            else:
+                decls.append(f"        {ctype} a{i} = ({ctype})rnd({bits}, {signed});")
+                printf_fmt.append("%lld")
+                printf_args.append(f"(long long)a{i}")
+            sig_types.append(ctype)
+            orig_args.append(f"a{i}")
+            cand_args.append(f"a{i}")
+    sig = ", ".join(sig_types) or "void"
     fmt = ",".join(printf_fmt)
     exargs = (", " + ", ".join(printf_args)) if printf_args else ""
-    if ret_float:
-        eq = (
-            "(isnan(ro)&&isnan(rc)) || ro==rc || "
-            "fabs((double)ro-(double)rc) <= 1e-9*fmax(fabs((double)ro),fabs((double)rc))"
-        )
-        ret_fmt, ro_arg, rc_arg = "%g", "(double)ro", "(double)rc"
+    bufs_ok = " && ".join(buf_cmps) if buf_cmps else "1"
+
+    if e.ret == "void":
+        ret_c = "void"
+        ret_decl_o, ret_decl_c = "", ""
+        call_o = f"fo({', '.join(orig_args)});"
+        call_c = f"fc({', '.join(cand_args)});"
+        ret_eq = "1"
+        ex_fault = f'"{e.name}({fmt}) buffers differ"'
+        ex_mism = f'"{e.name}({fmt}) buffers differ"'
+        ex_fault_args = ex_mism_args = exargs
     else:
-        eq = "ro==rc"
-        ret_fmt, ro_arg, rc_arg = "%lld", "(long long)ro", "(long long)rc"
+        ret_c, _, _, ret_float = _C_INFO[TYPE_MAP[e.ret][1]]
+        ret_decl_o, ret_decl_c = f"{ret_c} ro; ", f"{ret_c} rc; "
+        call_o = f"ro = fo({', '.join(orig_args)});"
+        call_c = f"rc = fc({', '.join(cand_args)});"
+        if ret_float:
+            ret_eq = (
+                "((isnan(ro)&&isnan(rc)) || ro==rc || "
+                "fabs((double)ro-(double)rc) <= 1e-9*fmax(fabs((double)ro),fabs((double)rc)))"
+            )
+            rfmt, ro_a, rc_a = "%g", "(double)ro", "(double)rc"
+        else:
+            ret_eq = "(ro==rc)"
+            rfmt, ro_a, rc_a = "%lld", "(long long)ro", "(long long)rc"
+        ex_fault = f'"{e.name}({fmt}) orig={rfmt} rust=FAULT"'
+        ex_fault_args = f"{exargs}, {ro_a}"
+        ex_mism = f'"{e.name}({fmt}) orig={rfmt} rust={rfmt}"'
+        ex_mism_args = f"{exargs}, {ro_a}, {rc_a}"
+
     return f"""
 #include <stdio.h>
 #include <stdlib.h>
@@ -499,7 +589,9 @@ def _driver_source(e: Entry) -> str:
 #include <signal.h>
 #include <math.h>
 
+#define BUFSZ 4096
 typedef {ret_c} (*fn_t)({sig});
+{chr(10).join(globals_)}
 static sigjmp_buf JB;
 static volatile sig_atomic_t FAULT;
 static void on_fault(int s) {{ FAULT = s; siglongjmp(JB, 1); }}
@@ -510,9 +602,9 @@ static int64_t rnd(int bits, int is_signed) {{
     uint64_t r = xr();
     int mode = r % 10;
     int64_t v;
-    if (mode < 3)      v = (int64_t)(xr() % 513) - 256;      /* small */
+    if (mode < 3)      v = (int64_t)(xr() % 513) - 256;
     else if (mode < 5) {{ int64_t e[] = {{0,1,-1}}; v = e[xr()%3]; }}
-    else               v = (int64_t)xr();                    /* full width */
+    else               v = (int64_t)xr();
     if (bits < 64) {{
         uint64_t mask = ((uint64_t)1 << bits) - 1;
         uint64_t m = ((uint64_t)v) & mask;
@@ -530,6 +622,13 @@ static double rndd(void) {{
     double base = mode < 9 ? 1e6 : 1e18;
     return ((double)(int64_t)xr() / (double)INT64_MAX) * base;
 }}
+static void fill_buf(uint8_t* b) {{ for (long j=0;j<BUFSZ;j++) b[j]=(uint8_t)xr(); }}
+static void fill_str(uint8_t* b) {{
+    long L = xr() % 65;
+    memset(b, 0, BUFSZ);
+    for (long j=0;j<L;j++) b[j] = (uint8_t)(33 + xr()%94);
+    b[L] = 0;
+}}
 
 int main(int argc, char** argv) {{
     if (argc < 5) return 2;
@@ -545,25 +644,26 @@ int main(int argc, char** argv) {{
     signal(SIGABRT, on_fault); signal(SIGFPE, on_fault); signal(SIGILL, on_fault);
 
     long compared=0, mism=0, orig_faults=0, cand_faults=0, both_faults=0;
-    char example[600]=""; 
+    char example[600]="";
     for (long i=0; i<n; i++) {{
 {chr(10).join(decls)}
-        {ret_c} ro; int of=0;
-        if (sigsetjmp(JB,1)==0) {{ ro = fo({call_args}); }} else of=1;
-        {ret_c} rc; int cf=0;
-        if (sigsetjmp(JB,1)==0) {{ rc = fc({call_args}); }} else cf=1;
+{chr(10).join(fills)}
+        {ret_decl_o}int of=0;
+        if (sigsetjmp(JB,1)==0) {{ {call_o} }} else of=1;
+        {ret_decl_c}int cf=0;
+        if (sigsetjmp(JB,1)==0) {{ {call_c} }} else cf=1;
         if (of) {{ if (cf) both_faults++; else orig_faults++; continue; }}
         if (cf) {{
             cand_faults++; mism++;
             if (!example[0]) snprintf(example,sizeof example,
-                "{e.name}({fmt}) orig={ret_fmt} rust=FAULT"{exargs}, {ro_arg});
+                {ex_fault}{ex_fault_args});
             continue;
         }}
         compared++;
-        if (!({eq})) {{
+        if (!({ret_eq} && ({bufs_ok}))) {{
             mism++;
             if (!example[0]) snprintf(example,sizeof example,
-                "{e.name}({fmt}) orig={ret_fmt} rust={ret_fmt}"{exargs}, {ro_arg}, {rc_arg});
+                {ex_mism}{ex_mism_args});
         }}
     }}
     printf("{{\\"status\\":\\"%s\\",\\"compared\\":%ld,\\"mismatches\\":%ld,"
@@ -635,10 +735,16 @@ def main() -> None:
         help="Re-verify the winners in a prior results file under the current "
         "(harsher) differential; no generation, no API cost.",
     )
+    ap.add_argument(
+        "--pointers",
+        action="store_true",
+        help="Include const/mut char* and byte-buffer pointer params (fuzzed "
+        "with dual buffers + mutation compare). Struct pointers stay excluded.",
+    )
     args = ap.parse_args()
 
     workdir = Path(tempfile.mkdtemp(prefix="cgir-rung4-"))
-    entries, excluded = build_worklist(args.index, args.src)
+    entries, excluded = build_worklist(args.index, args.src, pointers=args.pointers)
 
     if args.recheck:
         prior = json.loads(args.recheck.read_text())
@@ -661,7 +767,8 @@ def main() -> None:
         return
     if args.limit:
         entries = entries[: args.limit]
-    print(f"worklist: {len(entries)} scalar-ABI pure leaves; compiling C oracle...", flush=True)
+    kind = "scalar+pointer" if args.pointers else "scalar-ABI"
+    print(f"worklist: {len(entries)} {kind} pure leaves; compiling C oracle...", flush=True)
     t0 = time.monotonic()
     orig = compile_original(args.src, [e.name for e in entries], workdir)
     have = exported_symbols(orig, [e.name for e in entries])
