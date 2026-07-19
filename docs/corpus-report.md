@@ -1,83 +1,75 @@
-# Corpus robustness report (2026-07-19)
+# Corpus robustness + correctness report (2026-07-19)
 
-`cgir scan` run across 15 public repositories spanning all five adapters,
-via `benchmarks/corpus_scan.py` (shallow clone → scan under a 420s timeout →
-record success/crash/timeout + stats). Scanning is fully static
-(tree-sitter, no repo dependencies), so no per-repo setup was needed.
+`cgir scan` run across **23 public repositories** spanning all five adapters,
+via `benchmarks/corpus_scan.py`. Each repo is checked four ways, not just
+"did it run":
 
-## Headline: robust
+1. **scan** — crash / timeout / success + wall time;
+2. **extraction ratio** — independently tree-sitter-parse the source, count the
+   function-like definitions cgir *should* extract, and report
+   `extracted / present`. This denominator is what turns "1,513 components"
+   into "1,513 of 2,552 (59%)" and makes under-extraction visible;
+3. **determinism** — scan twice, require an identical component set;
+4. **downstream** — run `stats` / `search` / `impact` on the real graph so the
+   whole pipeline, not just ingest, is exercised.
 
-**15/15 scanned cleanly — zero crashes, zero timeouts, zero clone failures.
-554,790 LOC → 10,127 components.** The slowest scan was curl (173k LOC of C)
-at 3.3s; nothing needed more than a few seconds.
+## Headline: robust, deterministic, extraction ~80–99% on clean code
 
-| repo | lang | KLOC | components | comps/KLOC | pure% | scan |
-|---|---|---|---|---|---|---|
-| flask | python | 10 | 332 | 34.9 | 67.8 | 0.7s |
-| requests | python | 6 | 237 | 37.1 | 50.2 | 0.6s |
-| click | python | 13 | 490 | 39.2 | 71.0 | 0.9s |
-| httpx | python | 9 | 424 | 48.0 | 71.2 | 0.8s |
-| rich | python | 39 | 821 | 21.3 | 72.5 | 1.7s |
-| zod | typescript | 74 | 933 | 12.6 | 90.4 | 2.2s |
-| ky | typescript | 4 | 87 | 21.7 | 94.3 | 0.4s |
-| cobra | go | 17 | 588 | 35.1 | 84.5 | 1.1s |
-| gin | go | 24 | 1318 | 54.7 | 58.0 | 1.9s |
-| ripgrep | rust | 49 | 2272 | 46.7 | 89.7 | 2.5s |
-| clap | rust | 29 | 1057 | 36.5 | 92.6 | 1.3s |
-| tiny-AES-c | c | 1 | 24 | 24.5 | 50.0 | 0.3s |
-| kilo | c | 1 | 36 | 27.5 | 22.2 | 0.3s |
-| stb | c | 107 | 311 | **2.9** | 63.7 | 1.8s |
-| curl | c | 174 | 1197 | **6.9** | 56.6 | 3.3s |
+**23/23 scanned cleanly — 0 crashes, 0 timeouts, 0 non-deterministic, 0
+downstream failures. 1.41M LOC → 45,120 components against 51,180
+tree-sitter-counted definitions.** Largest were redis (207k LOC C, 15.7s),
+sqlalchemy (247k LOC Python, 14.0s), django (165k, 15.4s); nothing timed out.
 
-Purity distributions pass a sanity check per language: type-heavy TS ~90%+,
-builder/derive-heavy Rust ~90%, I/O-heavy C editors low (kilo 22%), and the
-C libraries mid-range.
+Extraction ratio by language (median [range]):
 
-## Finding 1 (real bug): the C adapter skips functions inside `#ifdef`
-
-**stb and curl stand out at 2.9 / 6.9 components per KLOC — far below the C
-median (15.7).** Confirmed on `stb_image.h`: tree-sitter finds **221
-`function_definition` nodes; cgir extracts only 36 (16%).**
-
-Root cause: `CAdapter` iterates `root.named_children` — the *direct* children
-of the translation unit. tree-sitter-c nests conditionally-compiled top-level
-definitions inside `preproc_ifdef` / `preproc_if` nodes, which are children of
-the translation unit, so the function definitions inside them (children of the
-preproc node, not of the root) are never visited. stb's single-header pattern
-wraps its entire implementation in `#ifdef STB_IMAGE_IMPLEMENTATION`, so ~84%
-of it is invisible; curl's platform/feature `#ifdef`s cause the milder version.
-
-**Fixed (2026-07-19, `c.py:_iter_top_level`):** treat `preproc_ifdef`/
-`preproc_if`/`preproc_elif`/`preproc_else` as transparent — recurse into them
-when collecting `function_definition` / `struct_specifier` / `type_definition`
-/ `preproc_include`, deduping symbols that appear under mutually-exclusive
-branches (an x86 vs portable variant is one component). After the fix:
-
-| repo | before | after | comps/KLOC |
+| language | median | range | reads as |
 |---|---|---|---|
-| stb | 311 | **1,513** | 2.9 → 14.2 |
-| curl | 1,197 | **3,511** | 6.9 → 20.2 |
-| stb_image.h alone | 36 / 221 | **219 / 221** | 16% → 99% |
+| go | 0.99 | 0.94–1.00 | essentially complete |
+| c | 0.96 | 0.59–1.19 | complete except macro-dense outliers (below) |
+| python | 0.87 | 0.83–0.95 | gap = nested/local `def`s cgir doesn't componentize |
+| rust | 0.81 | 0.80–0.90 | gap = trait-impl / nested / macro-generated |
+| typescript | 0.78 | 0.00–1.61 | noisy denominator (arrows) + the JS gap (below) |
 
-**The correction that matters most:** SQLite was *not* immune, as first
-assumed here. Re-scanned, the amalgamation goes **2,663 → 5,067 components
-(583 → 1,120 pure)** — its `#ifdef SQLITE_ENABLE_*` / `SQLITE_OMIT_*` feature
-guards hid ~47% of its functions. The amalgamation flattens `#include`, not
-feature `#ifdef`s. So the rung-1/rung-4 SQLite figures elsewhere in the docs
-were computed on a ~half-complete graph; the real candidate pool is roughly
-double. This is the corpus test earning its keep — it found a bug that had
-been silently shrinking even our flagship validation.
+Ratios above 1.0 (ky 1.61, tiny-AES-c 1.19) mean cgir legitimately extracts
+things the ground-truth node set doesn't count (TS arrow functions bound to
+variables; C functions under distinct `#if` branches), so the ratio is a
+diagnostic, not a precise score. The healthy band is ~0.85–0.99; the two
+values that fall out of it are real gaps.
 
-## Finding 2 (not a defect): call resolution is in-repo by design
+## Finding 1 (real gap): JavaScript files are not ingested
 
-`calls/component` varies widely (clap 0.16, curl 1.67) and looks alarming
-until you check the denominator: **flask resolves 61 of 1,225 call sites (5%);
-ripgrep 751 of 12,760 (6%)** — nearly identical rates across languages. cgir
-resolves only calls whose target is *defined in the repo*; the other ~94% are
-stdlib/third-party/method calls it deliberately does not chase (dynamic
-dispatch is a documented precision limit). So the spread reflects how much
-internal calling and macro-generation each codebase has, not adapter quality.
-No action.
+**axios: 0 of 159 definitions (0.0).** `axios/lib` is 67 `.js` files, and the
+TypeScript adapter declares `file_extensions = (".ts", ".tsx")` — so cgir
+ingests nothing. The TS tree-sitter grammar is a superset of JS and parses it
+fine (import resolution already handles `.js`), so this is a coverage choice,
+not a parser limit. The old count-only harness showed "0 components" with no
+denominator and no way to know it was wrong; the ground-truth check flags it
+immediately.
+
+*Proposed fix (adapter surface — needs sign-off):* add `.js` / `.mjs` / `.cjs`
+to the TS adapter's `file_extensions` (`.jsx` needs the TSX grammar). Low risk;
+lights up the large JS-only ecosystem.
+
+## Finding 2 (real bug): functions buried in tree-sitter `ERROR` nodes
+
+**stb: 1,513 of 2,552 (0.59).** Per-file, `stb_image.h` is now 219/221 (99%,
+post-#ifdef-fix), but three files extract ~nothing: `stb_vorbis.c` 0/115,
+`deprecated/stb_image.c` 0/159, `stb_truetype.h` 3/144.
+
+Root cause: in these macro-dense files tree-sitter hits a parse error early and
+wraps the entire remainder of the file in a single top-level `ERROR` node — the
+real functions sit at `translation_unit > ERROR > preproc_ifdef >
+function_definition`. `_iter_top_level` (the #ifdef fix) recurses through
+preprocessor conditionals but not through `ERROR` nodes, so cgir sees only the
+leading comments and extracts zero. tree-sitter's error recovery keeps the
+buried function subtrees well-formed; cgir simply never descends to them.
+
+*Proposed fix (C adapter, same class as the just-landed #ifdef fix):* add
+`ERROR` to the transparent-recursion set in `_iter_top_level` (only known node
+types are ever processed, so descending an ERROR wrapper is safe). Expected to
+recover stb_vorbis / stb_truetype and any real macro-dense C that trips
+tree-sitter mid-file. Redis (0.99), curl (0.92), jq (0.93) already scan
+near-complete, so this is the tail, not the common case.
 
 ## Reproduce
 
@@ -85,5 +77,5 @@ No action.
 python benchmarks/corpus_scan.py --out benchmarks/corpus-report.json
 ```
 
-Full per-repo data (kinds, languages, node/edge counts) is in
+Per-repo data (extraction ratio, determinism, downstream, kinds) in
 `benchmarks/corpus-report.json`.
