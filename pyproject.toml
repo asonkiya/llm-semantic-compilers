@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # Distribution name (the import package and CLI command are both `cgir`;
 # the PyPI project name `cgir` was already taken, so we ship as codegraph-ir).
 name = "codegraph-ir"
-version = "0.6.2"
+version = "0.6.3"
 description = "The deterministic contract layer for AI-modified codebases — effects, purity, contracts, and blast radius, with zero LLM calls."
 readme = "README.md"
 license = { file = "LICENSE" }

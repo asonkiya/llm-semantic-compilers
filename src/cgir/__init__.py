@@ -3,4 +3,4 @@
 See ``Code-IR.md`` at the repo root for the product specification.
 """
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"
