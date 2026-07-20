@@ -1,6 +1,8 @@
 # Design: the FFI rewrite core — language-neutral rewrite pipelines
 
-Status: **proposed** (2026-07-20). Research grounded in a full seam-map of
+Status: **approved; M1 landed** (2026-07-20 — `cgir/ffi/` extracted, c-rust
+reassembled on it, 21-test pin + CLI dry-run byte-identical on SQLite; M2–M4
+pending). Research grounded in a full seam-map of
 `rewrite_c_rust.py`, the `run_search_loop`/`replay.py`/`verify.py` contracts,
 and live Python↔Rust FFI experiments (rustc + ctypes smoke tests; results in
 §6.2's traps — every load-bearing convention below was verified on-machine,
