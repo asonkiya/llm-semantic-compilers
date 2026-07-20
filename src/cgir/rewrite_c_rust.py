@@ -25,8 +25,14 @@ calls.
 
 Rides the shared :func:`cgir.rewrite.run_search_loop`, so it inherits the
 same k-sampling / escalation / ledger / budget machinery as the Python
-``cgir rewrite`` path. Struct-pointer ABIs stay out of scope (they need real
-instances); the addressable set is scalar and char*/byte-buffer leaves.
+``cgir rewrite`` path. The isolated-differential set is scalar and
+char*/byte-buffer leaves. With ``structs`` it also rewrites functions taking
+a single-level pointer to a named struct: the model mirrors the C struct as
+``#[repr(C)]`` from its definition, and — because the byte-fuzz differential
+can't fabricate a valid instance — these are *gate-only*, verified solely by
+the whole-program gate on real instances (``--apply`` + ``--gate-build`` /
+``--gate-run``). Subclass casts, pointer-field chasing, and function-pointer
+method tables stay out of scope (flagged, not rewritten).
 
 Toolchain: ``cc`` and ``rustc`` on PATH. Network only via the injected
 sampler (``--live``).
@@ -57,10 +63,15 @@ DECL = re.compile(
 )
 PARAM = re.compile(rf"^({SCALAR_RE})\s+(\w+)$")
 # Read-or-write pointer params fuzzable with a byte buffer: const/mut char*
-# (C strings) and u8/unsigned char/void* (binary). Struct and multi-level
-# pointers stay out of scope (need real instances).
+# (C strings) and u8/unsigned char/void* (binary).
 _PTR_ELEM = r"(?:char|unsigned\s+char|signed\s+char|u8|i8|void)"
 PTR_PARAM = re.compile(rf"^(const\s+)?{_PTR_ELEM}\s*\*\s*(\w+)$")
+# A single-level pointer to a named struct — either a typedef (`DateTime *p`)
+# or an explicit tag (`struct Ymd *p`). NOT byte-fuzzable (needs a valid
+# instance), so struct-pointer functions are verified by the whole-program
+# gate on real instances, not the isolated differential. Multi-level (`**`)
+# stays out.
+STRUCT_PTR = re.compile(r"^(const\s+)?(?:struct\s+|union\s+|enum\s+)?(\w+)\s*\*\s*(\w+)$")
 
 # C type -> (rust type, ctypes name).
 TYPE_MAP: dict[str, tuple[str, str]] = {
@@ -120,9 +131,22 @@ class CEntry:
     # verification (the oracle exports every de-static'd worklist symbol), the
     # rewritten Rust after link-back.
     callees: list[str] = field(default_factory=list)
+    # {struct name: C definition} for struct-pointer params — the model mirrors
+    # these as #[repr(C)]. Non-empty marks a gate-only function (the isolated
+    # differential can't build a valid instance to fuzz).
+    struct_defs: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def gate_only(self) -> bool:
+        return bool(self.struct_defs)
 
 
-def _parse_param(q: str) -> tuple[str, str] | None:
+_C_TYPE_WORDS = frozenset(
+    ["void", "int", "double", "float", "char", "short", "long", "unsigned", "signed", "const"]
+)
+
+
+def _parse_param(q: str, structs: bool = False) -> tuple[str, str] | None:
     q = q.strip()
     pm = PARAM.match(q)
     if pm:
@@ -133,11 +157,20 @@ def _parse_param(q: str) -> tuple[str, str] | None:
         is_str = "char" in q and "unsigned" not in q and "u8" not in q
         kind = "str" if is_str else "buf"
         return (f"ptr:{kind}:{'const' if is_const else 'mut'}", pp.group(2))
+    if structs:
+        sm = STRUCT_PTR.match(q)
+        if sm and sm.group(2) not in _C_TYPE_WORDS:
+            const = "const" if sm.group(1) else "mut"
+            return (f"struct:{sm.group(2)}:{const}", sm.group(3))
     return None
 
 
 def c_rust_worklist(
-    index_dir: Path, c_source: Path, pointers: bool = False, include_nonleaf: bool = False
+    index_dir: Path,
+    c_source: Path,
+    pointers: bool = False,
+    include_nonleaf: bool = False,
+    structs: bool = False,
 ) -> tuple[list[CEntry], list[tuple[str, str]]]:
     """Pure functions defined in ``c_source`` with a fuzzable ABI.
 
@@ -184,25 +217,35 @@ def c_rust_worklist(
         ok = True
         if raw not in ("", "void"):
             for q in raw.split(","):
-                parsed = _parse_param(q)
+                parsed = _parse_param(q, structs=structs)
                 if parsed is None:
                     ok = False
                     break
                 params.append(parsed)
         has_ptr = any(t.startswith("ptr:") for t, _ in params)
+        has_struct = any(t.startswith("struct:") for t, _ in params)
         if not ok:
             excluded.append((s["id"], "unfuzzable parameter (struct/multi-level pointer)"))
             continue
         if has_ptr and not pointers:
             excluded.append((s["id"], "pointer ABI (enable with --pointers)"))
             continue
-        if ret == "void" and not has_ptr:
+        if ret == "void" and not has_ptr and not has_struct:
             excluded.append((s["id"], "void return: nothing observable to compare"))
             continue
         if s.get("calls") and not include_nonleaf:
             excluded.append((s["id"], "non-leaf (enable with --non-leaf)"))
             continue
-        candidates[s["id"]] = CEntry(s["id"], name, ret, params, text)
+        entry = CEntry(s["id"], name, ret, params, text)
+        if has_struct:
+            # Struct-pointer functions are verified only by the whole-program
+            # gate (real instances); the model writes its own #[repr(C)] mirror
+            # from the struct definitions provided in the prompt.
+            full = "\n".join(file_cache[path])
+            entry.struct_defs = _struct_defs(
+                {t.split(":")[1] for t, _ in params if t.startswith("struct:")}, full
+            )
+        candidates[s["id"]] = entry
         calls_of[s["id"]] = list(s.get("calls", []))
 
     # Pass 2: keep functions whose every in-repo callee is also a candidate;
@@ -217,6 +260,48 @@ def c_rust_worklist(
         keep[cid] = e
 
     return _toposort(keep), excluded
+
+
+def _extract_struct(name: str, text: str) -> str | None:
+    """The full ``struct <name> { ... }`` body from the source, brace-matched."""
+    m = re.search(rf"\bstruct\s+{re.escape(name)}\s*\{{", text)
+    if not m:
+        return None
+    i = text.index("{", m.start())
+    depth = 0
+    for j in range(i, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                end = text.find(";", j)
+                return text[m.start() : (end + 1 if end != -1 else j + 1)]
+    return None
+
+
+def _struct_defs(names: set[str], text: str, depth: int = 2) -> dict[str, str]:
+    """Struct definitions for ``names`` plus the struct types they reference,
+    up to ``depth`` levels — the layout context the model mirrors as
+    ``#[repr(C)]``."""
+    out: dict[str, str] = {}
+    frontier = set(names)
+    for _ in range(depth):
+        nxt: set[str] = set()
+        for nm in frontier:
+            if nm in out:
+                continue
+            body = _extract_struct(nm, text)
+            if body is None:
+                continue
+            out[nm] = body[:2000]
+            # referenced struct types (`struct Foo` or a typedef'd name used as
+            # a field type) — shallow, best-effort.
+            for ref in re.findall(r"\bstruct\s+(\w+)", body):
+                if ref != nm:
+                    nxt.add(ref)
+        frontier = nxt - set(out)
+    return out
 
 
 def _toposort(entries: dict[str, CEntry]) -> list[CEntry]:
@@ -405,6 +490,9 @@ def _rust_type(token: str) -> str:
     if token.startswith("ptr:"):
         _, _kind, constness = token.split(":")
         return "*const u8" if constness == "const" else "*mut u8"
+    if token.startswith("struct:"):
+        _, name, constness = token.split(":")
+        return f"*const {name}" if constness == "const" else f"*mut {name}"
     return TYPE_MAP[token][0]
 
 
@@ -449,12 +537,33 @@ def build_c_rust_prompt(e: CEntry, context: str = "", callees: list[CEntry] | No
             f"function — do not redeclare them): \n{sigs}\n  Call them exactly as the "
             f"C does, inside `unsafe {{ ... }}`. Do NOT reimplement them."
         )
+    struct_ctx = struct_rule = output_rule = ""
+    if e.struct_defs:
+        defs = "\n\n".join(e.struct_defs[k] for k in sorted(e.struct_defs))
+        struct_ctx = f"\nThe C struct(s) it takes by pointer:\n```c\n{defs}\n```\n"
+        struct_rule = (
+            "\n- The pointer params reference REAL C structs (received at runtime). "
+            "FIRST write faithful `#[repr(C)]` Rust mirrors of the struct(s) above — "
+            "same field order and same field sizes (a C pointer field you do not "
+            "dereference can be `*mut u8` or `usize`; a `char x[N]` can be `[u8; N]`; "
+            "an `int` is `i32`). Then dereference with `unsafe { (*p).field }`. Getting "
+            "the layout wrong will be caught downstream, so mirror it exactly."
+        )
+        output_rule = (
+            "- Output the `#[repr(C)]` struct definition(s) you need, then the one "
+            "function item — no markdown fences, no `use` statements, no prose."
+        )
+    else:
+        output_rule = (
+            "- Output ONLY that one function item, no markdown fences, no `use` "
+            "statements, no extra items, no comments about the translation."
+        )
     return f"""Translate this C function into Rust.
 
 ```c
 {e.source}
 ```
-{ctx}
+{struct_ctx}{ctx}
 Contract: deterministic, no I/O, no globals, no heap allocation visible to
 the caller. It is called through C FFI; the exact item you must produce is:
 
@@ -463,13 +572,12 @@ the caller. It is called through C FFI; the exact item you must produce is:
 }}
 
 Rules:
-- Output ONLY that one function item, no markdown fences, no `use` statements,
-  no extra items, no comments about the translation.
+{output_rule}
 - Preserve C semantics exactly: two's-complement wrapping arithmetic where C
   could overflow (use wrapping_add/wrapping_mul/wrapping_shl etc.), C
   integer-division/shift behavior, and identical branch conditions.
 - The function must never panic for ANY input (no unwrap, no plain arithmetic
-  that can overflow-panic, no divide-by-zero path C does not have).{ptr_rule}{callee_rule}
+  that can overflow-panic, no divide-by-zero path C does not have).{ptr_rule}{struct_rule}{callee_rule}
 - If the C references macros or globals you cannot see, translate the visible
   logic faithfully anyway."""
 
@@ -819,11 +927,104 @@ def suspect_global_reads(e: CEntry) -> set[str]:
     return accessed - params - locals_ - _C_KEYWORDS - {e.name}
 
 
+# Head of a top-level type-defining Rust item, keyed by name. Struct-pointer
+# winners each emit a `#[repr(C)]` mirror of the SAME C struct, so two winners
+# sharing a struct would define it twice in one crate. We dedup these by name.
+_RUST_TYPE_HEAD = re.compile(
+    r"^(?:pub\s+)?(?:struct|enum|union|type)\s+(\w+)",
+    re.MULTILINE,
+)
+
+
+def _split_rust_items(src: str) -> list[str]:
+    """Split a Rust source fragment into top-level items by brace matching.
+
+    Skips braces inside line/block comments and string/char literals so a `}`
+    in a function body or string doesn't end an item early. Good enough for the
+    model-generated `#[repr(C)]` struct + function shape we assemble; it only
+    feeds type-item dedup, and a mis-split at worst falls back to today's
+    behavior (a duplicate-definition compile error, no silent miscompile)."""
+    items: list[str] = []
+    depth = 0
+    start = 0
+    i = 0
+    n = len(src)
+    while i < n:
+        c = src[i]
+        two = src[i : i + 2]
+        if two == "//":
+            j = src.find("\n", i)
+            i = n if j == -1 else j + 1
+            continue
+        if two == "/*":
+            j = src.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+            continue
+        if c == '"':
+            i += 1
+            while i < n and src[i] != '"':
+                i += 2 if src[i] == "\\" else 1
+            i += 1
+            continue
+        if c == "'":
+            # char literal `'x'` / `'\n'`; a lifetime `'a` has no closing quote
+            # nearby, so only skip when a close quote is within 3 chars.
+            close = src.find("'", i + 1)
+            if 0 < close <= i + 3:
+                i = close + 1
+                continue
+            i += 1
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                items.append(src[start : i + 1])
+                j = i + 1
+                while j < n and src[j] in " \t\r\n;":
+                    j += 1
+                start = j
+                i = j
+                continue
+        i += 1
+    tail = src[start:].strip()
+    if tail:
+        items.append(tail)
+    return [it.strip() for it in items if it.strip()]
+
+
+def _assemble_winner_bodies(winners: dict[str, str]) -> str:
+    """Concatenate winner sources into one crate body, deduping shared
+    type-defining items (a `#[repr(C)]` struct mirror emitted by more than one
+    struct-pointer winner) by name — first definition wins. Functions stay at
+    top-level scope so winner-to-winner (non-leaf) crate calls still resolve.
+
+    When no winner defines a type (the scalar/pointer path), this is a no-op:
+    the original flat concatenation is returned unchanged."""
+    ordered = [winners[n] for n in sorted(winners)]
+    if not any(_RUST_TYPE_HEAD.search(w) for w in ordered):
+        return "\n\n".join(ordered)
+    seen_types: set[str] = set()
+    type_items: list[str] = []
+    other_items: list[str] = []
+    for w in ordered:
+        for item in _split_rust_items(w):
+            m = _RUST_TYPE_HEAD.search(item)
+            if m:
+                if m.group(1) not in seen_types:
+                    seen_types.add(m.group(1))
+                    type_items.append(item)
+            else:
+                other_items.append(item)
+    return "\n\n".join(type_items + other_items)
+
+
 def _build_rust_staticlib(winners: dict[str, str], workdir: Path, extern_decls: str = "") -> Path:
     lib_rs = workdir / "cgir_rewrites.rs"
     # extern_decls declares any callee that stayed C so a rewritten caller
     # links against it; winner-to-winner calls resolve as crate functions.
-    body = "\n\n".join(winners[n] for n in sorted(winners))
+    body = _assemble_winner_bodies(winners)
     if not body:  # empty set (the gate's stock baseline) — keep the crate valid
         body = '#[no_mangle]\npub extern "C" fn __cgir_gate_empty() {}'
     lib_rs.write_text(extern_decls + body + "\n")
@@ -1039,18 +1240,21 @@ def run_c_rust(
     n_trials: int = 300,
     pointers: bool = False,
     include_nonleaf: bool = False,
+    structs: bool = False,
     budget_usd: float | None = None,
     ledger_path: Path | None = None,
     log: Any = lambda _: None,
 ) -> dict[str, Any]:
     """Regenerate ``c_source``'s pure functions in Rust, verified end to end.
     With ``include_nonleaf`` the worklist covers functions that call other
-    worklist functions, processed callees-first; a rewritten caller reaches
-    its callees as ``extern "C"`` symbols. Rides
-    :func:`cgir.rewrite.run_search_loop`."""
+    worklist functions, processed callees-first. With ``structs`` it also
+    covers single-struct-pointer functions — verified only by the
+    whole-program gate on real instances (the isolated differential can't
+    build a valid struct), the model mirroring the struct as ``#[repr(C)]``.
+    Rides :func:`cgir.rewrite.run_search_loop`."""
     flags = c_flags or []
     workdir = Path(tempfile.mkdtemp(prefix="cgir-crust-"))
-    entries, excluded = c_rust_worklist(index_dir, c_source, pointers, include_nonleaf)
+    entries, excluded = c_rust_worklist(index_dir, c_source, pointers, include_nonleaf, structs)
     orig = compile_oracle(c_source, [e.name for e in entries], workdir, flags)
     have = exported_symbols(orig, [e.name for e in entries])
     for e in entries:
@@ -1079,16 +1283,19 @@ def run_c_rust(
         )
         if dylib is None:
             return "rustc", err, {}
-        # Arity always checked; purity only for leaves — a non-leaf's calls to
-        # known-pure callees would look impure to the adapter, and the
-        # differential is the real behavioral judge either way.
-        err = contract_check(cand, e, check_purity=not callees)
+        # Arity always checked; purity relaxed for non-leaves (calls look
+        # impure) and struct-pointer functions (deref through a repr(C) mirror).
+        err = contract_check(cand, e, check_purity=not callees and not e.gate_only)
         if err:
             return "contract", err, {}
+        # Struct-pointer functions can't be byte-fuzzed into a valid instance;
+        # the whole-program gate (--apply --gate) is their authoritative check.
+        if e.gate_only:
+            return "ok", "", {"regenerated_as": f"rust:{e.name}", "verify": "gate-required"}
         err = differential(orig, dylib, e, n_trials, seed=42)
         if err:
             return "differential", err, {}
-        return "ok", "", {"regenerated_as": f"rust:{e.name}"}
+        return "ok", "", {"regenerated_as": f"rust:{e.name}", "verify": "differential"}
 
     loop = run_search_loop(
         entries,

@@ -926,6 +926,15 @@ def rewrite_cmd(
             "(dependency-ordered; a Rust caller reaches its callees via extern C).",
         ),
     ] = False,
+    structs: Annotated[
+        bool,
+        typer.Option(
+            "--structs",
+            help="c-rust: also rewrite functions taking single-level struct pointers "
+            "(model mirrors the C struct as #[repr(C)]). Gate-only: the isolated "
+            "differential is skipped, so these need --apply with --gate-build/--gate-run.",
+        ),
+    ] = False,
     out: Annotated[
         Path | None, typer.Option("--out", help="c-rust: write the full results JSON here.")
     ] = None,
@@ -1024,6 +1033,7 @@ def rewrite_cmd(
             gate_build,
             gate_run,
             gate_input,
+            structs,
         )
         return
     if lang != "python":
@@ -1129,6 +1139,7 @@ def _rewrite_c_rust(
     gate_build: str | None = None,
     gate_run: str | None = None,
     gate_input: Path | None = None,
+    structs: bool = False,
 ) -> None:
     import shutil
 
@@ -1144,14 +1155,21 @@ def _rewrite_c_rust(
         raise typer.BadParameter("--lang c-rust needs --c-source <amalgamation.c>")
     if not c_source.exists():
         raise typer.BadParameter(f"No such C source: {c_source}")
+    if structs and not (gate_build and gate_run):
+        typer.echo(
+            "note: struct-pointer functions are gate-only (the isolated differential is "
+            "skipped). Without --gate-build/--gate-run they compile + pass the contract "
+            "scan but are not behaviorally verified; pass a gate to link them safely."
+        )
     if not live:
-        entries, _ = c_rust_worklist(index_dir, c_source, pointers, non_leaf)
+        entries, _ = c_rust_worklist(index_dir, c_source, pointers, non_leaf, structs)
         kind = "function(s)" if non_leaf else "leaf function(s)"
         typer.echo(f"dry run: {len(entries)} C {kind} in {c_source.name} regenerable")
         for e in sorted(entries, key=lambda e: e.component_id):
             ptr = " [ptr]" if any(t.startswith("ptr:") for t, _ in e.params) else ""
+            st = " [struct]" if e.gate_only else ""
             deps = f" -> {e.callees}" if e.callees else ""
-            typer.echo(f"  {e.component_id}{ptr}{deps}")
+            typer.echo(f"  {e.component_id}{ptr}{st}{deps}")
         typer.echo(
             f"~{len(entries) * k} cheap calls + escalations, verified by differential vs the "
             "compiled C. Rerun with --live (requires cgir[llm], ANTHROPIC_API_KEY, cc + rustc)."
@@ -1173,6 +1191,7 @@ def _rewrite_c_rust(
         n_trials=n_trials,
         pointers=pointers,
         include_nonleaf=non_leaf,
+        structs=structs,
         budget_usd=budget_usd,
         ledger_path=ledger,
         log=typer.echo,
@@ -1189,7 +1208,7 @@ def _rewrite_c_rust(
     if not apply:
         return
     # Link the Rust in place of the C originals: the "C with Rust inside" step.
-    worklist = c_rust_worklist(index_dir, c_source, pointers, non_leaf)[0]
+    worklist = c_rust_worklist(index_dir, c_source, pointers, non_leaf, structs)[0]
     by_id = {e.component_id: e for e in worklist}
     winners: dict[str, str] = {}
     skipped: list[str] = []

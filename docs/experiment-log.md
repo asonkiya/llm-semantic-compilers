@@ -650,3 +650,56 @@ authoritative gate. Proven end to end via the CLI on a 3-function chain
 (`quad->sumsq->square`, all gate-verified) and unit-tested (accepts a correct
 candidate, rejects a wrong one as `diverged`). `benchmarks/rung4_program_gate.py`
 remains the SQLite reproducer.
+
+## Struct-pointer ABIs (`--structs`, 2026-07-20)
+
+The isolated differential can only verify functions whose whole input is
+synthesizable from bytes: scalars and char*/byte buffers. A function taking a
+pointer to a named struct can't be fuzzed that way — a random buffer isn't a
+valid instance (fields have invariants, pointer fields must point somewhere
+real). So struct-pointer functions ride the whole-program gate exclusively:
+the model writes its own `#[repr(C)]` mirror of the struct from the C
+definition, and the only acceptance test is that a real program built with the
+function replaced stays byte-identical to stock. There is no per-function
+differential for them — `gate_only` is set, the differential is skipped, and
+`--apply` without `--gate-build`/`--gate-run` refuses to claim they're verified
+(it prints a note and links them unproven only if you insist).
+
+Worklist: `c_rust_worklist(..., structs=True)` adds single-level struct-pointer
+params (`struct Ymd *p` or a typedef `DateTime *p`; `**` and scalar pointers
+excluded), extracts the C struct definition (plus shallowly-referenced structs,
+depth 2, capped) and hands it to the prompt. CLI: `cgir rewrite --lang c-rust
+--structs`. On SQLite the flag surfaces ~298 leaf / 381 with `--non-leaf`
+struct-pointer pure functions on top of the scalar+pointer set.
+
+**End-to-end proof (live, Haiku 4.5).** A 2-function unit — `rect_area` and
+`rect_perimeter`, both `int f(struct Rect *)` — rewritten and linked in one
+command:
+
+    cgir rewrite --lang c-rust --structs --live --apply \
+      --gate-build 'cc main.c {source} {lib} -o {out}' --gate-run '{out}'
+
+2/2 solved for $0.002, both verified by the whole-program gate on real `Rect`
+instances, both linked into `geom.c` (nm-proven the symbols come from Rust),
+final program byte-identical to stock C. The model's `#[repr(C)] struct Rect`
+mirror is what makes the ABI line up; a **wrong** layout (fields transposed) is
+caught by the gate as `diverged` — unit-tested.
+
+**Assembly bug found and fixed.** Combining N struct winners into one staticlib
+collided: each winner emits its own `#[repr(C)]` mirror of the shared struct,
+so a flat concatenation defined `struct Rect` twice (rustc error). The
+per-function gate never hits this (one function per staticlib); only the final
+`link_back` does. Fix: `_assemble_winner_bodies` splits each winner into
+top-level items and dedups type-defining items (struct/enum/union/type) by name
+— first definition wins — while functions stay at top-level scope so
+winner-to-winner non-leaf crate calls still resolve. The scalar/pointer path
+(no type items) returns the original flat concatenation unchanged.
+Regression-tested (assembler dedup + a two-struct-winner staticlib build).
+
+**Honest scope.** The tractable case is a *flat* struct read/written by value
+of its fields. The bulk of SQLite's struct-pointer functions are not this:
+subclass casts (`sqlite3_vtab_cursor*` -> `carray_cursor*`), pointer-field
+chasing across the heap, and function-pointer method-table dispatch. Those stay
+out of scope — flagged, not rewritten. `--structs` widens the addressable set
+to flat-struct leaves verified on real instances; it does not claim the general
+struct-graph case.

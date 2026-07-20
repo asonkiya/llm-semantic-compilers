@@ -13,6 +13,8 @@ import pytest
 from cgir.pipeline import scan_repo
 from cgir.rewrite_c_rust import (
     CEntry,
+    _assemble_winner_bodies,
+    _build_rust_staticlib,
     _driver_source,
     build_c_rust_prompt,
     c_rust_worklist,
@@ -53,6 +55,21 @@ static int strlen_c(const char *z) {
   int n = 0;
   while (z[n]) n++;
   return n;
+}
+"""
+
+
+# A flat scalar struct passed by pointer — the tractable struct-pointer case:
+# no pointer-field chasing, no subclass cast. `weekday` reads three int fields.
+STRUCT_C = """\
+struct Ymd {
+  int y;
+  int m;
+  int d;
+};
+
+static int day_number(struct Ymd *p) {
+  return p->y * 10000 + p->m * 100 + p->d;
 }
 """
 
@@ -259,6 +276,124 @@ def test_whole_program_gate_accepts_and_rejects(tmp_path: Path) -> None:
     wrong = '#[no_mangle]\npub extern "C" fn caller(x: i32) -> i32 { x + 999 }'  # wrong output
     verified, rejected = whole_program_gate(repo / "unit.c", {"caller": wrong}, ents, build, run)
     assert not verified and rejected.get("caller") == "diverged"
+
+
+def test_struct_worklist_opt_in_and_gate_only(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "unit.c").write_text(STRUCT_C)
+    idx = tmp_path / "idx"
+    scan_repo(repo, out=idx)
+    # off by default (struct pointer isn't byte-fuzzable)
+    base, _ = c_rust_worklist(idx, repo / "unit.c", pointers=True)
+    assert "day_number" not in {e.name for e in base}
+    # opt in with structs=True
+    ents, _ = c_rust_worklist(idx, repo / "unit.c", pointers=True, structs=True)
+    e = next(e for e in ents if e.name == "day_number")
+    assert e.params == [("struct:Ymd:mut", "p")]
+    assert e.gate_only is True  # verified by the whole-program gate, not the differential
+    assert "Ymd" in e.struct_defs
+    assert "int y" in e.struct_defs["Ymd"]
+
+
+def test_struct_signature_and_repr_c_prompt() -> None:
+    e = CEntry(
+        "m.day_number",
+        "day_number",
+        "int",
+        [("struct:Ymd:mut", "p")],
+        "static int day_number(struct Ymd *p){...}",
+        struct_defs={"Ymd": "struct Ymd {\n  int y;\n  int m;\n  int d;\n};"},
+    )
+    assert "p: *mut Ymd" in rust_signature(e)
+    prompt = build_c_rust_prompt(e)
+    assert "#[repr(C)]" in prompt  # instructed to mirror the layout
+    assert "struct Ymd" in prompt  # the C definition is provided as context
+    assert "(*p).field" in prompt  # deref guidance
+
+
+@pytest.mark.skipif(not (CC and RUSTC), reason="needs cc + rustc")
+def test_struct_whole_program_gate_accepts_repr_c_mirror(tmp_path: Path) -> None:
+    """A struct-pointer function is verified only by the whole-program gate on a
+    real instance: a correct #[repr(C)] mirror links byte-identical, a
+    wrong-layout one diverges."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "unit.c").write_text(
+        "struct Ymd { int y; int m; int d; };\n"
+        "int day_number(struct Ymd *p){ return p->y * 10000 + p->m * 100 + p->d; }\n"
+    )
+    (repo / "main.c").write_text(
+        "#include <stdio.h>\n"
+        "struct Ymd { int y; int m; int d; };\n"
+        "int day_number(struct Ymd *);\n"
+        "int main(){ struct Ymd a = {2026,7,20}, b = {1999,12,31};\n"
+        '  printf("%d %d\\n", day_number(&a), day_number(&b)); return 0; }\n'
+    )
+    idx = tmp_path / "idx"
+    scan_repo(repo, out=idx)
+    ents, _ = c_rust_worklist(idx, repo / "unit.c", pointers=True, structs=True)
+    assert any(e.name == "day_number" and e.gate_only for e in ents)
+    build = f"cc {repo / 'main.c'} {{source}} {{lib}} -o {{out}}"
+    run = "{out}"
+
+    good = (
+        "#[repr(C)]\npub struct Ymd { y: i32, m: i32, d: i32 }\n"
+        '#[no_mangle]\npub extern "C" fn day_number(p: *mut Ymd) -> i32 {\n'
+        "  unsafe { (*p).y * 10000 + (*p).m * 100 + (*p).d }\n}"
+    )
+    verified, rejected = whole_program_gate(repo / "unit.c", {"day_number": good}, ents, build, run)
+    assert verified == ["day_number"] and not rejected
+
+    # wrong layout: fields transposed -> reads garbage offsets -> diverges
+    wrong = (
+        "#[repr(C)]\npub struct Ymd { d: i32, m: i32, y: i32 }\n"
+        '#[no_mangle]\npub extern "C" fn day_number(p: *mut Ymd) -> i32 {\n'
+        "  unsafe { (*p).y * 10000 + (*p).m * 100 + (*p).d }\n}"
+    )
+    verified, rejected = whole_program_gate(
+        repo / "unit.c", {"day_number": wrong}, ents, build, run
+    )
+    assert not verified and rejected.get("day_number") == "diverged"
+
+
+def test_assemble_dedups_shared_struct_but_not_scalar() -> None:
+    # Two struct-pointer winners emit the SAME #[repr(C)] mirror; the crate must
+    # define the struct once (else rustc: "Rect defined multiple times").
+    area = (
+        "#[repr(C)]\npub struct Rect { w: i32, h: i32 }\n"
+        '#[no_mangle]\npub extern "C" fn rect_area(p: *mut Rect) -> i32 '
+        "{ unsafe { (*p).w * (*p).h } }"
+    )
+    perim = (
+        "#[repr(C)]\npub struct Rect { w: i32, h: i32 }\n"
+        '#[no_mangle]\npub extern "C" fn rect_perimeter(p: *mut Rect) -> i32 '
+        "{ unsafe { 2 * ((*p).w + (*p).h) } }"
+    )
+    body = _assemble_winner_bodies({"rect_area": area, "rect_perimeter": perim})
+    assert body.count("struct Rect") == 1  # deduped
+    assert "fn rect_area" in body and "fn rect_perimeter" in body  # both kept
+    # the scalar path (no type items) is left as the exact flat concatenation
+    scal = {"a": 'pub extern "C" fn a() {}', "b": 'pub extern "C" fn b() {}'}
+    assert _assemble_winner_bodies(scal) == "\n\n".join(scal[n] for n in sorted(scal))
+
+
+@pytest.mark.skipif(not RUSTC, reason="needs rustc")
+def test_staticlib_builds_with_two_struct_winners(tmp_path: Path) -> None:
+    """Regression: combining two struct-pointer winners that share a struct into
+    one staticlib must compile (the per-function gate never exercises this)."""
+    area = (
+        "#[repr(C)]\npub struct Rect { w: i32, h: i32 }\n"
+        '#[no_mangle]\npub extern "C" fn rect_area(p: *mut Rect) -> i32 '
+        "{ unsafe { (*p).w * (*p).h } }"
+    )
+    perim = (
+        "#[repr(C)]\npub struct Rect { w: i32, h: i32 }\n"
+        '#[no_mangle]\npub extern "C" fn rect_perimeter(p: *mut Rect) -> i32 '
+        "{ unsafe { 2 * ((*p).w + (*p).h) } }"
+    )
+    lib = _build_rust_staticlib({"rect_area": area, "rect_perimeter": perim}, tmp_path)
+    assert lib.exists()
 
 
 def test_cc_available_sanity() -> None:
