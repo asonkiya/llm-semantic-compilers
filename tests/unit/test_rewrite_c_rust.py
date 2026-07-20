@@ -247,7 +247,9 @@ def test_whole_program_gate_accepts_and_rejects(tmp_path: Path) -> None:
     idx = tmp_path / "idx"
     scan_repo(repo, out=idx)
     ents, _ = c_rust_worklist(idx, repo / "unit.c", include_nonleaf=True)
-    build = f"cc {repo / 'main.c'} {{source}} -Wl,-force_load,{{lib}} -o {{out}}"
+    # main.c references caller directly, so plain linking pulls it from the
+    # staticlib — portable (no macOS -force_load / GNU --whole-archive).
+    build = f"cc {repo / 'main.c'} {{source}} {{lib}} -o {{out}}"
     run = "{out}"
 
     good = '#[no_mangle]\npub extern "C" fn caller(x: i32) -> i32 { unsafe { helper(x) + 1 } }'
