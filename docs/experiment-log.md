@@ -600,3 +600,37 @@ to Rust in one pass — 92 functions, 19 of them calling each other in Rust —
 and a real SQLite built from them is behaviorally indistinguishable. The
 sweep also drew a precise line around where per-function verification stops
 being enough.
+
+## Rung 5 at scale: the whole-program gate for context-dependent functions
+
+The at-scale sweep left an open gap: ~12 memory-path functions pass the
+isolated differential but crash a live SQLite, and the fix was a crude
+name-based exclusion. Capture/replay closes it properly (2026-07-19,
+`benchmarks/rung4_program_gate.py`).
+
+You cannot replay a recorded *pointer* — its address and heap are gone by
+replay time. So replay the real *workload* instead: link each candidate into
+its own SQLite, one function at a time, and run the SQL battery. Survive
+byte-identical with no crash -> whole-program-safe; crash or diverge ->
+rejected. The isolated differential stays a cheap pre-filter; this is the
+authoritative acceptance test.
+
+**Result over the 104 non-state-reading winners: 102 verified, 2 rejected —
+`sqlite3MemInit` and `sqlite3MemSize`, both SIGSEGV — caught automatically
+with no name heuristic. The assembled 102-function SQLite passes the battery
+byte-identical.**
+
+The gate is strictly better than the earlier `Mem|Malloc|Size|Vdbe|Btree|…`
+name filter, which conservatively excluded 12 and left 92: the gate rejects
+*only* the two functions that actually break and recovers the other ten
+(e.g. `sqlite3StrIHash`, `sqlite3Utf16ByteLen`, Vdbe helpers) that the name
+filter wrongly dropped. And the two it rejects are exactly the ones whose
+contract reads hidden allocation metadata the random-input differential can't
+model — pinpointed by running them, not by guessing from their names.
+
+**Takeaway:** the vision's verification stack is now layered and honest —
+compiler + cgir contract scan + isolated differential as fast per-function
+pre-filters, then the whole-program replay as the gate that admits a function
+only if a real program built from it is behaviorally indistinguishable. On
+SQLite that yields 102 cheap-model-written Rust functions provably safe to
+run inside the engine, with the exact 2 that aren't named and explained.
