@@ -3,7 +3,9 @@ real public repositories (all five adapters) and check not just that it runs
 but that it extracts what's actually there.
 
 Scanning is fully static (tree-sitter; no repo dependencies to install), so we
-can point it at anything. For each repo:
+can point it at anything. Each repo is pinned to a commit SHA so the
+ground-truth denominator is reproducible (no HEAD drift → no flaky gate). For
+each repo:
 
 - scan under a timeout; record crash / timeout / success and wall time;
 - **ground truth**: independently tree-sitter-parse the source and count the
@@ -12,12 +14,24 @@ can point it at anything. For each repo:
   "1,513 components" into "1,513 of 1,580 (96%)" and would have flashed the
   #ifdef under-extraction (stb 16%) automatically;
 - **determinism**: scan twice, require an identical component set;
-- **downstream smoke**: run stats / search / decompose on the index so the
-  whole pipeline — not just ingest — is exercised on diverse real graphs.
+- **downstream smoke**: run stats / search / impact on the index so the whole
+  pipeline — not just ingest — is exercised on diverse real graphs.
 
 Failures are captured and the sweep continues.
 
+This is a regression *gate*, not just a report. Three modes:
+
+    # report only (writes JSON, always exit 0)
     python benchmarks/corpus_scan.py --out corpus-report.json [--only flask,stb]
+
+    # regenerate the committed baseline (run this when a ratio change is
+    # intentional — e.g. an adapter improvement — and review the diff)
+    python benchmarks/corpus_scan.py --update-baseline
+
+    # CI gate: run and FAIL (exit 1) on any crash / timeout / non-determinism /
+    # downstream failure, or an extraction ratio that dropped more than
+    # `tolerance` below its baseline. This is what the nightly workflow runs.
+    python benchmarks/corpus_scan.py --check
 """
 
 from __future__ import annotations
@@ -26,44 +40,197 @@ import argparse
 import json
 import shutil
 import subprocess
+import sys
 import time
 import traceback
 from pathlib import Path
 
 from tree_sitter import Language, Parser
 
-CGIR = str(Path(__file__).resolve().parent.parent / ".venv" / "bin" / "cgir")
 
-# name, git url, language, optional subdir (keeps giant repos tractable)
-CORPUS = [
+def _cgir_bin() -> str:
+    """Prefer an explicit override, then the repo venv, then PATH (CI installs
+    cgir system-wide, so `.venv/bin/cgir` won't exist there)."""
+    import os
+
+    if env := os.environ.get("CGIR_BIN"):
+        return env
+    venv = Path(__file__).resolve().parent.parent / ".venv" / "bin" / "cgir"
+    if venv.exists():
+        return str(venv)
+    return shutil.which("cgir") or str(venv)
+
+
+CGIR = _cgir_bin()
+BASELINE_PATH = Path(__file__).resolve().parent / "corpus-baseline.json"
+# An extraction ratio may drop this far below baseline before it's a regression
+# (absorbs tree-sitter grammar-wheel jitter; a real adapter break drops far more).
+DEFAULT_TOLERANCE = 0.03
+
+# name, git url, language, optional subdir (keeps giant repos tractable), pin SHA.
+# Pins make the ground-truth denominator reproducible; refresh them alongside a
+# deliberate `--update-baseline`.
+CORPUS: list[tuple[str, str, str, str | None, str]] = [
     # Python — incl. a metaprogramming-heavy ORM and a numeric lib
-    ("flask", "https://github.com/pallets/flask", "python", "src"),
-    ("requests", "https://github.com/psf/requests", "python", "src"),
-    ("click", "https://github.com/pallets/click", "python", "src"),
-    ("httpx", "https://github.com/encode/httpx", "python", "httpx"),
-    ("rich", "https://github.com/Textualize/rich", "python", "rich"),
-    ("sqlalchemy", "https://github.com/sqlalchemy/sqlalchemy", "python", "lib"),
-    ("pydantic", "https://github.com/pydantic/pydantic", "python", "pydantic"),
-    ("django", "https://github.com/django/django", "python", "django"),
+    (
+        "flask",
+        "https://github.com/pallets/flask",
+        "python",
+        "src",
+        "36e4a824f340fdee7ed50937ba8e7f6bc7d17f81",
+    ),
+    (
+        "requests",
+        "https://github.com/psf/requests",
+        "python",
+        "src",
+        "69f84847045bef7a849cc994a26fe7ba8a169e95",
+    ),
+    (
+        "click",
+        "https://github.com/pallets/click",
+        "python",
+        "src",
+        "cfa01eeb7894a408af70b29d28c0b24f8680f9fb",
+    ),
+    (
+        "httpx",
+        "https://github.com/encode/httpx",
+        "python",
+        "httpx",
+        "b5addb64f0161ff6bfe94c124ef76f6a1fba5254",
+    ),
+    (
+        "rich",
+        "https://github.com/Textualize/rich",
+        "python",
+        "rich",
+        "9d8f9a372cc5916fd4781fec207ced7ddac2f08f",
+    ),
+    (
+        "sqlalchemy",
+        "https://github.com/sqlalchemy/sqlalchemy",
+        "python",
+        "lib",
+        "10cdc38ccf037617ef9baa4e816b5ff377f58a38",
+    ),
+    (
+        "pydantic",
+        "https://github.com/pydantic/pydantic",
+        "python",
+        "pydantic",
+        "2294b52862478f3ef0fa0afd3cfdc9acba3881b0",
+    ),
+    (
+        "django",
+        "https://github.com/django/django",
+        "python",
+        "django",
+        "76e1bca1311ae7073a1fa4add6f9d19d709f0f09",
+    ),
     # TypeScript / JavaScript
-    ("zod", "https://github.com/colinhacks/zod", "typescript", "src"),
-    ("ky", "https://github.com/sindresorhus/ky", "typescript", "source"),
-    ("axios", "https://github.com/axios/axios", "typescript", "lib"),
+    (
+        "zod",
+        "https://github.com/colinhacks/zod",
+        "typescript",
+        "src",
+        "912f0f51b0ced654d0069741e7160834dca742ee",
+    ),
+    (
+        "ky",
+        "https://github.com/sindresorhus/ky",
+        "typescript",
+        "source",
+        "3419113b48e034fdcf8fa6bd3be3da7b3d0d758f",
+    ),
+    (
+        "axios",
+        "https://github.com/axios/axios",
+        "typescript",
+        "lib",
+        "c44f8d0a910df99486da9175584b99f56a94a73b",
+    ),
     # Go — incl. a big framework
-    ("cobra", "https://github.com/spf13/cobra", "go", None),
-    ("gin", "https://github.com/gin-gonic/gin", "go", None),
-    ("hugo", "https://github.com/gohugoio/hugo", "go", "hugolib"),
+    (
+        "cobra",
+        "https://github.com/spf13/cobra",
+        "go",
+        None,
+        "adbc8813901bba65827259daa8e22ff94ec1f30e",
+    ),
+    (
+        "gin",
+        "https://github.com/gin-gonic/gin",
+        "go",
+        None,
+        "34dac209ffb6ef85cc78c5d217bbb7ad001d68fd",
+    ),
+    (
+        "hugo",
+        "https://github.com/gohugoio/hugo",
+        "go",
+        "hugolib",
+        "89b8c322008f5285b81d4b357887292e3b61f708",
+    ),
     # Rust — incl. async + macro-heavy
-    ("ripgrep", "https://github.com/BurntSushi/ripgrep", "rust", "crates"),
-    ("clap", "https://github.com/clap-rs/clap", "rust", "clap_builder"),
-    ("tokio", "https://github.com/tokio-rs/tokio", "rust", "tokio/src"),
+    (
+        "ripgrep",
+        "https://github.com/BurntSushi/ripgrep",
+        "rust",
+        "crates",
+        "59e318f5ace48db54f37bb67c152535bc17fa153",
+    ),
+    (
+        "clap",
+        "https://github.com/clap-rs/clap",
+        "rust",
+        "clap_builder",
+        "12e50b3bc855d506cdc07a3bdaece5416e6fc7ba",
+    ),
+    (
+        "tokio",
+        "https://github.com/tokio-rs/tokio",
+        "rust",
+        "tokio/src",
+        "ac6869a431d9d7e2a81ce5309f00730741d3462a",
+    ),
     # C — single-header, feature-flagged, and macro-dense
-    ("tiny-AES-c", "https://github.com/kokke/tiny-AES-c", "c", None),
-    ("kilo", "https://github.com/antirez/kilo", "c", None),
-    ("stb", "https://github.com/nothings/stb", "c", None),
-    ("curl", "https://github.com/curl/curl", "c", "lib"),
-    ("redis", "https://github.com/redis/redis", "c", "src"),
-    ("jq", "https://github.com/jqlang/jq", "c", "src"),
+    (
+        "tiny-AES-c",
+        "https://github.com/kokke/tiny-AES-c",
+        "c",
+        None,
+        "23856752fbd139da0b8ca6e471a13d5bcc99a08d",
+    ),
+    (
+        "kilo",
+        "https://github.com/antirez/kilo",
+        "c",
+        None,
+        "323d93b29bd89a2cb446de90c4ed4fea1764176e",
+    ),
+    (
+        "stb",
+        "https://github.com/nothings/stb",
+        "c",
+        None,
+        "31c1ad37456438565541f4919958214b6e762fb4",
+    ),
+    (
+        "curl",
+        "https://github.com/curl/curl",
+        "c",
+        "lib",
+        "c5fd5eb55a58f0f370c69d56fd0dabfe76035474",
+    ),
+    (
+        "redis",
+        "https://github.com/redis/redis",
+        "c",
+        "src",
+        "e1cc3dc268a5ff20eecbdb530483fd692c3dbc6e",
+    ),
+    ("jq", "https://github.com/jqlang/jq", "c", "src", "2d410d6d86be7f685ad28e5cffac0248aa47664c"),
 ]
 
 _EXTS = {
@@ -136,9 +303,36 @@ def ground_truth_defs(scan_dir: Path, lang: str) -> tuple[int, int]:
     return defs, loc
 
 
-def clone(name: str, url: str, cache: Path) -> tuple[Path | None, str]:
+def clone(name: str, url: str, cache: Path, pin: str | None) -> tuple[Path | None, str]:
+    """Clone ``url`` into the cache, pinned to ``pin`` when given (so the
+    ground-truth denominator is reproducible). GitHub serves arbitrary commit
+    SHAs to `fetch`, so we init + fetch the one commit rather than clone HEAD."""
     dest = cache / name
     if dest.exists():
+        # Trust the cache only if it's a *complete* checkout at the right
+        # commit; a failed earlier fetch can leave an empty .git behind, which
+        # would silently scan as 0 LOC (and, unpinned, a stale HEAD would
+        # drift the denominator).
+        head = subprocess.run(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True
+        )
+        ok = head.returncode == 0 and (pin is None or head.stdout.strip() == pin)
+        if ok:
+            return dest, ""
+        shutil.rmtree(dest, ignore_errors=True)
+    if pin:
+        dest.mkdir(parents=True)
+        steps = [
+            ["git", "-C", str(dest), "init", "-q"],
+            ["git", "-C", str(dest), "remote", "add", "origin", url],
+            ["git", "-C", str(dest), "fetch", "--depth", "1", "-q", "origin", pin],
+            ["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"],
+        ]
+        for step in steps:
+            proc = subprocess.run(step, capture_output=True, text=True, timeout=600)
+            if proc.returncode != 0:
+                shutil.rmtree(dest, ignore_errors=True)
+                return None, proc.stderr[-500:]
         return dest, ""
     proc = subprocess.run(
         ["git", "clone", "--depth", "1", "--quiet", url, str(dest)],
@@ -215,27 +409,18 @@ def scan_and_check(scan_dir: Path, lang: str, out: Path, timeout: int) -> dict:
     return result
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--cache", type=Path, default=Path("/tmp/cgir-corpus"))
-    ap.add_argument("--timeout", type=int, default=600)
-    ap.add_argument("--only", default=None)
-    args = ap.parse_args()
-
-    args.cache.mkdir(parents=True, exist_ok=True)
-    work = args.cache / "_indexes"
+def run_corpus(picks: set[str] | None, cache: Path, timeout: int) -> list[dict]:
+    cache.mkdir(parents=True, exist_ok=True)
+    work = cache / "_indexes"
     work.mkdir(exist_ok=True)
-    picks = set(args.only.split(",")) if args.only else None
-
-    rows = []
-    for name, url, lang, subdir in CORPUS:
+    rows: list[dict] = []
+    for name, url, lang, subdir, pin in CORPUS:
         if picks and name not in picks:
             continue
-        row: dict = {"name": name, "lang": lang, "url": url}
+        row: dict = {"name": name, "lang": lang, "url": url, "pin": pin}
         print(f"[{lang:10s}] {name:14s}", flush=True, end=" ")
         try:
-            repo, err = clone(name, url, args.cache)
+            repo, err = clone(name, url, cache, pin)
             if repo is None:
                 row["clone"] = "fail"
                 row["error"] = err
@@ -245,7 +430,7 @@ def main() -> None:
             scan_dir = repo / subdir if subdir and (repo / subdir).exists() else repo
             idx = work / name
             shutil.rmtree(idx, ignore_errors=True)
-            row.update(scan_and_check(scan_dir, lang, idx, args.timeout))
+            row.update(scan_and_check(scan_dir, lang, idx, timeout))
             if row.get("scan_ok"):
                 print(
                     f"{row['loc'] // 1000}k LOC -> OK {row['seconds']}s | "
@@ -261,14 +446,17 @@ def main() -> None:
             row["error"] = traceback.format_exc()[-1500:]
             print("HARNESS ERROR")
         rows.append(row)
+    return rows
 
+
+def summarize(rows: list[dict]) -> dict:
     ok = [r for r in rows if r.get("scan_ok")]
     low = [
         f"{r['name']} ({r['extraction_ratio']})"
         for r in ok
         if r.get("extraction_ratio") is not None and r["extraction_ratio"] < 0.85
     ]
-    summary = {
+    return {
         "repos": len(rows),
         "scanned_ok": len(ok),
         "crashed": [r["name"] for r in rows if r.get("scan") == "crash"],
@@ -281,8 +469,99 @@ def main() -> None:
         "total_components": sum(r.get("components", 0) for r in ok),
         "total_defs": sum(r.get("ground_truth_defs", 0) for r in ok),
     }
+
+
+def write_baseline(rows: list[dict], tolerance: float) -> None:
+    """Freeze the current per-repo ratios as the regression baseline."""
+    repos = {
+        r["name"]: {
+            "lang": r["lang"],
+            "pin": r.get("pin"),
+            "extraction_ratio": r["extraction_ratio"],
+            "components": r["components"],
+            "ground_truth_defs": r["ground_truth_defs"],
+        }
+        for r in rows
+        if r.get("scan_ok") and r.get("extraction_ratio") is not None
+    }
+    BASELINE_PATH.write_text(json.dumps({"tolerance": tolerance, "repos": repos}, indent=2) + "\n")
+    print(f"\nwrote baseline: {len(repos)} repos -> {BASELINE_PATH}")
+
+
+def check_against_baseline(rows: list[dict], baseline: dict) -> list[str]:
+    """Return a list of human-readable regression failures (empty = pass).
+
+    ``baseline`` is the loaded ``corpus-baseline.json`` dict (``{tolerance,
+    repos}``); pass it in so the gate logic is testable without the filesystem."""
+    tol = baseline.get("tolerance", DEFAULT_TOLERANCE)
+    base_repos = baseline["repos"]
+    failures: list[str] = []
+    for r in rows:
+        name = r["name"]
+        # A clone failure is infrastructure/network noise, not an adapter
+        # regression — report it but don't fail the gate on it (keeps the
+        # nightly run from flaking on a transient fetch).
+        if r.get("clone") == "fail":
+            print(f"  note: {name} clone failed (infra, not gated)", flush=True)
+            continue
+        # Everything below is a real adapter/pipeline signal.
+        if not r.get("scan_ok"):
+            failures.append(f"{name}: scan {r.get('scan', '?')}")
+            continue
+        if not r.get("deterministic"):
+            failures.append(f"{name}: non-deterministic (two scans differ)")
+        if not r.get("downstream_ok"):
+            failures.append(f"{name}: downstream failed {r.get('downstream')}")
+        # Ratio regression vs the frozen baseline.
+        base = base_repos.get(name)
+        if base is None:
+            print(f"  note: {name} not in baseline (skipping ratio check)", flush=True)
+            continue
+        got, want = r.get("extraction_ratio"), base["extraction_ratio"]
+        if got is not None and want is not None and got < want - tol:
+            failures.append(
+                f"{name}: extraction ratio regressed {want} -> {got} "
+                f"(floor {round(want - tol, 3)}); components {base['ground_truth_defs']}"
+                f"-denom now {r['components']}/{r['ground_truth_defs']}"
+            )
+    return failures
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", type=Path, default=Path("benchmarks/corpus-report.json"))
+    ap.add_argument("--cache", type=Path, default=Path("/tmp/cgir-corpus"))
+    ap.add_argument("--timeout", type=int, default=600)
+    ap.add_argument("--only", default=None)
+    ap.add_argument(
+        "--check", action="store_true", help="Gate: exit 1 on regression vs the baseline."
+    )
+    ap.add_argument(
+        "--update-baseline", action="store_true", help="Freeze current ratios as the baseline."
+    )
+    ap.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE)
+    args = ap.parse_args()
+
+    picks = set(args.only.split(",")) if args.only else None
+    rows = run_corpus(picks, args.cache, args.timeout)
+    summary = summarize(rows)
     args.out.write_text(json.dumps({"summary": summary, "rows": rows}, indent=2) + "\n")
     print("\n" + json.dumps(summary, indent=2))
+
+    if args.update_baseline:
+        write_baseline(rows, args.tolerance)
+        return
+    if args.check:
+        if not BASELINE_PATH.exists():
+            print(f"\nno baseline at {BASELINE_PATH} (run --update-baseline first)")
+            sys.exit(1)
+        failures = check_against_baseline(rows, json.loads(BASELINE_PATH.read_text()))
+        if failures:
+            print("\nCORPUS GATE FAILED:")
+            for f in failures:
+                print(f"  ✗ {f}")
+            sys.exit(1)
+        print("\nCORPUS GATE PASSED — no regressions vs baseline.")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,166 @@
+{
+  "tolerance": 0.03,
+  "repos": {
+    "flask": {
+      "lang": "python",
+      "pin": "36e4a824f340fdee7ed50937ba8e7f6bc7d17f81",
+      "extraction_ratio": 0.856,
+      "components": 332,
+      "ground_truth_defs": 388
+    },
+    "requests": {
+      "lang": "python",
+      "pin": "69f84847045bef7a849cc994a26fe7ba8a169e95",
+      "extraction_ratio": 0.884,
+      "components": 237,
+      "ground_truth_defs": 268
+    },
+    "click": {
+      "lang": "python",
+      "pin": "cfa01eeb7894a408af70b29d28c0b24f8680f9fb",
+      "extraction_ratio": 0.861,
+      "components": 490,
+      "ground_truth_defs": 569
+    },
+    "httpx": {
+      "lang": "python",
+      "pin": "b5addb64f0161ff6bfe94c124ef76f6a1fba5254",
+      "extraction_ratio": 0.951,
+      "components": 424,
+      "ground_truth_defs": 446
+    },
+    "rich": {
+      "lang": "python",
+      "pin": "9d8f9a372cc5916fd4781fec207ced7ddac2f08f",
+      "extraction_ratio": 0.9,
+      "components": 821,
+      "ground_truth_defs": 912
+    },
+    "sqlalchemy": {
+      "lang": "python",
+      "pin": "10cdc38ccf037617ef9baa4e816b5ff377f58a38",
+      "extraction_ratio": 0.836,
+      "components": 9642,
+      "ground_truth_defs": 11532
+    },
+    "pydantic": {
+      "lang": "python",
+      "pin": "2294b52862478f3ef0fa0afd3cfdc9acba3881b0",
+      "extraction_ratio": 0.831,
+      "components": 1548,
+      "ground_truth_defs": 1862
+    },
+    "django": {
+      "lang": "python",
+      "pin": "76e1bca1311ae7073a1fa4add6f9d19d709f0f09",
+      "extraction_ratio": 0.952,
+      "components": 9155,
+      "ground_truth_defs": 9612
+    },
+    "zod": {
+      "lang": "typescript",
+      "pin": "912f0f51b0ced654d0069741e7160834dca742ee",
+      "extraction_ratio": 0.782,
+      "components": 934,
+      "ground_truth_defs": 1194
+    },
+    "ky": {
+      "lang": "typescript",
+      "pin": "3419113b48e034fdcf8fa6bd3be3da7b3d0d758f",
+      "extraction_ratio": 1.611,
+      "components": 87,
+      "ground_truth_defs": 54
+    },
+    "axios": {
+      "lang": "typescript",
+      "pin": "c44f8d0a910df99486da9175584b99f56a94a73b",
+      "extraction_ratio": 1.258,
+      "components": 200,
+      "ground_truth_defs": 159
+    },
+    "cobra": {
+      "lang": "go",
+      "pin": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+      "extraction_ratio": 0.988,
+      "components": 588,
+      "ground_truth_defs": 595
+    },
+    "gin": {
+      "lang": "go",
+      "pin": "34dac209ffb6ef85cc78c5d217bbb7ad001d68fd",
+      "extraction_ratio": 0.996,
+      "components": 1318,
+      "ground_truth_defs": 1323
+    },
+    "hugo": {
+      "lang": "go",
+      "pin": "89b8c322008f5285b81d4b357887292e3b61f708",
+      "extraction_ratio": 0.941,
+      "components": 1487,
+      "ground_truth_defs": 1581
+    },
+    "ripgrep": {
+      "lang": "rust",
+      "pin": "59e318f5ace48db54f37bb67c152535bc17fa153",
+      "extraction_ratio": 0.816,
+      "components": 2365,
+      "ground_truth_defs": 2897
+    },
+    "clap": {
+      "lang": "rust",
+      "pin": "12e50b3bc855d506cdc07a3bdaece5416e6fc7ba",
+      "extraction_ratio": 0.797,
+      "components": 1057,
+      "ground_truth_defs": 1327
+    },
+    "tokio": {
+      "lang": "rust",
+      "pin": "ac6869a431d9d7e2a81ce5309f00730741d3462a",
+      "extraction_ratio": 0.9,
+      "components": 3338,
+      "ground_truth_defs": 3710
+    },
+    "tiny-AES-c": {
+      "lang": "c",
+      "pin": "23856752fbd139da0b8ca6e471a13d5bcc99a08d",
+      "extraction_ratio": 1.194,
+      "components": 37,
+      "ground_truth_defs": 31
+    },
+    "kilo": {
+      "lang": "c",
+      "pin": "323d93b29bd89a2cb446de90c4ed4fea1764176e",
+      "extraction_ratio": 1.0,
+      "components": 36,
+      "ground_truth_defs": 36
+    },
+    "stb": {
+      "lang": "c",
+      "pin": "31c1ad37456438565541f4919958214b6e762fb4",
+      "extraction_ratio": 0.821,
+      "components": 2095,
+      "ground_truth_defs": 2552
+    },
+    "curl": {
+      "lang": "c",
+      "pin": "c5fd5eb55a58f0f370c69d56fd0dabfe76035474",
+      "extraction_ratio": 0.962,
+      "components": 3687,
+      "ground_truth_defs": 3833
+    },
+    "redis": {
+      "lang": "c",
+      "pin": "e1cc3dc268a5ff20eecbdb530483fd692c3dbc6e",
+      "extraction_ratio": 0.99,
+      "components": 5730,
+      "ground_truth_defs": 5787
+    },
+    "jq": {
+      "lang": "c",
+      "pin": "2d410d6d86be7f685ad28e5cffac0248aa47664c",
+      "extraction_ratio": 0.97,
+      "components": 646,
+      "ground_truth_defs": 666
+    }
+  }
+}

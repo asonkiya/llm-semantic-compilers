@@ -1,0 +1,35 @@
+name: corpus
+
+# Nightly adapter-regression gate: scan a pinned spread of real public repos
+# (all five language adapters) and fail if any crashes, becomes
+# non-deterministic, breaks downstream, or its extraction ratio drops below the
+# committed baseline (benchmarks/corpus-baseline.json). This is the check that
+# would have caught the C #ifdef / ERROR-node under-extraction and the JS
+# ingestion gap automatically. Too slow (clones ~1.4M LOC) for per-commit CI,
+# so it runs nightly and on demand.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC daily
+  workflow_dispatch:       # manual "Run workflow" button
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv pip install --system -e ".[dev,api]"
+      - name: Corpus regression gate
+        run: python benchmarks/corpus_scan.py --check --out corpus-report.json
+      - name: Upload report
+        if: always()   # keep the JSON even when the gate fails, for triage
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-report
+          path: corpus-report.json

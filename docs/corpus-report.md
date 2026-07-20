@@ -89,3 +89,28 @@ python benchmarks/corpus_scan.py --out benchmarks/corpus-report.json
 
 Per-repo data (extraction ratio, determinism, downstream, kinds) in
 `benchmarks/corpus-report.json`.
+
+## The corpus is now a regression gate (2026-07-20)
+
+The harness is productized from a run-by-hand benchmark into a reproducible
+adapter-regression gate:
+
+- **Pinned corpus.** Every repo is pinned to a commit SHA (`CORPUS` in
+  `benchmarks/corpus_scan.py`), so the ground-truth denominator can't drift with
+  upstream `HEAD` — the gate is reproducible, not flaky.
+- **Committed baseline.** `benchmarks/corpus-baseline.json` freezes each repo's
+  extraction ratio. Regenerate deliberately with
+  `python benchmarks/corpus_scan.py --update-baseline` and review the diff.
+- **A real gate.** `--check` runs the sweep and **exits non-zero** on any parse
+  crash, timeout, non-determinism, downstream failure, or an extraction ratio
+  that drops more than `tolerance` (default 0.03) below baseline. Clone failures
+  are treated as infra noise (reported, not gated). This is exactly the signal
+  that caught the C `#ifdef` / `ERROR`-node under-extraction and the JS
+  ingestion gap — now it fails automatically instead of needing a human to read
+  a ratio column.
+- **Nightly CI.** `.github/workflows/corpus.yml` runs `--check` nightly (and on
+  demand) and uploads the report; too slow (~1.4M LOC of clones) for per-commit
+  CI.
+- **Offline guard.** `tests/unit/test_corpus_gate.py` unit-tests the gate logic
+  and the ground-truth counter on committed fixtures (no network), so the gate
+  machinery itself is covered by the normal `pytest` run.
