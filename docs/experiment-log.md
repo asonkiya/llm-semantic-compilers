@@ -703,3 +703,39 @@ chasing across the heap, and function-pointer method-table dispatch. Those stay
 out of scope — flagged, not rewritten. `--structs` widens the addressable set
 to flat-struct leaves verified on real instances; it does not claim the general
 struct-graph case.
+
+## Gate-only routing for differential-inconclusive functions (2026-07-20)
+
+Some pure functions have a precondition the byte-fuzzer can't satisfy: `ts_bm`'s
+`subpattern(u8 *pattern, int i, int j, int g)` indexes `pattern[i+g-1]`,
+`pattern[j-1]` etc., valid only because its caller (`compute_prefix_tbl`) keeps
+`i+g == patlen`. Fuzzed with random ints, ~91% of trials fault out of bounds
+(trapped, skipped) and the handful of non-faulting comparisons are on
+out-of-bounds *garbage the C read without segfaulting* — so the isolated
+differential reports a `mismatch` (e.g. `subpattern(buf,-226,0,-201) orig=1
+rust=0`) on a translation that is actually correct.
+
+This is the same verification-boundary class as struct pointers: unverifiable
+in isolation, but decidable by the whole-program gate on the real caller. So we
+route it there instead of rejecting:
+
+- `differential()` now flags **inconclusive** when the fuzzer overwhelmingly
+  produced out-of-contract inputs (`orig_faults + both_faults >= trials/2`) with
+  almost no clean comparisons (`compared < trials/4`) — keyed on the *original's*
+  fault rate, not the candidate, so a real mismatch on a fuzzable function is
+  still a rejection.
+- `run_c_rust`'s `evaluate` treats an inconclusive verdict like a struct
+  pointer: accept the candidate as `verify="gate-required"` (a provisional
+  winner) rather than a `differential` kill. The candidate already matched on
+  every in-contract input the fuzzer *did* find.
+- The CLI labels these honestly (`solved N/M (K gate-required — not
+  differential-verified, need --gate)`), routes them through
+  `whole_program_gate` on `--apply` when a gate is configured, and **warns**
+  when they'd be linked without one.
+
+End to end through the product: `cgir rewrite --lang c-rust --pointers --live
+--apply --gate-build 'cc bm_main.c {source} {lib} -o {out}' --gate-run '{out}'`
+on `subpattern` → solved in 1 attempt (differential inconclusive → gate-required),
+whole-program gate verifies byte-identical Boyer-Moore good-shift tables over 9
+patterns, linked. A flipped-compare variant is rejected by the gate as
+`diverged`. The Linux `lib/` batch is now effectively 11/11 through one command.

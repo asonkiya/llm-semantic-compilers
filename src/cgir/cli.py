@@ -1199,8 +1199,18 @@ def _rewrite_c_rust(
     if out is not None:
         out.write_text(json.dumps(report, indent=2) + "\n")
     totals = report["totals"]
+    n_gate_req = sum(
+        1
+        for o in report["outcomes"]
+        if o["status"] == "solved" and o.get("verify") == "gate-required"
+    )
+    gate_note = (
+        f" ({n_gate_req} gate-required — not differential-verified, need --gate)"
+        if n_gate_req
+        else ""
+    )
     typer.echo(
-        f"solved {totals['solved']}/{totals['components']} C->Rust "
+        f"solved {totals['solved']}/{totals['components']} C->Rust{gate_note} "
         f"(unsolved {totals['unsolved']}) for ${totals['cost_usd']}; "
         f"stage kills: {report['stage_kills']}"
     )
@@ -1211,6 +1221,7 @@ def _rewrite_c_rust(
     worklist = c_rust_worklist(index_dir, c_source, pointers, non_leaf, structs)[0]
     by_id = {e.component_id: e for e in worklist}
     winners: dict[str, str] = {}
+    gate_required: set[str] = set()  # struct-ptr + differential-inconclusive
     skipped: list[str] = []
     for o in report["outcomes"]:
         if o["status"] != "solved":
@@ -1223,6 +1234,8 @@ def _rewrite_c_rust(
             skipped.append(f"{entry.name} (reads {sorted(globals_read)})")
             continue
         winners[entry.name] = next(a["candidate"] for a in o["attempts"] if a["stage"] == "ok")
+        if o.get("verify") == "gate-required":
+            gate_required.add(entry.name)
     if skipped:
         typer.echo(
             f"skipped {len(skipped)} state-reading function(s) (use --force-link): {skipped}"
@@ -1256,6 +1269,16 @@ def _rewrite_c_rust(
             return
     elif gate_build or gate_run:
         raise typer.BadParameter("--gate-build and --gate-run must be given together")
+    else:
+        linked_gate_required = sorted(gate_required & winners.keys())
+        if linked_gate_required:
+            typer.echo(
+                f"WARNING: {len(linked_gate_required)} function(s) are gate-only "
+                "(struct-pointer, or the differential couldn't build valid inputs so "
+                "their precondition is unfuzzable) and were NOT behaviorally verified — "
+                f"linked unproven: {linked_gate_required}. Pass --gate-build/--gate-run "
+                "to verify them against the real program before linking."
+            )
     dest = link_out or (out.parent / "cgir-link" if out else Path("cgir-link"))
     gate = link_back(c_source, winners, dest, c_flags, entries=worklist)
     if not gate["linked"]:

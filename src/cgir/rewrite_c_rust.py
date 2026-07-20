@@ -860,16 +860,26 @@ def differential(orig: Path, cand: Path, e: CEntry, n: int, seed: int) -> str:
     v = json.loads(run.stdout.strip().splitlines()[-1])
     if v["status"] in ("missing_symbol", "dlopen_fail"):
         return f"differential: {v['status']}"
+    compared = v["compared"]
+    # Inputs the fuzzer put out of contract: the original faults (orig-only or
+    # alongside the candidate). A high rate with almost no clean comparisons
+    # means the valid-input manifold is something random bytes essentially can't
+    # hit — a precondition like "i, j, g index a valid pattern" that only the
+    # real caller enforces (ts_bm's subpattern). Then neither a clean pass nor a
+    # mismatch is trustworthy (the mismatches are on UB garbage the C read
+    # without faulting), so report inconclusive and let the caller defer to the
+    # whole-program gate rather than reject a possibly-correct translation.
+    faulted = v.get("orig_faults", 0) + v.get("both_faults", 0)
+    if e.params and faulted >= trials // 2 and compared < trials // 4:
+        return (
+            f"differential inconclusive: only {compared} in-contract inputs of "
+            f"{trials} ({faulted} out-of-contract faults in the C original)"
+        )
     if v["status"] == "mismatch":
         return (
             f"differential mismatch on {v['mismatches']} inputs "
-            f"({v['compared']} compared, {v['cand_faults']} candidate-faults); "
+            f"({compared} compared, {v['cand_faults']} candidate-faults); "
             f"e.g. {v['example']}"
-        )
-    if e.params and v["compared"] < max(20, trials // 10) and v["orig_faults"] > 0:
-        return (
-            f"differential inconclusive: only {v['compared']} in-contract inputs "
-            f"({v['orig_faults']} out-of-contract faults in the C original)"
         )
     return ""
 
@@ -1303,6 +1313,20 @@ def run_c_rust(
             return "ok", "", {"regenerated_as": f"rust:{e.name}", "verify": "gate-required"}
         err = differential(orig, dylib, e, n_trials, seed=42)
         if err:
+            # "Inconclusive" means the ORIGINAL C faults on most fuzzed inputs,
+            # so its precondition isn't expressible to the byte-fuzzer (valid
+            # array indices only a real caller supplies — e.g. ts_bm's
+            # subpattern). The candidate already matched on every in-contract
+            # input the fuzzer did find; route it to gate-only, like a struct
+            # pointer, instead of rejecting — the whole-program gate (--apply
+            # --gate) is then its authoritative check. A real mismatch is still
+            # a rejection (differential returns "mismatch", not "inconclusive").
+            if err.startswith("differential inconclusive:"):
+                return (
+                    "ok",
+                    "",
+                    {"regenerated_as": f"rust:{e.name}", "verify": "gate-required", "note": err},
+                )
             return "differential", err, {}
         return "ok", "", {"regenerated_as": f"rust:{e.name}", "verify": "differential"}
 

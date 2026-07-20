@@ -417,6 +417,38 @@ def test_differential_timeout_is_a_rejection_not_a_crash(
     assert "timed out" in reason  # rejected with a reason, no exception escaped
 
 
+@pytest.mark.skipif(not (CC and RUSTC), reason="needs cc + rustc")
+def test_inconclusive_differential_routes_to_gate_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the differential is inconclusive (the original's precondition isn't
+    fuzzable — e.g. ts_bm's subpattern), the candidate is accepted as gate-only
+    (verify='gate-required'), not rejected — so the whole-program gate can still
+    verify it. A real mismatch would still reject."""
+    from cgir.rewrite_c_rust import run_c_rust
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "unit.c").write_text("int dbl(int x){ return x + x; }\n")
+    idx = tmp_path / "idx"
+    scan_repo(repo, out=idx)
+
+    # the original faults on most fuzzed inputs -> differential can't confirm
+    monkeypatch.setattr(
+        rcr,
+        "differential",
+        lambda *a, **k: "differential inconclusive: only 3 in-contract inputs (297 ...)",
+    )
+
+    def sampler(prompt: str, model: str) -> tuple[str, float]:
+        return ('#[no_mangle]\npub extern "C" fn dbl(x: i32) -> i32 { x.wrapping_add(x) }', 0.0)
+
+    report = run_c_rust(idx, repo / "unit.c", sampler=sampler, k=1)
+    o = next(o for o in report["outcomes"] if o["component_id"].endswith("dbl"))
+    assert o["status"] == "solved"
+    assert o["verify"] == "gate-required"  # routed to the gate, not rejected
+
+
 def test_cc_available_sanity() -> None:
     # Guard the toolchain-gated tests aren't silently all-skipped in CI images
     # that DO have cc: if cc exists, compile_oracle must at least run.
