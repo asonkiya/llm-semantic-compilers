@@ -832,20 +832,29 @@ def differential(orig: Path, cand: Path, e: CEntry, n: int, seed: int) -> str:
     drv_c = cand.with_suffix(".driver.c")
     drv = cand.with_suffix(".driver")
     drv_c.write_text(_driver_source(e))
-    comp = subprocess.run(
-        ["cc", "-O0", "-w", str(drv_c), "-o", str(drv)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    try:
+        comp = subprocess.run(
+            ["cc", "-O0", "-w", str(drv_c), "-o", str(drv)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return "differential: driver compile timed out"
     if comp.returncode != 0:
         return f"differential: driver compile failed:\n{comp.stderr[:300]}"
-    run = subprocess.run(
-        [str(drv), str(orig), str(cand), str(trials), str(seed or 1)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    try:
+        run = subprocess.run(
+            [str(drv), str(orig), str(cand), str(trials), str(seed or 1)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        # A candidate that never terminates on some input (e.g. a rewritten
+        # strcmp that walks past a non-NUL-terminated buffer) is a rejection,
+        # not a crash of the whole run — the loop escalates or moves on.
+        return "differential: candidate timed out (likely non-terminating on some input)"
     if run.returncode != 0:
         return f"differential: driver died (rc={run.returncode})"
     v = json.loads(run.stdout.strip().splitlines()[-1])

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import cgir.rewrite_c_rust as rcr
 from cgir.pipeline import scan_repo
 from cgir.rewrite_c_rust import (
     CEntry,
@@ -394,6 +395,26 @@ def test_staticlib_builds_with_two_struct_winners(tmp_path: Path) -> None:
     )
     lib = _build_rust_staticlib({"rect_area": area, "rect_perimeter": perim}, tmp_path)
     assert lib.exists()
+
+
+def test_differential_timeout_is_a_rejection_not_a_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A candidate that never terminates on some input (a rewritten strcmp that
+    walks past a non-NUL-terminated buffer — hit for real on Linux lib/string.c)
+    must be rejected, not crash the whole run with TimeoutExpired."""
+    e = CEntry("m.f", "f", "int", [("ptr:str:const", "z")], "static int f(const char*z){...}")
+    calls = {"n": 0}
+
+    def fake_run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls["n"] += 1
+        if calls["n"] == 1:  # driver compile succeeds
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        raise subprocess.TimeoutExpired(cmd, 120)  # driver run hangs
+
+    monkeypatch.setattr(rcr.subprocess, "run", fake_run)
+    reason = differential(tmp_path / "orig.dylib", tmp_path / "cand.dylib", e, 300, seed=1)
+    assert "timed out" in reason  # rejected with a reason, no exception escaped
 
 
 def test_cc_available_sanity() -> None:
