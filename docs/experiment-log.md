@@ -634,3 +634,19 @@ pre-filters, then the whole-program replay as the gate that admits a function
 only if a real program built from it is behaviorally indistinguishable. On
 SQLite that yields 102 cheap-model-written Rust functions provably safe to
 run inside the engine, with the exact 2 that aren't named and explained.
+
+### Whole-program gate generalized into the product (`--gate-build`/`--gate-run`)
+
+The SQLite-specific gate is now a first-class, project-agnostic capability:
+`cgir.rewrite_c_rust.whole_program_gate(c_source, winners, entries,
+build_cmd, run_cmd, run_input)` and CLI flags `--gate-build`/`--gate-run`
+/`--gate-input`. The user supplies a build recipe (placeholders `{source}`
+patched C, `{lib}` Rust staticlib, `{out}` binary) and a run recipe
+(`{out}`, optional stdin). On `--apply` each surviving winner is verified by
+building+running the real program with only it replaced and requiring
+byte-identical output to stock; only the verified set is linked. The
+isolated differential stays the cheap per-function pre-filter; this is the
+authoritative gate. Proven end to end via the CLI on a 3-function chain
+(`quad->sumsq->square`, all gate-verified) and unit-tested (accepts a correct
+candidate, rejects a wrong one as `diverged`). `benchmarks/rung4_program_gate.py`
+remains the SQLite reproducer.

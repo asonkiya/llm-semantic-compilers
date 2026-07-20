@@ -823,7 +823,10 @@ def _build_rust_staticlib(winners: dict[str, str], workdir: Path, extern_decls: 
     lib_rs = workdir / "cgir_rewrites.rs"
     # extern_decls declares any callee that stayed C so a rewritten caller
     # links against it; winner-to-winner calls resolve as crate functions.
-    lib_rs.write_text(extern_decls + "\n\n".join(winners[n] for n in sorted(winners)) + "\n")
+    body = "\n\n".join(winners[n] for n in sorted(winners))
+    if not body:  # empty set (the gate's stock baseline) — keep the crate valid
+        body = '#[no_mangle]\npub extern "C" fn __cgir_gate_empty() {}'
+    lib_rs.write_text(extern_decls + body + "\n")
     out = workdir / "libcgir_rewrites.a"
     subprocess.run(
         ["rustc", "--crate-type=staticlib", "-O", "-o", str(out), str(lib_rs)],
@@ -952,6 +955,78 @@ def link_back(
     result["staticlib"] = str(dst_a)
     result["shared_lib"] = str(shared)
     return result
+
+
+def _gate_build_run(
+    c_source: Path,
+    subset: dict[str, str],
+    entries: list[CEntry],
+    build_cmd: str,
+    run_cmd: str,
+    run_input: bytes,
+    workdir: Path,
+) -> tuple[int | None, str, str]:
+    """Build the real program with ``subset`` replaced by Rust and run it.
+    Returns (returncode|None-if-build-failed, stdout, build_stderr)."""
+    d = Path(tempfile.mkdtemp(dir=workdir))
+    by_name = {e.name: e for e in entries}
+    still_c = {
+        c
+        for w in subset
+        for c in by_name.get(w, CEntry("", "", "", [], "")).callees
+        if c in by_name and c not in subset
+    }
+    lib = _build_rust_staticlib(subset, d, extern_block([by_name[c] for c in sorted(still_c)]))
+    patched = _patch_source(c_source, sorted(subset), d, also_export=still_c)
+    prog = d / "prog"
+    build = build_cmd.format(source=str(patched), lib=str(lib), out=str(prog))
+    b = subprocess.run(build, shell=True, capture_output=True, text=True, timeout=600)
+    if b.returncode != 0:
+        return None, "", b.stderr[-1500:]
+    run = run_cmd.format(out=str(prog))
+    r = subprocess.run(run, shell=True, input=run_input, capture_output=True, timeout=180)
+    return r.returncode, r.stdout.decode("utf-8", "replace"), ""
+
+
+def whole_program_gate(
+    c_source: Path,
+    winners: dict[str, str],
+    entries: list[CEntry],
+    build_cmd: str,
+    run_cmd: str,
+    run_input: bytes = b"",
+    workdir: Path | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    """The authoritative acceptance test: replay the real *workload*, not a
+    dead pointer. For each winner, build the program with only that function
+    replaced by Rust (``build_cmd`` — placeholders ``{source}`` patched C,
+    ``{lib}`` Rust staticlib, ``{out}`` binary) and run it (``run_cmd`` —
+    ``{out}``, stdin ``run_input``); keep it only if the output is
+    byte-identical to stock and it did not crash. Catches functions whose
+    contract depends on hidden runtime state (allocation metadata, etc.) that
+    the isolated differential can't model — with no name heuristic. Returns
+    (verified, {rejected: reason})."""
+    wd = workdir or Path(tempfile.mkdtemp(prefix="cgir-gate-"))
+    stock_rc, stock_out, err = _gate_build_run(
+        c_source, {}, entries, build_cmd, run_cmd, run_input, wd
+    )
+    if stock_rc != 0:
+        raise RuntimeError(f"gate stock build/run failed (rc={stock_rc}):\n{err}")
+    verified: list[str] = []
+    rejected: dict[str, str] = {}
+    for name in sorted(winners):
+        rc, out, _ = _gate_build_run(
+            c_source, {name: winners[name]}, entries, build_cmd, run_cmd, run_input, wd
+        )
+        if rc is None:
+            rejected[name] = "build_fail"
+        elif rc != 0:
+            rejected[name] = f"crash(rc={rc})"
+        elif out != stock_out:
+            rejected[name] = "diverged"
+        else:
+            verified.append(name)
+    return verified, rejected
 
 
 def run_c_rust(

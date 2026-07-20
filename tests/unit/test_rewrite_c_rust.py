@@ -23,6 +23,7 @@ from cgir.rewrite_c_rust import (
     rust_signature,
     suspect_global_reads,
     try_rustc,
+    whole_program_gate,
 )
 
 NONLEAF_C = """\
@@ -225,6 +226,37 @@ def test_nonleaf_differential_calls_into_original_c(tmp_path: Path) -> None:
     dl2, err2 = try_rustc(extern_block([helper]) + wrong, wd, "wrong", allow_undefined=True)
     assert dl2 is not None, err2
     assert "mismatch" in differential(orig, dl2, caller, 300, seed=1)
+
+
+@pytest.mark.skipif(not (CC and RUSTC), reason="needs cc + rustc")
+def test_whole_program_gate_accepts_and_rejects(tmp_path: Path) -> None:
+    """The gate builds+runs the real program with one function replaced and
+    keeps it only if the output matches stock — catching a wrong candidate the
+    isolated check might pass."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    # non-static so the harness reaches them directly (real projects call
+    # internal functions through a public API, like SQLite's shell.c).
+    (repo / "unit.c").write_text(
+        "int helper(int x){ return x * 2; }\nint caller(int x){ return helper(x) + 1; }\n"
+    )
+    (repo / "main.c").write_text(
+        "#include <stdio.h>\nint caller(int);\n"
+        'int main(){ printf("%d %d %d\\n", caller(1), caller(5), caller(-3)); return 0; }\n'
+    )
+    idx = tmp_path / "idx"
+    scan_repo(repo, out=idx)
+    ents, _ = c_rust_worklist(idx, repo / "unit.c", include_nonleaf=True)
+    build = f"cc {repo / 'main.c'} {{source}} -Wl,-force_load,{{lib}} -o {{out}}"
+    run = "{out}"
+
+    good = '#[no_mangle]\npub extern "C" fn caller(x: i32) -> i32 { unsafe { helper(x) + 1 } }'
+    verified, rejected = whole_program_gate(repo / "unit.c", {"caller": good}, ents, build, run)
+    assert verified == ["caller"] and not rejected
+
+    wrong = '#[no_mangle]\npub extern "C" fn caller(x: i32) -> i32 { x + 999 }'  # wrong output
+    verified, rejected = whole_program_gate(repo / "unit.c", {"caller": wrong}, ents, build, run)
+    assert not verified and rejected.get("caller") == "diverged"
 
 
 def test_cc_available_sanity() -> None:

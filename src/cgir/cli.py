@@ -929,6 +929,25 @@ def rewrite_cmd(
     out: Annotated[
         Path | None, typer.Option("--out", help="c-rust: write the full results JSON here.")
     ] = None,
+    gate_build: Annotated[
+        str | None,
+        typer.Option(
+            "--gate-build",
+            help="c-rust --apply: whole-program gate build command. Placeholders: "
+            "{source} patched C TU, {lib} Rust staticlib, {out} binary. "
+            "e.g. 'cc shell.c {source} -Wl,-force_load,{lib} -o {out} -lm'.",
+        ),
+    ] = None,
+    gate_run: Annotated[
+        str | None,
+        typer.Option(
+            "--gate-run", help="c-rust gate run command; placeholder {out}. e.g. '{out}'."
+        ),
+    ] = None,
+    gate_input: Annotated[
+        Path | None,
+        typer.Option("--gate-input", help="c-rust gate: file piped to the run command's stdin."),
+    ] = None,
     model: Annotated[str | None, typer.Option("--model", help="Cheap model override.")] = None,
     escalation_model: Annotated[
         str | None, typer.Option("--escalation-model", help="Escalation model override.")
@@ -1002,6 +1021,9 @@ def rewrite_cmd(
             link_out,
             force_link,
             non_leaf,
+            gate_build,
+            gate_run,
+            gate_input,
         )
         return
     if lang != "python":
@@ -1104,6 +1126,9 @@ def _rewrite_c_rust(
     link_out: Path | None = None,
     force_link: bool = False,
     non_leaf: bool = False,
+    gate_build: str | None = None,
+    gate_run: str | None = None,
+    gate_input: Path | None = None,
 ) -> None:
     import shutil
 
@@ -1186,6 +1211,32 @@ def _rewrite_c_rust(
     if not winners:
         typer.echo("nothing safe to link.")
         return
+    # Whole-program gate: the authoritative acceptance test. Verify each winner
+    # by building+running the real program with only it replaced, requiring
+    # byte-identical output to stock — catches functions whose contract reads
+    # hidden runtime state the isolated differential can't model.
+    if gate_build and gate_run:
+        from cgir.rewrite_c_rust import whole_program_gate
+
+        run_input = gate_input.read_bytes() if gate_input else b""
+        try:
+            verified, rejected = whole_program_gate(
+                c_source, winners, worklist, gate_build, gate_run, run_input
+            )
+        except RuntimeError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        if rejected:
+            typer.echo(
+                f"whole-program gate rejected {len(rejected)}/{len(winners)}: "
+                + ", ".join(f"{n} ({r})" for n, r in sorted(rejected.items()))
+            )
+        winners = {n: winners[n] for n in verified}
+        typer.echo(f"whole-program gate: {len(verified)} function(s) verified safe to link")
+        if not winners:
+            typer.echo("nothing passed the gate.")
+            return
+    elif gate_build or gate_run:
+        raise typer.BadParameter("--gate-build and --gate-run must be given together")
     dest = link_out or (out.parent / "cgir-link" if out else Path("cgir-link"))
     gate = link_back(c_source, winners, dest, c_flags, entries=worklist)
     if not gate["linked"]:
