@@ -104,6 +104,35 @@ SCALARS: dict[str, ScalarType] = {
 }
 
 
+@dataclass(frozen=True)
+class Param:
+    """One FFI-IR parameter (docs/design-ffi-pipeline.md §3).
+
+    ``kind`` for the Python pair: ``"scalar"`` (``scalar`` names ``"i64"`` /
+    ``"f64"`` / ``"bool"`` — ``bool`` is a Python-pair scalar, deliberately not
+    in the C fuzz registry) or ``"slice"`` (a ``(ptr, len)`` pair; ``text``
+    distinguishes str/UTF-8 from bytes). The C pair still speaks its string
+    tokens (``"int"``, ``"ptr:str:const"``, …); unifying it onto these
+    dataclasses is a later cleanup, not behavior.
+    """
+
+    name: str
+    kind: str  # "scalar" | "slice"
+    scalar: str | None = None  # canonical scalar name when kind == "scalar"
+    text: bool = False  # kind == "slice": True = str (UTF-8), False = bytes
+    mutable: bool = False
+
+
+@dataclass(frozen=True)
+class Signature:
+    """A function's FFI-IR signature. ``ret`` is ``"void"``, a canonical
+    scalar name, or ``"buf:str"`` / ``"buf:bytes"`` (a Rust-allocated
+    ``RustBuf{ptr,len,cap}`` return, freed via ``cgir_buf_free``)."""
+
+    params: tuple[Param, ...]
+    ret: str
+
+
 @dataclass
 class CEntry:
     component_id: str
