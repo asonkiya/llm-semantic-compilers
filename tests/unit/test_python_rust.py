@@ -191,3 +191,59 @@ def test_end_to_end_panic_candidate_rejected_not_harness_death(fixture_index: Pa
     clamp = next(o for o in report["results"] if o["component_id"] == "mathlib.clamp")
     assert clamp["status"] == "unsolved"
     assert any("replay crash" in a["feedback"] for a in clamp["attempts"])
+
+
+# --- M4: apply (wrapper emission + splice + gate) ----------------------------
+
+
+def test_assemble_dedups_prelude_across_string_winners() -> None:
+    from cgir.ffi.targets.rust import RUSTBUF_PRELUDE, assemble_python_winners
+
+    w1 = (
+        RUSTBUF_PRELUDE
+        + '#[no_mangle]\npub extern "C" fn a(p: *const u8, n: usize) -> RustBuf { todo!() }'
+    )
+    w2 = (
+        RUSTBUF_PRELUDE
+        + '#[no_mangle]\npub extern "C" fn b(p: *const u8, n: usize) -> RustBuf { todo!() }'
+    )
+    body = assemble_python_winners({"a": w1, "b": w2})
+    assert body.count("struct RustBuf") == 1  # type deduped
+    assert body.count("fn cgir_buf_free") == 1  # helper fn deduped
+    assert body.count("fn cgir_make_buf") == 1
+    assert "fn a(" in body and "fn b(" in body  # both winners kept
+
+
+def test_render_python_wrapper_preserves_name_and_params() -> None:
+    from cgir.ffi.sources.python import PyEntry
+    from cgir.rewrite_python_rust import render_python_wrapper
+
+    sig, _ = _sig("def clamp(x: int, lo: int, hi: int) -> int: ...", "clamp")
+    e = PyEntry("m.clamp", "clamp", sig, "", "m.py")
+    w = render_python_wrapper(e)
+    assert w.startswith("def clamp(x, lo, hi):")
+    assert "from _cgir_rs import clamp as _rs" in w and "return _rs(x, lo, hi)" in w
+
+
+@pytest.mark.skipif(not RUSTC, reason="needs rustc")
+def test_apply_splices_wrappers_and_repo_tests_pass_with_rust_inside(tmp_path: Path) -> None:
+    import shutil
+
+    from cgir.replay import capture
+
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE, repo)
+    idx = tmp_path / "idx"
+    scan_repo(repo, out=idx)
+    entries, _ = python_rust_worklist(idx, repo)
+    traces = capture(repo, {e.component_id: (Path(e.path), e.symbol) for e in entries})
+
+    report = run_python_rust(idx, repo, sampler=_sampler(), traces=traces, k=1, apply=True)
+    gate = report["final_gate"]
+    assert gate["applied"] == 4
+    assert gate["tests_ok"] is True  # the repo's OWN pytest passes with Rust inside
+    assert gate["hard_drift_outside_rewritten"] == []  # drift is only on the rewritten set
+    assert (repo / "_cgir_rs.py").exists() and list(repo.glob("_cgir_rs_lib.*"))
+    # the original body was replaced by a delegating wrapper
+    spliced = (repo / "mathlib.py").read_text()
+    assert "from _cgir_rs import clamp as _rs" in spliced

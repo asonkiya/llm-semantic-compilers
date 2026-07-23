@@ -239,6 +239,43 @@ def _assemble_winner_bodies(winners: dict[str, str]) -> str:
     return "\n\n".join(type_items + other_items)
 
 
+# The prelude helper functions (as opposed to the RustBuf *type*, which
+# `_RUST_TYPE_HEAD` already dedups). Multiple string-returning Python->Rust
+# winners each emit the whole prelude, so these collide on assembly.
+_PRELUDE_FNS = frozenset({"cgir_make_buf", "cgir_buf_free"})
+_RUST_FN_HEAD = re.compile(r"\bfn\s+(\w+)")
+
+
+def assemble_python_winners(winners: dict[str, str]) -> str:
+    """Concatenate Python->Rust winners into one crate, deduping the shared
+    RustBuf prelude (the ``#[repr(C)]`` struct *and* the ``cgir_make_buf`` /
+    ``cgir_buf_free`` helpers) by name — first wins — while keeping every
+    winner function. Robust to per-candidate whitespace drift in the prelude
+    (dedup is by item name, not text)."""
+    seen: set[tuple[str, str]] = set()
+    types: list[str] = []
+    helpers: list[str] = []
+    others: list[str] = []
+    for sym in sorted(winners):
+        for item in _split_rust_items(winners[sym]):
+            tm = _RUST_TYPE_HEAD.search(item)
+            if tm:
+                key = ("type", tm.group(1))
+                if key not in seen:
+                    seen.add(key)
+                    types.append(item)
+                continue
+            fm = _RUST_FN_HEAD.search(item)
+            if fm and fm.group(1) in _PRELUDE_FNS:
+                key = ("fn", fm.group(1))
+                if key not in seen:
+                    seen.add(key)
+                    helpers.append(item)
+                continue
+            others.append(item)
+    return "\n\n".join(types + helpers + others)
+
+
 def _build_rust_staticlib(winners: dict[str, str], workdir: Path, extern_decls: str = "") -> Path:
     lib_rs = workdir / "cgir_rewrites.rs"
     # extern_decls declares any callee that stayed C so a rewritten caller

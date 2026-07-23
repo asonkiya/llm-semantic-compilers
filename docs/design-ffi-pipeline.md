@@ -10,8 +10,11 @@ fixture cdylib. M3 2026-07-23 — the Python→Rust pair: `ffi/sources/python.py
 (`build_python_rust_prompt` + `run_python_rust`), `cgir rewrite --lang
 python-rust` (dry-run + `--live` + `--capture`/`--traces`); proven e2e on a
 committed fixture repo with a fake sampler (4/4 replay-verified incl. RustBuf
-string return, bytes slice; wrong + panicking candidates rejected). M4
-pending: `--apply` wrappers + real-model dogfood). Research grounded in a full seam-map of
+string return, bytes slice; wrong + panicking candidates rejected). M4 core
+2026-07-23 — `--apply`: assemble winners into one cdylib (prelude deduped),
+emit a ctypes wrapper module, splice delegating Python wrappers, expected-drift
+gate + full pytest; proven on the fixture with a fake sampler (4/4 applied,
+the repo's own pytest green with Rust inside). Real-model dogfood target open). Research grounded in a full seam-map of
 `rewrite_c_rust.py`, the `run_search_loop`/`replay.py`/`verify.py` contracts,
 and live Python↔Rust FFI experiments (rustc + ctypes smoke tests; results in
 §6.2's traps — every load-bearing convention below was verified on-machine,

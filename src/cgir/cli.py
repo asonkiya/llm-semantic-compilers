@@ -1346,8 +1346,6 @@ def _rewrite_python_rust(
     from cgir.rewrite import anthropic_sampler
     from cgir.rewrite_python_rust import run_python_rust
 
-    if apply:
-        raise typer.BadParameter("python-rust --apply lands in M4 (wrapper emission); not yet.")
     if traces_path and capture:
         raise typer.BadParameter("pass either --traces or --capture, not both")
 
@@ -1402,6 +1400,7 @@ def _rewrite_python_rust(
         min_traces=min_traces,
         budget_usd=budget_usd,
         ledger_path=ledger,
+        apply=apply,
         log=typer.echo,
     )
     if out is not None:
@@ -1412,6 +1411,18 @@ def _rewrite_python_rust(
         f"(unsolved {totals['unsolved']}) for ${totals['cost_usd']}; "
         f"stage kills: {report['stage_kills']}"
     )
+    gate = report.get("final_gate")
+    if gate is not None:
+        if gate.get("applied"):
+            typer.echo(
+                f"applied {gate['applied']} winner(s): {gate['wrapper_module']} + {gate['lib']} "
+                f"in {repo}; tests_ok={gate['tests_ok']}, "
+                f"hard-drift-outside-rewritten={gate['hard_drift_outside_rewritten']}"
+            )
+            if not gate["tests_ok"]:
+                typer.echo(f"FINAL GATE FAILED — test output:\n{gate.get('tests_output', '')}")
+        else:
+            typer.echo(f"apply: {gate.get('error') or gate.get('note')}")
 
 
 @app.command(name="regenerate")
