@@ -14,7 +14,12 @@ string return, bytes slice; wrong + panicking candidates rejected). M4 core
 2026-07-23 — `--apply`: assemble winners into one cdylib (prelude deduped),
 emit a ctypes wrapper module, splice delegating Python wrappers, expected-drift
 gate + full pytest; proven on the fixture with a fake sampler (4/4 applied,
-the repo's own pytest green with Rust inside). Real-model dogfood target open). Research grounded in a full seam-map of
+the repo's own pytest green with Rust inside). Real-model dogfood 2026-07-23 —
+live Haiku on the fixture: capture → generate → replay-verify → apply → the
+repo's own pytest green with Rust inside, **4/4 for $0.005**; Haiku's `fnv1a`
+chose `u32` masking over i64, `shout` reproduced the RustBuf prelude. **All
+four milestones landed; the pipeline is language-neutral and proven on a
+second pair.**). Research grounded in a full seam-map of
 `rewrite_c_rust.py`, the `run_search_loop`/`replay.py`/`verify.py` contracts,
 and live Python↔Rust FFI experiments (rustc + ctypes smoke tests; results in
 §6.2's traps — every load-bearing convention below was verified on-machine,

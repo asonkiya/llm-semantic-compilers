@@ -739,3 +739,54 @@ on `subpattern` → solved in 1 attempt (differential inconclusive → gate-requ
 whole-program gate verifies byte-identical Boyer-Moore good-shift tables over 9
 patterns, linked. A flipped-compare variant is rejected by the gate as
 `diverged`. The Linux `lib/` batch is now effectively 11/11 through one command.
+
+## The FFI rewrite core + Python→Rust, proven with a real model (2026-07-23)
+
+The C→Rust engine was refactored into a language-neutral core (`cgir/ffi/`,
+docs/design-ffi-pipeline.md) so a new language pair costs a binding + prompt +
+recipes, not a 1,400-line engine. Four milestones:
+
+- **M1** — extract `cgir/ffi/` (ir / driver / gate / targets.rust / sources.c);
+  `rewrite_c_rust.py` reassembled on it. Pure refactor: the 21 c-rust tests
+  pass unchanged and the CLI dry-run is byte-identical to pre-refactor HEAD on
+  SQLite (603 lines).
+- **M2** — `ffi/replay_ffi.py`, the ReplayOracle: replay recorded `(args,
+  result)` pairs against a candidate cdylib over the C ABI. Five marshalling
+  conventions were verified by live rustc+ctypes experiment, not assumed: i64
+  with a mandatory range check (ctypes silently wraps `2**63`); `(ptr,len)`
+  strings (never NUL-terminated CStr); Rust-allocated `RustBuf{ptr,len,cap}` +
+  `cgir_buf_free` for string returns (output size is unboundable from input);
+  bitwise-with-NaN-class float equality; and panic isolation in the harness
+  (`panic=abort` + a child that announces each index before the FFI call, so a
+  SIGABRT is a per-input rejection with a counterexample and the parent
+  respawns on the tail).
+- **M3** — the Python→Rust pair. Eligibility (`ast` on real source: params +
+  return in `int|float|bool|str|bytes`) → worklist → a prompt carrying the
+  exact FFI signature + the RustBuf skeleton + the i64-overflow rule → rustc
+  (`panic=abort -C overflow-checks=on`) → symbol-export check → replay against
+  captured traces. No isolated fuzz differential (there is no compiled
+  "original" — the Python isn't a dylib); the recorded test I/O is the oracle,
+  so the verified property is agreement on the recorded, non-raising inputs.
+- **M4** — `--apply`: assemble winners into one cdylib (the shared RustBuf
+  prelude deduped by item name across string-returning winners), emit a ctypes
+  wrapper module, splice each Python body with a thin delegating wrapper, and
+  gate on hard contract drift *outside* the rewritten set (drift on the
+  rewritten functions — dropped annotations, the new ctypes call — is expected
+  and downgraded) plus the repo's own full pytest run (authoritative).
+
+**Real-model dogfood.** Live Haiku on the fixture repo, one command
+(`cgir rewrite --lang python-rust --capture --live --apply`): capture real test
+I/O → Haiku writes Rust → replay-verify against the captured pairs → compile to
+a cdylib → splice ctypes wrappers → the repo's own pytest passes with Rust
+inside. **4/4 for $0.005**, no escalation. Notably Haiku's `fnv1a` chose `u32`
+masking (matching Python's 32-bit semantics exactly, no overflow) over the
+obvious i64, and `shout` reproduced the RustBuf prelude verbatim with a
+`len == 0` guard — both replay-verified, then run for real by the test suite.
+
+**Honest scope.** v1 is scalar + `str`/`bytes` leaf functions; the verified
+property is agreement on the recorded inputs (weak-evidence functions are
+excluded via `--min-traces`). Multi-winner symbol collisions across modules,
+packaged-repo wrapper imports, and `list`/tuple/`Optional` params are the
+documented next steps. But the thesis holds: the differential driver never
+reads a source language, so the same core now drives two pairs — C→Rust
+(fuzz-verified) and Python→Rust (replay-verified) — and a third is a binding.
