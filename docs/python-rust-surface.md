@@ -80,6 +80,48 @@ Three more parser/oracle limitations the push surfaced and fixed on the way:
   excludes transitively-exercised leaves like `_escape_inner`; python-rust now
   defaults to `kind:pure` and lets dynamic capture + the min-traces floor gate.
 
+## Live battery across real libraries — the verifier is sound
+
+Beyond markupsafe, live rewrites (isolated venv per repo: `uv venv` + editable
+`cgir[llm]` + editable target + its test plugins) on more libraries. The
+rejections are the point — they show the pipeline refuses to apply a rewrite it
+can't verify, on real code:
+
+| library | function | result |
+|---|---|---|
+| markupsafe | `_escape_inner` (HTML escape) | **solved**, applied, its 79 tests pass, $0.003 |
+| semver | `_increment_string` (increment trailing digits) | **solved** (escalated, $0.057), applied, its tests pass |
+| semver | `_increment_prerelease` | **rejected** — model couldn't see `Version._LAST_PRERELEASE` (a class-level regex not in the fn source), tried the `regex` crate (rustc fails), then guessed wrong; replay caught it: `_increment_prerelease('rc1')` expected `'rc1.0'`, got `'rc2'` |
+| semver | `compare` | **excluded** — a recorded result is `None` despite the `-> int` annotation; a Rust `-> i64` can't return `None`, so it's unverifiable |
+
+Two distinct soundness wins on real code: replay catching a **plausible-but-wrong**
+translation with a concrete counterexample, and validation refusing a function
+whose **annotation doesn't match its recorded behavior**. Neither was a false pass.
+`_increment_prerelease` also names the next real limitation — a function that
+references a module/class constant (here a compiled regex) it doesn't define is
+the Python analog of C→Rust's invisible-macro problem, which c-rust solved with
+compiler-probed context; the python analog (inject referenced module constants
+into the prompt) is a v2 candidate.
+
+## Operational reality: eligible ≠ rewritable
+
+The sweep's static eligibility is a ceiling; *rewriting* one live needs three
+things to line up, and real repos routinely miss the last two:
+
+1. **eligible** (static — 0.87% of pure functions);
+2. **exercised** — the function must actually be *called* during the test run to
+   record traces. Many eligible leaf helpers aren't (packaging: 11 eligible, ~0
+   traces — its tests exercise higher-level APIs that don't route through them);
+3. **a runnable test environment** — the repo's own pytest must run: src-layout
+   repos must be captured from the repo *root* (tests live outside `src/`), and a
+   single missing plugin (`pytest-cov` in semver's `addopts`) or one collection
+   error (rich) yields zero traces. Isolated-venv-per-repo with the repo's test
+   deps is the working pattern.
+
+This is why the honest live yield is small — but each success is a real function
+in a real library, verified against that library's own recorded inputs, with its
+own test suite green over the Rust.
+
 ## Reproduce
 
 ```
