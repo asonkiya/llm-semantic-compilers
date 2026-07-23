@@ -215,6 +215,18 @@ def test_assemble_dedups_prelude_across_string_winners() -> None:
     assert "fn a(" in body and "fn b(" in body  # both winners kept
 
 
+def test_dedup_traces_keeps_distinct_inputs() -> None:
+    from cgir.rewrite_python_rust import _dedup_traces
+
+    # a hot leaf gets called many times on few distinct inputs (markupsafe:
+    # 80k calls, 26 distinct) — dedup keeps one per argument tuple
+    traces = [(("a",), "A"), (("a",), "A"), (("b",), "B"), (("a",), "A"), (("c",), "C")]
+    assert _dedup_traces(traces) == [(("a",), "A"), (("b",), "B"), (("c",), "C")]
+    # bytearray args are unhashable but keyed by their bytes
+    ba = [((bytearray(b"x"),), 1), ((bytearray(b"x"),), 1), ((bytearray(b"y"),), 2)]
+    assert len(_dedup_traces(ba)) == 2
+
+
 def test_render_python_wrapper_preserves_name_and_params() -> None:
     from cgir.ffi.sources.python import PyEntry
     from cgir.rewrite_python_rust import render_python_wrapper

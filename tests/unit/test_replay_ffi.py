@@ -213,6 +213,18 @@ def test_validation_accepts_the_good_cases() -> None:
     assert validate_traces(sig("bytes", ret="buf:bytes"), [((bytearray(b"ab"),), b"abab")]) == ""
 
 
+def test_validation_accepts_str_subclasses() -> None:
+    # markupsafe's tests pass a str subclass (Markup / ReferenceStr); it encodes
+    # to identical UTF-8 bytes, so accept it (a behavior-changing subclass would
+    # diverge and be caught as a replay mismatch, not a false pass).
+    class SubStr(str):
+        pass
+
+    assert validate_traces(sig("str", ret="buf:str"), [((SubStr("hi"),), SubStr("HI"))]) == ""
+    # but bool-as-int is STILL rejected — that coercion is the real hazard
+    assert "expected int, got bool" in validate_traces(sig("i64", ret="i64"), [((True,), 1)])
+
+
 def test_empty_traces_report_honestly() -> None:
     verdict = replay_against_dylib(Path("/nonexistent.dylib"), "f", sig("i64", ret="i64"), [])
     assert verdict == "replay: no captured traces to replay"

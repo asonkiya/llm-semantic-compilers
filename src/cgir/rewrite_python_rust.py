@@ -63,6 +63,25 @@ _CTYPES_SCALAR = {"i64": "c_int64", "f64": "c_double", "bool": "c_bool"}
 _RUSTC_FLAGS = ["-C", "panic=abort", "-C", "overflow-checks=on"]
 
 
+def _dedup_traces(traces: list[Trace]) -> list[Trace]:
+    """Distinct-by-argument traces (first result kept). Pure functions map an
+    input to one output, so the distinct inputs are the evidence; the dups a hot
+    leaf accumulates just slow replay down. ``bytearray`` args are keyed by their
+    bytes (they're unhashable)."""
+    seen: set[Any] = set()
+    out: list[Trace] = []
+    for args, result in traces:
+        key = tuple(bytes(a) if isinstance(a, bytearray) else a for a in args)
+        try:
+            if key in seen:
+                continue
+            seen.add(key)
+        except TypeError:  # an unhashable arg slipped through — keep it, don't dedup
+            pass
+        out.append((args, result))
+    return out
+
+
 def build_python_rust_prompt(e: PyEntry) -> str:
     sig = e.sig
     has_slice = any(p.kind == "slice" for p in sig.params)
@@ -145,9 +164,13 @@ def run_python_rust(
     # A function is verifiable only with enough valid recorded inputs; drop the
     # rest into `excluded` with a specific reason (the verified property is
     # agreement on the recorded inputs, so weak evidence is no evidence).
+    # Dedup by argument tuple first: a hot leaf (e.g. markupsafe's escape) can be
+    # called 80k times on ~26 distinct inputs — for a pure function the distinct
+    # inputs are the real evidence, and replaying the dups just burns time.
+    prepared: dict[str, list[Trace]] = {}
     verifiable: list[PyEntry] = []
     for e in entries:
-        t = traces.get(e.component_id, [])
+        t = _dedup_traces(traces.get(e.component_id, []))
         if not t:
             excluded.append((e.component_id, "no captured traces"))
             continue
@@ -156,8 +179,11 @@ def run_python_rust(
             excluded.append((e.component_id, reason))
             continue
         if len(t) < min_traces:
-            excluded.append((e.component_id, f"only {len(t)} traces (< min-traces {min_traces})"))
+            excluded.append(
+                (e.component_id, f"only {len(t)} distinct inputs (< min-traces {min_traces})")
+            )
             continue
+        prepared[e.component_id] = t
         verifiable.append(e)
 
     counter = {"n": 0}
@@ -174,7 +200,7 @@ def run_python_rust(
             return "rustc", err, {}
         if e.symbol not in exported_symbols(dylib, [e.symbol]):
             return "abi", f"candidate does not export `{e.symbol}` as a no_mangle extern C fn", {}
-        verdict = replay_against_dylib(dylib, e.symbol, e.sig, traces[e.component_id])
+        verdict = replay_against_dylib(dylib, e.symbol, e.sig, prepared[e.component_id])
         if verdict:
             return "replay", verdict, {}
         return "ok", "", {"regenerated_as": f"rust:{e.symbol}", "verify": "replay"}

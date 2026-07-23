@@ -1349,6 +1349,12 @@ def _rewrite_python_rust(
     if traces_path and capture:
         raise typer.BadParameter("pass either --traces or --capture, not both")
 
+    # python-rust captures traces dynamically (setprofile sees transitive calls),
+    # and the min-traces floor is the real coverage gate — so the static
+    # `covered:true` heuristic (direct test->fn CALLS only) just wrongly excludes
+    # exercised leaf helpers like markupsafe's _escape_inner. Default to kind:pure.
+    if query == "kind:pure covered:true":
+        query = "kind:pure"
     entries, excluded = python_rust_worklist(index_dir, repo, query)
 
     # Obtain traces (pre-captured or recorded now) if available; the dry-run

@@ -53,6 +53,33 @@ that looked like a lookup bug. Fixed: match `ast.AsyncFunctionDef` too and rejec
 it cleanly as `async function not supported`. Regression-tested. This is exactly
 why the sweep runs the parser over real code, not just the fixture.
 
+## Capstone: a real function from a real library, rewritten and verified
+
+`markupsafe._native._escape_inner` — the HTML escaper at the heart of a
+foundational library — rewritten live by Haiku, one command:
+
+```
+cgir rewrite --lang python-rust --repo <markupsafe> --capture --live --apply
+```
+
+Captured **80,033 real calls (26 distinct inputs)** from markupsafe's own test
+suite → Haiku wrote the Rust escaper (`&`→`&amp;`, `<`→`&lt;`, the exact `&#39;`
+/ `&#34;` numeric entities) → replay-verified against those recorded inputs →
+compiled + spliced in → **markupsafe's own 79-test suite passes with the Rust
+escaper inside**, for **$0.003**.
+
+Three more parser/oracle limitations the push surfaced and fixed on the way:
+- **str subclasses.** markupsafe's tests pass a `str` subclass; type-exact
+  validation rejected it. Relaxed str/bytes to `isinstance` (int/float/bool stay
+  exact — that coercion is the real false-pass hazard; a behavior-changing str
+  subclass would diverge and be caught as a mismatch).
+- **trace dedup.** 80k calls / 26 distinct inputs — dedup by argument tuple; for
+  a pure function the distinct inputs are the evidence and the dups just slow
+  replay. `--min-traces` now counts distinct inputs.
+- **`covered:true` default.** That static heuristic (direct test→fn calls only)
+  excludes transitively-exercised leaves like `_escape_inner`; python-rust now
+  defaults to `kind:pure` and lets dynamic capture + the min-traces floor gate.
+
 ## Reproduce
 
 ```

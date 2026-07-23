@@ -83,14 +83,19 @@ def _check_value(kind: str, v: Any) -> str:
         if type(v) is not bool:
             return f"expected bool, got {type(v).__name__}"
     elif kind == "str":
-        if type(v) is not str:
+        # accept str SUBCLASSES (markupsafe.Markup, test helpers): they encode
+        # to identical UTF-8 bytes, and if a subclass changed behavior the Rust
+        # would diverge and replay would catch it as a mismatch, not a false
+        # pass. int/float/bool stay type-exact — there the coercion (bool-as-int,
+        # int-as-float) is the actual false-pass hazard.
+        if not isinstance(v, str):
             return f"expected str, got {type(v).__name__}"
         try:
             v.encode("utf-8")
         except UnicodeEncodeError:
             return "str is not UTF-8-encodable (lone surrogate)"
     elif kind == "bytes":
-        if type(v) not in (bytes, bytearray):
+        if not isinstance(v, bytes | bytearray):
             return f"expected bytes, got {type(v).__name__}"
     else:
         return f"unsupported kind {kind!r}"
