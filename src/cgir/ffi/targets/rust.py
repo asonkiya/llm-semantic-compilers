@@ -10,7 +10,49 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from cgir.ffi.ir import TYPE_MAP, CEntry
+from cgir.ffi.ir import TYPE_MAP, CEntry, Signature
+
+# The verbatim, experiment-proven skeleton a str/bytes-returning candidate must
+# include (M2 fixture: 100k alloc/free cycles clean). `cap` is load-bearing —
+# Vec::from_raw_parts with the wrong capacity is UB — so the model gets the
+# ManuallyDrop dance handed to it rather than asked to invent it.
+RUSTBUF_PRELUDE = """\
+#[repr(C)]
+pub struct RustBuf { ptr: *mut u8, len: usize, cap: usize }
+
+fn cgir_make_buf(v: Vec<u8>) -> RustBuf {
+    let mut v = std::mem::ManuallyDrop::new(v);
+    RustBuf { ptr: v.as_mut_ptr(), len: v.len(), cap: v.capacity() }
+}
+
+#[no_mangle]
+pub extern "C" fn cgir_buf_free(b: RustBuf) {
+    if !b.ptr.is_null() { unsafe { drop(Vec::from_raw_parts(b.ptr, b.len, b.cap)); } }
+}
+"""
+
+
+def _rust_ret(ret: str) -> str:
+    """Rust return spelling for an IR return token: a canonical scalar renders
+    as itself; ``buf:*`` (a Rust-allocated string/bytes return) is a RustBuf."""
+    return "RustBuf" if ret.startswith("buf:") else ret
+
+
+def rust_signature_ir(symbol: str, sig: Signature) -> str:
+    """The exact ``#[no_mangle] extern "C"`` signature a Python->Rust candidate
+    must produce. Scalars (``i64``/``f64``/``bool``) render as themselves; a
+    slice param expands to a ``(ptr, len)`` pair; a ``buf:*`` return is a
+    RustBuf (see :data:`RUSTBUF_PRELUDE`)."""
+    parts: list[str] = []
+    for p in sig.params:
+        if p.kind == "scalar":
+            parts.append(f"{p.name}: {p.scalar}")
+        else:  # slice -> (ptr, len)
+            parts.append(f"{p.name}_ptr: *const u8")
+            parts.append(f"{p.name}_len: usize")
+    args = ", ".join(parts)
+    ret = "" if sig.ret == "void" else f" -> {_rust_ret(sig.ret)}"
+    return f'#[no_mangle]\npub extern "C" fn {symbol}({args}){ret}'
 
 
 def _rust_type(token: str) -> str:
@@ -45,12 +87,16 @@ def extern_block(callees: list[CEntry]) -> str:
 
 
 def try_rustc(
-    candidate: str, workdir: Path, tag: str, allow_undefined: bool = False
+    candidate: str,
+    workdir: Path,
+    tag: str,
+    allow_undefined: bool = False,
+    extra_flags: list[str] | None = None,
 ) -> tuple[Path | None, str]:
     rs = workdir / f"cand_{tag}.rs"
     rs.write_text(candidate + "\n")
     out = workdir / f"cand_{tag}.dylib"
-    cmd = ["rustc", "--crate-type=cdylib", "-O", "-o", str(out), str(rs)]
+    cmd = ["rustc", "--crate-type=cdylib", "-O", "-o", str(out), str(rs), *(extra_flags or [])]
     if allow_undefined:
         # non-leaf candidates reference callees resolved at load time
         import sys

@@ -1003,6 +1003,21 @@ def rewrite_cmd(
         bool,
         typer.Option("--live", help="Call the Anthropic API (requires cgir[llm] + API key)."),
     ] = False,
+    traces: Annotated[
+        Path | None,
+        typer.Option("--traces", help="python-rust: pre-captured traces pickle (from --capture)."),
+    ] = None,
+    capture: Annotated[
+        bool,
+        typer.Option(
+            "--capture",
+            help="python-rust: record traces now by running the repo's test suite.",
+        ),
+    ] = False,
+    min_traces: Annotated[
+        int,
+        typer.Option("--min-traces", help="python-rust: exclude functions with fewer traces."),
+    ] = 3,
 ) -> None:
     """Rewrite every matching component through the sample->verify->escalate loop."""
     from cgir.report.impact import _is_test_spec
@@ -1036,8 +1051,24 @@ def rewrite_cmd(
             structs,
         )
         return
+    if lang == "python-rust":
+        _rewrite_python_rust(
+            index_dir,
+            repo,
+            query,
+            k,
+            out,
+            live,
+            budget_usd,
+            ledger,
+            apply,
+            traces,
+            capture,
+            min_traces,
+        )
+        return
     if lang != "python":
-        raise typer.BadParameter(f"--lang must be python or c-rust, got {lang!r}")
+        raise typer.BadParameter(f"--lang must be python, c-rust, or python-rust, got {lang!r}")
 
     if oracle not in ("tests", "replay"):
         raise typer.BadParameter(f"--oracle must be tests or replay, got {oracle!r}")
@@ -1290,6 +1321,97 @@ def _rewrite_c_rust(
         f"{gate['c_definitions_renamed']} C definitions sidelined."
     )
     typer.echo(f"artifacts in {dest}/ (patched C, Rust staticlib, linked shared lib)")
+
+
+def _rewrite_python_rust(
+    index_dir: Path,
+    repo: Path,
+    query: str,
+    k: int,
+    out: Path | None,
+    live: bool,
+    budget_usd: float | None,
+    ledger: Path | None,
+    apply: bool,
+    traces_path: Path | None,
+    capture: bool,
+    min_traces: int,
+) -> None:
+    import shutil
+
+    from cgir.ffi.replay_ffi import validate_traces
+    from cgir.ffi.sources.python import python_rust_worklist
+    from cgir.replay import capture as capture_traces
+    from cgir.replay import load_traces, save_traces
+    from cgir.rewrite import anthropic_sampler
+    from cgir.rewrite_python_rust import run_python_rust
+
+    if apply:
+        raise typer.BadParameter("python-rust --apply lands in M4 (wrapper emission); not yet.")
+    if traces_path and capture:
+        raise typer.BadParameter("pass either --traces or --capture, not both")
+
+    entries, excluded = python_rust_worklist(index_dir, repo, query)
+
+    # Obtain traces (pre-captured or recorded now) if available; the dry-run
+    # shows per-function counts, the live run needs them.
+    traces: dict[str, list[Any]] = {}
+    if traces_path:
+        traces = load_traces(traces_path)
+    elif capture:
+        targets = {e.component_id: (Path(e.path), e.symbol) for e in entries}
+        typer.echo(f"capturing traces from {repo}'s test suite ({len(targets)} targets)...")
+        traces = capture_traces(repo, targets)
+        if out is not None:
+            save_traces(traces, out.with_suffix(".traces.pkl"))
+
+    if not live:
+        typer.echo(f"dry run: {len(entries)} eligible python function(s) for python-rust")
+        for e in sorted(entries, key=lambda e: e.component_id):
+            n = len(traces.get(e.component_id, []))
+            note = ""
+            if traces:
+                reason = (
+                    validate_traces(e.sig, traces.get(e.component_id, [])) if n else "no traces"
+                )
+                note = f"  [{n} traces{'' if not reason else ' — ' + reason}]"
+            typer.echo(f"  {e.component_id} :: {e.symbol}{note}")
+        if excluded:
+            typer.echo(f"excluded {len(excluded)}:")
+            for cid, reason in sorted(excluded):
+                typer.echo(f"  {cid} — {reason}")
+        hint = "" if (traces_path or capture) else " (add --capture or --traces to verify)"
+        typer.echo(f"rerun with --live{hint} to generate + replay-verify Rust.")
+        return
+
+    if shutil.which("rustc") is None:
+        raise typer.BadParameter("python-rust needs `rustc` on PATH")
+    if not traces:
+        raise typer.BadParameter("python-rust --live needs traces: pass --capture or --traces")
+    try:
+        sampler = anthropic_sampler()
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    report = run_python_rust(
+        index_dir,
+        repo,
+        sampler=sampler,
+        traces=traces,
+        query=query,
+        k=k,
+        min_traces=min_traces,
+        budget_usd=budget_usd,
+        ledger_path=ledger,
+        log=typer.echo,
+    )
+    if out is not None:
+        out.write_text(json.dumps(report, indent=2) + "\n")
+    totals = report["totals"]
+    typer.echo(
+        f"solved {totals['solved']}/{totals['components']} python->rust "
+        f"(unsolved {totals['unsolved']}) for ${totals['cost_usd']}; "
+        f"stage kills: {report['stage_kills']}"
+    )
 
 
 @app.command(name="regenerate")

@@ -1,10 +1,17 @@
 # Design: the FFI rewrite core — language-neutral rewrite pipelines
 
-Status: **approved; M1–M2 landed** (M1 2026-07-20 — `cgir/ffi/` extracted,
+Status: **approved; M1–M3 landed** (M1 2026-07-20 — `cgir/ffi/` extracted,
 c-rust reassembled on it, 21-test pin + CLI dry-run byte-identical on SQLite.
 M2 2026-07-21 — `ffi/replay_ffi.py`: Param/Signature IR, trace validation,
 subprocess-batch replay harness with crash-respawn, 14 tests against a
-fixture cdylib. M3–M4 pending). Research grounded in a full seam-map of
+fixture cdylib. M3 2026-07-23 — the Python→Rust pair: `ffi/sources/python.py`
+(ast-based eligibility + worklist), `ffi/targets/rust.py` (`rust_signature_ir`,
+`RUSTBUF_PRELUDE`, `try_rustc(extra_flags=)`), `rewrite_python_rust.py`
+(`build_python_rust_prompt` + `run_python_rust`), `cgir rewrite --lang
+python-rust` (dry-run + `--live` + `--capture`/`--traces`); proven e2e on a
+committed fixture repo with a fake sampler (4/4 replay-verified incl. RustBuf
+string return, bytes slice; wrong + panicking candidates rejected). M4
+pending: `--apply` wrappers + real-model dogfood). Research grounded in a full seam-map of
 `rewrite_c_rust.py`, the `run_search_loop`/`replay.py`/`verify.py` contracts,
 and live Python↔Rust FFI experiments (rustc + ctypes smoke tests; results in
 §6.2's traps — every load-bearing convention below was verified on-machine,
