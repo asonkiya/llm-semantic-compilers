@@ -56,6 +56,7 @@ def test_eligible_shapes_parse_to_signatures() -> None:
         ("@cache\ndef f(x: int) -> int: ...", "f", "decorated"),
         ("def f(self, x: int) -> int: ...", "f", "method"),
         ("def f(x: int, *, y: int) -> int: ...", "f", "keyword-only"),
+        ("async def f(x: int) -> int: ...", "f", "async"),  # found by the corpus sweep
     ],
 )
 def test_ineligible_shapes_rejected_with_reason(src: str, symbol: str, needle: str) -> None:

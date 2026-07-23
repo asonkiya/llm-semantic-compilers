@@ -1,0 +1,276 @@
+{
+  "summary": {
+    "repos": 26,
+    "eligible": 231,
+    "pure_total": 26518,
+    "eligible_pct": 0.87,
+    "return_kinds": {
+      "bool": 74,
+      "buf:str": 137,
+      "i64": 14,
+      "buf:bytes": 5,
+      "f64": 1
+    },
+    "exclusion_reasons": {
+      "method": 16433,
+      "param": 3463,
+      "default arguments not supported": 2661,
+      "*args/**kwargs not supported": 2404,
+      "keyword-only args not supported": 525,
+      "async function not supported": 370,
+      "return type is not a simple name": 172,
+      "return type annotation missing": 139,
+      "unsupported return type": 54,
+      "not a python function": 34,
+      "void return": 25,
+      "function definition not found in source": 4,
+      "unparseable source": 3
+    }
+  },
+  "rows": [
+    {
+      "name": "flask",
+      "eligible": 6,
+      "pure": 222,
+      "sample": [
+        "_path_is_ancestor",
+        "has_app_context",
+        "has_request_context",
+        "get_debug_flag",
+        "get_root_path"
+      ]
+    },
+    {
+      "name": "requests",
+      "eligible": 2,
+      "pure": 119,
+      "sample": [
+        "unicode_is_ascii",
+        "_get_idna_encoded_host"
+      ]
+    },
+    {
+      "name": "click",
+      "eligible": 9,
+      "pure": 348,
+      "sample": [
+        "is_ascii_encoding",
+        "strip_ansi",
+        "term_len",
+        "_truncate_visible",
+        "_get_error_message"
+      ]
+    },
+    {
+      "name": "httpx",
+      "eligible": 11,
+      "pure": 302,
+      "sample": [
+        "_is_known_encoding",
+        "_format_form_param",
+        "is_running_trio",
+        "PERCENT",
+        "encode_host"
+      ]
+    },
+    {
+      "name": "rich",
+      "eligible": 5,
+      "pure": 595,
+      "sample": [
+        "_first_paragraph",
+        "SetConsoleTitle",
+        "_cell_len",
+        "_is_jupyter",
+        "detect_legacy_windows"
+      ]
+    },
+    {
+      "name": "sqlalchemy",
+      "eligible": 20,
+      "pure": 7125,
+      "sample": [
+        "cleanup_text",
+        "_parse_error",
+        "_is_compiled",
+        "_is_compiled",
+        "_is_compiled"
+      ]
+    },
+    {
+      "name": "pydantic",
+      "eligible": 21,
+      "pure": 1324,
+      "sample": [
+        "is_valid_field_name",
+        "is_valid_privateattr_name",
+        "have_git",
+        "is_valid_identifier",
+        "to_camel"
+      ]
+    },
+    {
+      "name": "django",
+      "eligible": 0,
+      "pure": 7162,
+      "sample": []
+    },
+    {
+      "name": "attrs",
+      "eligible": 4,
+      "pure": 134,
+      "sample": [
+        "_get_global_name",
+        "_assign",
+        "_default_init_alias_for",
+        "_setattr"
+      ]
+    },
+    {
+      "name": "more-itertools",
+      "eligible": 0,
+      "pure": 215,
+      "sample": []
+    },
+    {
+      "name": "sortedcontainers",
+      "eligible": 0,
+      "pure": 99,
+      "sample": []
+    },
+    {
+      "name": "packaging",
+      "eligible": 8,
+      "pure": 384,
+      "sample": [
+        "_normalize_name",
+        "_pep440_python_full_version",
+        "_toml_key",
+        "_compute_32_bit_interpreter",
+        "_normalize_string"
+      ]
+    },
+    {
+      "name": "sqlparse",
+      "eligible": 0,
+      "pure": 134,
+      "sample": []
+    },
+    {
+      "name": "jsonschema",
+      "eligible": 0,
+      "pure": 187,
+      "sample": []
+    },
+    {
+      "name": "boltons",
+      "eligible": 1,
+      "pure": 654,
+      "sample": [
+        "removeprefix"
+      ]
+    },
+    {
+      "name": "toolz",
+      "eligible": 0,
+      "pure": 137,
+      "sample": []
+    },
+    {
+      "name": "pygments",
+      "eligible": 0,
+      "pure": 670,
+      "sample": []
+    },
+    {
+      "name": "jinja2",
+      "eligible": 11,
+      "pure": 490,
+      "sample": [
+        "do_capitalize",
+        "do_lower",
+        "do_mark_unsafe",
+        "do_title",
+        "do_upper"
+      ]
+    },
+    {
+      "name": "werkzeug",
+      "eligible": 18,
+      "pure": 690,
+      "sample": [
+        "_wsgi_decoding_dance",
+        "_wsgi_encoding_dance",
+        "hash_pin",
+        "fetch",
+        "render_console_html"
+      ]
+    },
+    {
+      "name": "urllib3",
+      "eligible": 14,
+      "pure": 293,
+      "sample": [
+        "_get_default_user_agent",
+        "_is_node_js",
+        "has_jspi",
+        "is_cross_origin_isolated",
+        "is_in_browser_main_thread"
+      ]
+    },
+    {
+      "name": "tabulate",
+      "eligible": 0,
+      "pure": 64,
+      "sample": []
+    },
+    {
+      "name": "markupsafe",
+      "eligible": 1,
+      "pure": 56,
+      "sample": [
+        "_escape_inner"
+      ]
+    },
+    {
+      "name": "cachetools",
+      "eligible": 0,
+      "pure": 67,
+      "sample": []
+    },
+    {
+      "name": "mypy",
+      "eligible": 73,
+      "pure": 4553,
+      "sample": [
+        "compute_hash",
+        "default_data_dir",
+        "get_meta_ex_name",
+        "missing_stubs_file",
+        "is_private"
+      ]
+    },
+    {
+      "name": "black",
+      "eligible": 24,
+      "pure": 438,
+      "sample": [
+        "_black_info",
+        "_get_code_start",
+        "put_trailing_semicolon_back",
+        "format_complex_number",
+        "format_float_or_int_string"
+      ]
+    },
+    {
+      "name": "semver",
+      "eligible": 3,
+      "pure": 56,
+      "sample": [
+        "compare",
+        "_increment_prerelease",
+        "_increment_string"
+      ]
+    }
+  ]
+}

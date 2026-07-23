@@ -66,11 +66,17 @@ def parse_signature(source: str, symbol: str) -> tuple[Signature | None, str]:
     except SyntaxError as exc:
         return None, f"unparseable source ({exc.msg})"
     fn = next(
-        (n for n in ast.walk(mod) if isinstance(n, ast.FunctionDef) and n.name == symbol),
+        (
+            n
+            for n in ast.walk(mod)
+            if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and n.name == symbol
+        ),
         None,
     )
     if fn is None:
         return None, "function definition not found in source"
+    if isinstance(fn, ast.AsyncFunctionDef):
+        return None, "async function not supported"
     if fn.decorator_list:
         return None, "decorated function"
     a = fn.args
