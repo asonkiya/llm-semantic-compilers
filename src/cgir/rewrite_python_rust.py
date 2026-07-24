@@ -146,6 +146,7 @@ def run_python_rust(
     budget_usd: float | None = None,
     ledger_path: Path | None = None,
     apply: bool = False,
+    pyo3: bool = False,
     log: Any = lambda _: None,
 ) -> dict[str, Any]:
     """Regenerate ``repo``'s eligible pure functions in Rust, replay-verified
@@ -227,7 +228,9 @@ def run_python_rust(
     loop["stage_kills"] = stage_kills
     loop["results"] = outcomes
     if apply:
-        loop["final_gate"] = apply_python_rust_winners(index_dir, repo, loop, by_id, workdir)
+        loop["final_gate"] = apply_python_rust_winners(
+            index_dir, repo, loop, by_id, workdir, pyo3=pyo3
+        )
         if ledger_path is not None:
             ledger_path.write_text(json.dumps(loop, indent=2) + "\n")
     return loop
@@ -324,13 +327,17 @@ def apply_python_rust_winners(
     report: dict[str, Any],
     by_id: dict[str, PyEntry],
     workdir: Path,
+    pyo3: bool = False,
 ) -> dict[str, Any]:
-    """Assemble the winners into one cdylib, emit the ctypes wrapper module,
-    splice each rewritten Python body with a delegating wrapper, then run the
-    final gate: rescan for hard contract drift *outside* the rewritten set
-    (drift on the rewritten functions — lost annotations, the new ctypes call —
-    is expected and downgraded to a note) and the repo's full test suite (the
-    authoritative check)."""
+    """Assemble the verified winners, emit the wrapper module (ctypes ``.py`` by
+    default, or a native PyO3 ``.so`` with ``pyo3=True``), splice each rewritten
+    Python body with a delegating wrapper, then run the final gate: rescan for
+    hard contract drift *outside* the rewritten set (drift on the rewritten
+    functions — lost annotations, the new call — is expected and downgraded) and
+    the repo's full test suite (the authoritative check).
+
+    Both emit modes produce the same importable ``_cgir_rs`` and splice the same
+    wrappers; PyO3 ships the same verified Rust behind a ~7x-cheaper boundary."""
     from cgir.report.diff import compute_diff
     from cgir.verify import _find_node, _hard_drift, _splice
 
@@ -347,24 +354,32 @@ def apply_python_rust_winners(
         spliced.append((node, o["attempts"][-1]["candidate"], e))
     if not winners:
         return {"applied": 0, "note": "no winners to apply"}
+    entries = [e for _, _, e in spliced]
 
-    # 1. one cdylib for the whole repo (prelude deduped across winners).
-    lib_dylib, err = try_rustc(
-        assemble_python_winners(winners),
-        workdir,
-        "apply",
-        extra_flags=["-C", "panic=abort", "-C", "overflow-checks=on"],
-    )
-    if lib_dylib is None:
-        return {"applied": 0, "error": f"assembled cdylib failed to build:\n{err}"}
-    libname = _lib_filename()
-    shutil.copy(lib_dylib, repo / libname)
+    # 1-2. emit the extension (native PyO3) or wrapper module + cdylib (ctypes).
+    if pyo3:
+        from cgir.ffi.targets.pyo3 import build_pyo3_extension, extension_filename
 
-    # 2. the ctypes wrapper module + 3. splice thin wrappers (descending span
-    # order within a file so earlier splices don't shift later spans).
-    (repo / f"{_WRAPPER_MODULE}.py").write_text(
-        render_wrapper_module([e for _, _, e in spliced], libname)
-    )
+        lib, err = build_pyo3_extension(winners, entries, _WRAPPER_MODULE, workdir)
+        if lib is None:
+            return {"applied": 0, "error": f"PyO3 extension build failed:\n{err}"}
+        artifact = extension_filename(_WRAPPER_MODULE)
+        shutil.copy(lib, repo / artifact)
+    else:
+        lib_dylib, err = try_rustc(
+            assemble_python_winners(winners),
+            workdir,
+            "apply",
+            extra_flags=["-C", "panic=abort", "-C", "overflow-checks=on"],
+        )
+        if lib_dylib is None:
+            return {"applied": 0, "error": f"assembled cdylib failed to build:\n{err}"}
+        artifact = _lib_filename()
+        shutil.copy(lib_dylib, repo / artifact)
+        (repo / f"{_WRAPPER_MODULE}.py").write_text(render_wrapper_module(entries, artifact))
+
+    # 3. splice thin wrappers (descending span order within a file so earlier
+    # splices don't shift later spans). Same wrapper for both emit modes.
     for node, _cand, e in sorted(spliced, key=lambda t: (t[0].path, -(t[0].start_line or 0))):
         _splice(repo / node.path, node.start_line, node.end_line, render_python_wrapper(e))
 
@@ -386,8 +401,8 @@ def apply_python_rust_winners(
     )
     return {
         "applied": len(winners),
-        "lib": libname,
-        "wrapper_module": f"{_WRAPPER_MODULE}.py",
+        "emit": "pyo3" if pyo3 else "ctypes",
+        "artifact": artifact,
         "contract_clean_outside_rewritten": not dirty,
         "hard_drift_outside_rewritten": dirty,
         "tests_ok": proc.returncode == 0,

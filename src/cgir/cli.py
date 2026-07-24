@@ -1018,6 +1018,14 @@ def rewrite_cmd(
         int,
         typer.Option("--min-traces", help="python-rust: exclude functions with fewer traces."),
     ] = 3,
+    pyo3: Annotated[
+        bool,
+        typer.Option(
+            "--pyo3",
+            help="python-rust --apply: ship a native PyO3 extension (~7x less call "
+            "overhead than the default ctypes wrapper). Needs `cargo` on PATH.",
+        ),
+    ] = False,
 ) -> None:
     """Rewrite every matching component through the sample->verify->escalate loop."""
     from cgir.report.impact import _is_test_spec
@@ -1065,6 +1073,7 @@ def rewrite_cmd(
             traces,
             capture,
             min_traces,
+            pyo3,
         )
         return
     if lang != "python":
@@ -1336,6 +1345,7 @@ def _rewrite_python_rust(
     traces_path: Path | None,
     capture: bool,
     min_traces: int,
+    pyo3: bool = False,
 ) -> None:
     import shutil
 
@@ -1407,6 +1417,7 @@ def _rewrite_python_rust(
         budget_usd=budget_usd,
         ledger_path=ledger,
         apply=apply,
+        pyo3=pyo3,
         log=typer.echo,
     )
     if out is not None:
@@ -1421,7 +1432,7 @@ def _rewrite_python_rust(
     if gate is not None:
         if gate.get("applied"):
             typer.echo(
-                f"applied {gate['applied']} winner(s): {gate['wrapper_module']} + {gate['lib']} "
+                f"applied {gate['applied']} winner(s) [{gate['emit']}]: {gate['artifact']} "
                 f"in {repo}; tests_ok={gate['tests_ok']}, "
                 f"hard-drift-outside-rewritten={gate['hard_drift_outside_rewritten']}"
             )

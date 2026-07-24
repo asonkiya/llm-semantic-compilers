@@ -149,11 +149,24 @@ Two facts:
   wins only once per-call compute clears the tax (large inputs with real work).
 
 The bottleneck is the FFI *mechanism*, not Rust — the Rust escaper is 5.2× on a
-5 KB payload. ctypes is the tax; **PyO3** (a native extension, ~10–50 ns/call)
-would move the crossover down ~10×, turning most eligible leaves from "slower"
-into "faster." The clean split this implies: **verify with ctypes** (simple,
-already sound) and **ship with PyO3** (fast) — same generated Rust, different
-apply target.
+5 KB payload. So the pipeline now has **both apply targets**: `--apply` verifies
+and ships via ctypes (needs only `rustc`); `--apply --pyo3` builds the *same
+verified* winners into a native PyO3 extension (`cgir/ffi/targets/pyo3.py` — the
+`extern "C"` functions kept verbatim, thin `#[pyfunction]` shims over them; needs
+`cargo`). Measured three ways:
+
+| input | Python | ctypes | **PyO3** | ctypes → PyO3 vs Python |
+|---|---|---|---|---|
+| empty | 78 ns | 483 ns | 51 ns | 0.16× → **1.54×** |
+| 20 ch, w/ specials | 281 ns | 876 ns | 203 ns | 0.32× → **1.38×** |
+| 200 ch, mixed | 1851 ns | 1206 ns | 548 ns | 1.54× → **3.38×** |
+| 5 KB, many specials | 47.8 µs | 9.2 µs | 8.5 µs | 5.22× → **5.60×** |
+
+**PyO3's per-call tax is ≈ 0** (within noise of a plain Python call, vs ctypes'
+~400 ns). It flips the small-string cases from *slower* to *faster* — the
+crossover drops from ~200 chars to ~20 — while shipping the exact bytes that
+passed replay-verification. The clean split, now real: **verify with ctypes**
+(sound, `rustc`-only) and **ship with PyO3** (`cargo`, ~0 overhead).
 
 **What this means for the vision.** It sharpens "eligible ≠ worth it" into a
 number: of the 0.87% eligible, the subset where a Rust rewrite is *actually

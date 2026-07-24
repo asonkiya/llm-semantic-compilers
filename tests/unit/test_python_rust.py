@@ -227,6 +227,57 @@ def test_dedup_traces_keeps_distinct_inputs() -> None:
     assert len(_dedup_traces(ba)) == 2
 
 
+CARGO = shutil.which("cargo")
+
+
+def test_render_pyo3_shim_shapes() -> None:
+    from cgir.ffi.sources.python import PyEntry
+    from cgir.ffi.targets.pyo3 import render_pyo3_shim
+
+    sig, _ = _sig("def clamp(x: int, lo: int, hi: int) -> int: ...", "clamp")
+    sh = render_pyo3_shim(PyEntry("m.clamp", "clamp", sig, "", "m.py"))
+    assert '#[pyo3(name = "clamp")]' in sh
+    assert "fn py_clamp(x: i64, lo: i64, hi: i64) -> i64" in sh
+    assert "unsafe { clamp(x, lo, hi) }" in sh  # calls the verified extern fn
+
+    sig, _ = _sig("def shout(s: str) -> str: ...", "shout")
+    sh = render_pyo3_shim(PyEntry("m.shout", "shout", sig, "", "m.py"))
+    assert "s: &str" in sh and "-> String" in sh
+    assert "s.as_ptr(), s.len()" in sh and "cgir_buf_free" in sh
+
+    sig, _ = _sig("def enc(b: bytes) -> bytes: ...", "enc")
+    sh = render_pyo3_shim(PyEntry("m.enc", "enc", sig, "", "m.py"))
+    assert "py: Python<'py>" in sh and "-> Bound<'py, PyBytes>" in sh and "b: &[u8]" in sh
+
+
+@pytest.mark.skipif(not (RUSTC and CARGO), reason="needs rustc + cargo")
+def test_pyo3_extension_builds_and_runs(tmp_path: Path) -> None:
+    import importlib.util
+
+    from cgir.ffi.sources.python import PyEntry
+    from cgir.ffi.targets.pyo3 import build_pyo3_extension, extension_filename
+
+    sig_c, _ = _sig("def clamp(x: int, lo: int, hi: int) -> int: ...", "clamp")
+    sig_s, _ = _sig("def shout(s: str) -> str: ...", "shout")
+    entries = [
+        PyEntry("m.clamp", "clamp", sig_c, "", "m.py"),
+        PyEntry("m.shout", "shout", sig_s, "", "m.py"),
+    ]
+    lib, err = build_pyo3_extension(
+        {"clamp": _CLAMP, "shout": _SHOUT}, entries, "_cgir_test_ext", tmp_path
+    )
+    assert lib is not None, err
+    so = tmp_path / extension_filename("_cgir_test_ext")
+    shutil.copy(lib, so)
+    spec = importlib.util.spec_from_file_location("_cgir_test_ext", so)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    # the verified extern "C" Rust, reached natively — scalar and RustBuf->String
+    assert mod.clamp(5, 0, 10) == 5 and mod.clamp(-3, 0, 10) == 0
+    assert mod.shout("hi") == "HI" and mod.shout("straße") == "STRASSE"
+
+
 def test_render_python_wrapper_preserves_name_and_params() -> None:
     from cgir.ffi.sources.python import PyEntry
     from cgir.rewrite_python_rust import render_python_wrapper

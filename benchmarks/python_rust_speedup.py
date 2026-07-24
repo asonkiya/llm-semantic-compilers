@@ -1,17 +1,16 @@
 """Does a python->rust rewrite actually make Python *faster*? Self-contained:
-compile a Rust escaper to a cdylib, wrap it the way ``--apply`` does (ctypes,
-(ptr,len) in, RustBuf out), and race it against the equivalent pure-Python
-across input sizes. The answer is a crossover, and it is set by the FFI
-mechanism, not by Rust.
+build the same Rust escaper three ways — pure Python, Rust+ctypes (how `--apply`
+verifies), and Rust+PyO3 (how `--apply --pyo3` ships) — and race them across
+input sizes. The answer is a crossover set by the FFI *mechanism*, not by Rust.
 
-    python benchmarks/python_rust_speedup.py     # needs rustc
+    python benchmarks/python_rust_speedup.py     # ctypes needs rustc; PyO3 needs cargo
 
-Headline (this machine): ctypes costs ~390ns/call fixed, so the small string
-leaves that dominate the eligible surface (docs/python-rust-surface.md) are
-*slower* via Rust+ctypes; Rust only wins once the per-call compute clears the
-tax (large inputs with real work). The verification pipeline uses ctypes for
-simplicity; a production emit target (PyO3, ~10-50ns/call) would move the
-crossover down by ~10x. Verify with ctypes; ship with PyO3.
+Headline (this machine): the ctypes boundary costs ~400ns/call, so the small
+string leaves that dominate the eligible surface (docs/python-rust-surface.md)
+come out *slower* through it; PyO3's boundary is ~0ns (as cheap as a Python
+call), which flips those same cases to faster (20-char escape: 0.32x ctypes ->
+1.38x PyO3) and wins big on real work (5KB escape: 5.6x). Verify with ctypes
+(sound, only needs rustc); ship with PyO3 (fast).
 """
 
 from __future__ import annotations
@@ -77,6 +76,8 @@ def main() -> None:
         finally:
             dll.cgir_buf_free(r)
 
+    rs_pyo3 = _build_pyo3_escape(d)  # None if no cargo
+
     inputs = {
         "empty": ("", 300000),
         "20ch no-special": ("hello world foobar!!", 300000),
@@ -87,6 +88,8 @@ def main() -> None:
     }
     for _name, (s, _) in inputs.items():
         assert py_escape(s) == rs_escape(s)
+        if rs_pyo3:
+            assert py_escape(s) == rs_pyo3(s)
 
     def ns(fn, arg, n):  # type: ignore[no-untyped-def]
         t = time.perf_counter()
@@ -94,12 +97,72 @@ def main() -> None:
             fn(arg)
         return (time.perf_counter() - t) / n * 1e9
 
-    print(f"{'input':18s} {'Python(ns)':>12s} {'Rust+ctypes':>12s} {'speedup':>9s}")
+    hdr = f"{'input':18s} {'Python':>10s} {'ctypes':>10s} {'PyO3':>10s}  {'ctypes/PyO3 vs Python':>22s}"
+    print(
+        hdr
+        if rs_pyo3
+        else f"{'input':18s} {'Python(ns)':>12s} {'Rust+ctypes':>12s} {'speedup':>9s}"
+    )
     for name, (s, n) in inputs.items():
         p, r = ns(py_escape, s, n), ns(rs_escape, s, n)
-        print(f"{name:18s} {p:12.0f} {r:12.0f} {p / r:8.2f}x")
-    tax = ns(rs_escape, "", 300000) - ns(py_escape, "", 300000)
-    print(f"\nfixed ctypes tax ~= {tax:.0f} ns/call (empty-input delta)")
+        if rs_pyo3:
+            q = ns(rs_pyo3, s, n)
+            print(f"{name:18s} {p:10.0f} {r:10.0f} {q:10.0f}  {p / r:9.2f}x / {p / q:.2f}x")
+        else:
+            print(f"{name:18s} {p:12.0f} {r:12.0f} {p / r:8.2f}x")
+    ctypes_tax = ns(rs_escape, "", 300000) - ns(py_escape, "", 300000)
+    print(f"\nfixed ctypes tax ~= {ctypes_tax:.0f} ns/call")
+    if rs_pyo3:
+        pyo3_tax = ns(rs_pyo3, "", 300000) - ns(py_escape, "", 300000)
+        print(
+            f"fixed PyO3   tax ~= {pyo3_tax:.0f} ns/call  (~{ctypes_tax / max(pyo3_tax, 1):.0f}x cheaper)"
+        )
+
+
+_PYO3_RS = """\
+use pyo3::prelude::*;
+#[pyfunction]
+fn escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() { match c {
+        '&' => out.push_str("&amp;"), '<' => out.push_str("&lt;"), '>' => out.push_str("&gt;"),
+        '\\'' => out.push_str("&#39;"), '"' => out.push_str("&#34;"), _ => out.push(c) } }
+    out }
+#[pymodule]
+fn esc(m: &Bound<'_, PyModule>) -> PyResult<()> { m.add_function(wrap_pyfunction!(escape, m)?)?; Ok(()) }
+"""
+
+
+def _build_pyo3_escape(d: Path):  # type: ignore[no-untyped-def]
+    """Build the same escaper as a native PyO3 extension; None if no cargo."""
+    if not shutil.which("cargo"):
+        return None
+    import importlib.util
+
+    crate = d / "pyo3esc"
+    (crate / "src").mkdir(parents=True, exist_ok=True)
+    (crate / ".cargo").mkdir(exist_ok=True)
+    (crate / "Cargo.toml").write_text(
+        '[package]\nname = "esc"\nversion = "0.0.0"\nedition = "2021"\n'
+        '[lib]\nname = "esc"\ncrate-type = ["cdylib"]\n'
+        '[dependencies]\npyo3 = { version = "0.22", features = ["extension-module", "abi3-py38"] }\n'
+    )
+    (crate / ".cargo" / "config.toml").write_text(
+        '[target.aarch64-apple-darwin]\nrustflags = ["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]\n'
+        '[target.x86_64-apple-darwin]\nrustflags = ["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]\n'
+    )
+    (crate / "src" / "lib.rs").write_text(_PYO3_RS)
+    if subprocess.run(["cargo", "build", "--release"], cwd=crate, capture_output=True).returncode:
+        return None
+    built = next(iter((crate / "target" / "release").glob("libesc.*dylib")), None) or next(
+        iter((crate / "target" / "release").glob("libesc.so")), None
+    )
+    so = d / "esc.abi3.so"
+    shutil.copy(built, so)  # type: ignore[arg-type]
+    spec = importlib.util.spec_from_file_location("esc", so)
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod.escape
 
 
 if __name__ == "__main__":
