@@ -994,3 +994,66 @@ passed, 1 on `remove_diacritic`. Zero false passes.
 The arc, in one line: the lifter took SQLite's one-command-rewritable surface from
 46 to 77 of 92 eligible functions, and every sampled unlock rewrote and verified
 for tenths of a cent.
+
+### Pointer ABIs + a kernel API shim, then a massive kernel-crypto sweep (2026-07-24)
+
+Two levers, then the honest kernel number.
+
+**Pointer ABIs (`--pointers` in the sweep).** The scalar-only sweep left SQLite's
+`char*`/byte-buffer functions on the table. Re-run with pointer ABIs: eligible jumps
+**92 → 190**, lifted **77 → 148 (+63 newly unlocked)**. The unlocks are real string
+algorithms — `sqlite3StrICmp` (reads the `sqlite3UpperToLower` table), the entire
+Porter-stemmer suite (`fts5Porter_*`), UTF-8 validators. The pointer ABIs roughly
+double the addressable amalgamation surface.
+
+**A kernel API shim (`benchmarks/kernel_shim.h`).** Kernel functions reference
+in-header vocabulary the lifter can't reach (`get_unaligned_le32`, byteorder, errno,
+`IS_ENABLED`). The shim provides the *pure-computational* slice — every helper written
+to the kernel's real byte semantics (unaligned load/store, `__swab32`), so the
+differential compares the Rust against a *correct* C reference, not a stub. It
+deliberately provides **no** allocators (`kvfree`/`vfree`), request contexts
+(`aead_request`), or per-cipher structs — those are stateful glue, and faking them
+would be wrong or need full kernel struct layouts. On the 45 ABI-eligible probes the
+shim alone doubled the compilable set **4 → 8**.
+
+**The massive sweep — every `.c` in the kernel's `crypto/` + `lib/crypto/` (216
+files).** The number is deflating and *correct*:
+
+| | count |
+|---|---|
+| functions with a fuzzable scalar/pointer ABI | **89** |
+| excluded — struct / multi-level-pointer param | **1,266** |
+| excluded — not scalar-parseable / vararg / etc. | 773 |
+| compilable with shim + lift | **10** |
+| of which, lifting (not the shim) unlocked | 3 |
+
+The kernel's rewritable surface is **tiny and gated by struct-context ABIs**:
+1,266 functions take a `struct crypto_tfm *` / `aead_request *` / cipher context —
+the dominant shape, which neither lifting nor a compute-shim addresses (that needs
+struct-mirroring + per-cipher layouts, a different lever). Of the 89 scalar/pointer
+functions, only **10** lift to a compilable TU; the other 79 need allocators, request
+contexts, crypto teardown, or globals — external entanglement the shim refuses to
+fake. **Lifting adds only +3 over the shim** (the AES `aes.c` in-file-table functions
+`subw`/`mix_columns`/`inv_mix_columns`) — because kernel functions rarely depend on
+*in-file* tables/helpers; their barrier is external, exactly as the first kernel probe
+found, now quantified at 216-file scale.
+
+The two levers are cleanly separated by where they pay off: **lifting → userspace
+amalgamations** (SQLite: +32 of 92, in-file tables everywhere), **the shim → the
+kernel's compute helpers** (lets pure byte/scalar functions compile at all). Neither
+moves the kernel's struct-context wall.
+
+**Live proof the shimmed path verifies, not just compiles:** `dh_check_params_length`
+(references the shimmed `fips_enabled`/`EINVAL`) lifted + rewritten + differential-
+verified against the shim-C, **$0.0008**, one command:
+
+```
+cgir rewrite --lang c-rust --c-source dh.c --lift dh_check_params_length \
+    --lift-shim benchmarks/kernel_shim.h --live
+```
+
+The honest read for the vision: the kernel's crypto tree has ~2,100 pure functions
+and a *verified-rewritable* surface of ~10. The ceiling is the struct-context ABI, not
+the model, the lifter, or the shim — and closing it means teaching the differential to
+construct valid cipher contexts (`--structs` + per-cipher layouts), which is the next
+real lever if the kernel is the target.

@@ -69,60 +69,39 @@ def _compiles(c_text: str, workdir: Path, name: str) -> tuple[bool, str]:
     return r.returncode == 0, err
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--source", type=Path, required=True, help="the .c file to sweep")
-    ap.add_argument("--index", type=Path, help="existing cgir index (else scans --source's dir)")
-    ap.add_argument("--shim", type=Path, help="shim header text file (default: built-in)")
-    ap.add_argument("--out", type=Path, help="write the full JSON report here")
-    ap.add_argument("--tu-dir", type=Path, help="write compilable lifted TUs here")
-    ap.add_argument("--non-leaf", action="store_true", help="include non-leaf functions")
-    args = ap.parse_args()
-
-    src_text = args.source.read_text(errors="replace")
-    shim = args.shim.read_text() if args.shim else DEFAULT_SHIM
-
-    index = args.index
-    if index is None:
-        index = Path(tempfile.mkdtemp(prefix="c-lift-sweep-idx-"))
-        print(f"scanning {args.source.parent} ...", flush=True)
-        scan_repo(args.source.parent, out=index)
-
-    entries, excluded = c_rust_worklist(
-        index, args.source, pointers=False, include_nonleaf=args.non_leaf
-    )
-    print(f"worklist: {len(entries)} scalar-ABI pure functions, {len(excluded)} excluded")
-
-    # shared across every lift of this source: one mask, one extraction cache
-    t0 = time.time()
+def sweep_file(
+    source: Path,
+    index: Path,
+    shim: str,
+    workdir: Path,
+    pointers: bool,
+    non_leaf: bool,
+    tu_dir: Path | None,
+) -> dict:
+    """Sweep one .c file: worklist -> per-function baseline vs lifted compile."""
+    src_text = source.read_text(errors="replace")
+    entries, excluded = c_rust_worklist(index, source, pointers=pointers, include_nonleaf=non_leaf)
     masked = _mask_comments(src_text)
-    print(f"masked {len(src_text) / 1e6:.1f} MB in {time.time() - t0:.1f}s", flush=True)
     cache: dict[str, str | None] = {}
-
-    workdir = Path(tempfile.mkdtemp(prefix="c-lift-sweep-cc-"))
-    if args.tu_dir:
-        args.tu_dir.mkdir(parents=True, exist_ok=True)
-
     rows = []
-    baseline_ok = lifted_ok = 0
-    t0 = time.time()
-    for i, e in enumerate(entries):
-        # baseline: the function definition alone (+shim)
+    for e in entries:
         d = extract_definition(e.name, src_text, masked)
         base_ok, _ = (
-            _compiles(shim + "\n" + d + "\n", workdir, f"base_{e.name}") if d else (False, "")
+            _compiles(shim + "\n" + d + "\n", workdir, f"base_{source.stem}_{e.name}")
+            if d
+            else (False, "")
         )
-        # lifted: the function + its transitive in-file deps
         tu, unresolved = lift_symbol(src_text, e.name, shim=shim, masked=masked, cache=cache)
         lift_ok, lift_err = (
-            _compiles(tu, workdir, f"lift_{e.name}") if tu else (False, "lift returned None")
+            _compiles(tu, workdir, f"lift_{source.stem}_{e.name}")
+            if tu
+            else (False, "lift returned None")
         )
-        baseline_ok += base_ok
-        lifted_ok += lift_ok
-        if lift_ok and args.tu_dir and tu:
-            (args.tu_dir / f"{e.name}.c").write_text(tu)
+        if lift_ok and tu_dir and tu:
+            (tu_dir / f"{source.stem}__{e.name}.c").write_text(tu)
         rows.append(
             {
+                "file": source.name,
                 "name": e.name,
                 "ret": e.ret,
                 "params": e.params,
@@ -133,19 +112,75 @@ def main() -> int:
                 "error": lift_err,
             }
         )
-        if (i + 1) % 25 == 0:
+    return {"rows": rows, "excluded": excluded}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--source", type=Path, help="a single .c file to sweep")
+    ap.add_argument(
+        "--source-dir",
+        type=Path,
+        help="sweep every .c under this dir (aggregate across the tree, e.g. the kernel's crypto/)",
+    )
+    ap.add_argument("--index", type=Path, help="existing cgir index (else scans the source tree)")
+    ap.add_argument("--shim", type=Path, help="shim header text file (default: built-in)")
+    ap.add_argument("--out", type=Path, help="write the full JSON report here")
+    ap.add_argument("--tu-dir", type=Path, help="write compilable lifted TUs here")
+    ap.add_argument("--non-leaf", action="store_true", help="include non-leaf functions")
+    ap.add_argument(
+        "--pointers", action="store_true", help="include char*/byte-buffer pointer ABIs"
+    )
+    args = ap.parse_args()
+    if not (args.source or args.source_dir):
+        ap.error("one of --source or --source-dir is required")
+
+    shim = args.shim.read_text() if args.shim else DEFAULT_SHIM
+    scan_root = args.source_dir or args.source.parent
+
+    index = args.index
+    if index is None:
+        index = Path(tempfile.mkdtemp(prefix="c-lift-sweep-idx-"))
+        print(f"scanning {scan_root} ...", flush=True)
+        scan_repo(scan_root, out=index)
+
+    files = sorted(args.source_dir.rglob("*.c")) if args.source_dir else [args.source]
+    print(f"sweeping {len(files)} file(s) under {scan_root}", flush=True)
+
+    workdir = Path(tempfile.mkdtemp(prefix="c-lift-sweep-cc-"))
+    if args.tu_dir:
+        args.tu_dir.mkdir(parents=True, exist_ok=True)
+
+    rows: list[dict] = []
+    excluded: list = []
+    t0 = time.time()
+    for i, f in enumerate(files):
+        try:
+            r = sweep_file(f, index, shim, workdir, args.pointers, args.non_leaf, args.tu_dir)
+        except Exception as exc:  # a single unparseable file must not sink the sweep
+            print(f"  ! {f.name}: {type(exc).__name__}: {exc}", flush=True)
+            continue
+        rows.extend(r["rows"])
+        excluded.extend(r["excluded"])
+        if len(files) > 1 and (i + 1) % 20 == 0:
+            bl = sum(x["baseline_ok"] for x in rows)
+            lf = sum(x["lifted_ok"] for x in rows)
             print(
-                f"  {i + 1}/{len(entries)}  baseline {baseline_ok}  lifted {lifted_ok}"
+                f"  {i + 1}/{len(files)} files  {len(rows)} fns  baseline {bl}  lifted {lf}"
                 f"  ({time.time() - t0:.0f}s)",
                 flush=True,
             )
 
-    newly = [r["name"] for r in rows if r["lifted_ok"] and not r["baseline_ok"]]
-    regressed = [r["name"] for r in rows if r["baseline_ok"] and not r["lifted_ok"]]
+    baseline_ok = sum(x["baseline_ok"] for x in rows)
+    lifted_ok = sum(x["lifted_ok"] for x in rows)
+    newly = [f"{r['file']}:{r['name']}" for r in rows if r["lifted_ok"] and not r["baseline_ok"]]
+    regressed = [
+        f"{r['file']}:{r['name']}" for r in rows if r["baseline_ok"] and not r["lifted_ok"]
+    ]
     report = {
-        "source": str(args.source),
-        "source_lines": src_text.count("\n"),
-        "worklist": len(entries),
+        "root": str(scan_root),
+        "files": len(files),
+        "worklist": len(rows),
         "excluded": len(excluded),
         "baseline_ok": baseline_ok,
         "lifted_ok": lifted_ok,
@@ -157,8 +192,10 @@ def main() -> int:
     if args.out:
         args.out.write_text(json.dumps(report, indent=1))
 
-    print(f"\n=== sweep: {args.source.name} ({src_text.count(chr(10)):,} lines) ===")
-    print(f"scalar-ABI pure functions : {len(entries)}")
+    label = str(args.source_dir) if args.source_dir else args.source.name
+    abi = "scalar/pointer-ABI" if args.pointers else "scalar-ABI"
+    print(f"\n=== sweep: {label} ({len(files)} file(s)) ===")
+    print(f"{abi} pure functions : {len(rows)}")
     print(f"baseline compilable       : {baseline_ok}")
     print(f"lifted compilable         : {lifted_ok}")
     print(f"newly unlocked by lifting : {len(newly)}")
