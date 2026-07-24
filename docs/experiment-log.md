@@ -828,3 +828,35 @@ would actually link it). The honest read: the pipeline correctly and freely
 rewrites the kernel's genuine crypto primitives — the binding constraint stays
 *extractability* (getting self-contained TUs out of the build), not the model
 or correctness or speed.
+
+### The lifter: tree-shake in-file deps into a compilable TU (2026-07-24)
+
+Extractability was the wall, so `cgir/ffi/sources/c_lift.py` attacks the part of
+it that's *in the same file*: `lift_symbol(source, fn, shim)` pulls `fn` plus
+every file-scope definition it transitively references — tables, `#define`s,
+consts, helper functions — into one TU, brace-matched by regex (robust to the
+kernel macros — `____cacheline_aligned`, `__alias(...)` — that defeat a real C
+parse). The poster child is `subw`: it reads the 256-byte file-scope `aes_sbox`
+table, so the isolated extract won't compile; lifted *with* the table it does,
+and the pipeline rewrites it end-to-end **live for $0.006** (`probe_context`
+injects the S-box values, Haiku embeds them as `const AES_SBOX: [u32; 256]`, the
+differential verifies against the compiled kernel).
+
+**Re-running the compile-filter over all 45 ABI-eligible functions, now with the
+lifter: 4/45 → 5/45.** Exactly one function (`subw`) was gated purely on an
+in-file table, and the lifter unlocks exactly it — no regressions (the other
+four baseline lifts still compile). The honest, slightly deflating finding is
+*why it's only +1*: kernel crypto's entanglement is overwhelmingly **external**,
+not in-file. The other 40 need allocators (`kmalloc`/`kvfree`/`vfree`), request
+contexts (`aead_request_ctx`, `crypto_skcipher`), or globals (`fips_enabled`,
+`EINPROGRESS`) — none of which live in the function's `.c`, so a file-scoped
+tree-shake can't reach them. The lifter's real leverage is where the blocker is
+an in-file table or helper (single-file userspace libraries, amalgamations,
+embedded lookup tables), which the kernel's allocator-heavy glue mostly isn't.
+
+One bug the probe caught and the tests now pin: the first cut of
+`extract_definition` matched a function's **local variables** (`u32 x = w & …;`
+inside `mul_by_x`) as if they were file-scope consts and hoisted them out —
+where `w` is undefined — *regressing* two baseline lifts. Fixed with a
+comment/string-aware brace-depth check: only depth-0 matches are definitions.
+5/45 with zero regressions is the post-fix number.
