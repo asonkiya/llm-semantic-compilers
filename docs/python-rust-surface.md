@@ -122,6 +122,46 @@ This is why the honest live yield is small — but each success is a real functi
 in a real library, verified against that library's own recorded inputs, with its
 own test suite green over the Rust.
 
+## Does it make Python faster? Measured — and the FFI is the ceiling
+
+The other half of "worth rewriting" is: is the Rust *faster*? Benchmarking the
+functions we actually rewrote — original Python vs the ctypes wrapper `--apply`
+emits — gives a clear crossover (`benchmarks/python_rust_speedup.py` reproduces
+it; markupsafe escape shown):
+
+| input | Python | Rust+ctypes | speedup |
+|---|---|---|---|
+| empty | 78 ns | 463 ns | **0.17×** |
+| 20 chars, no specials | 138 ns | 777 ns | **0.18×** |
+| 20 chars, w/ specials | 278 ns | 868 ns | **0.32×** |
+| 200 chars, mixed | 1823 ns | 1201 ns | 1.52× |
+| 5 KB, no specials | 8072 ns | 7281 ns | 1.11× |
+| 5 KB, many specials | 47396 ns | 9078 ns | **5.22×** |
+
+semver `_increment_string` on typical version strings: **0.67–0.88×** (slower).
+
+Two facts:
+- **The fixed ctypes tax is ~390 ns/call** (the empty-input delta). Every call
+  pays it: encode UTF-8 → marshal → call → `string_at` → decode → free.
+- **The eligible surface is dominated by small string/scalar leaves** — exactly
+  the functions whose compute is *under* 390 ns, where Python's builtins are
+  already C-level. So most of what v1 *can* rewrite, it makes **slower**. Rust
+  wins only once per-call compute clears the tax (large inputs with real work).
+
+The bottleneck is the FFI *mechanism*, not Rust — the Rust escaper is 5.2× on a
+5 KB payload. ctypes is the tax; **PyO3** (a native extension, ~10–50 ns/call)
+would move the crossover down ~10×, turning most eligible leaves from "slower"
+into "faster." The clean split this implies: **verify with ctypes** (simple,
+already sound) and **ship with PyO3** (fast) — same generated Rust, different
+apply target.
+
+**What this means for the vision.** It sharpens "eligible ≠ worth it" into a
+number: of the 0.87% eligible, the subset where a Rust rewrite is *actually
+faster today (ctypes)* is smaller still — compute-bound functions on large
+inputs. The path to a broad, worthwhile speedup surface is not more model
+quality (the translations are correct) but (1) the IR-shape unlocks that raise
+0.87% and (2) a lower-overhead apply target (PyO3) that lowers the break-even.
+
 ## Reproduce
 
 ```
