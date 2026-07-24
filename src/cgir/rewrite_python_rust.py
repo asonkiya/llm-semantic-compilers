@@ -63,6 +63,24 @@ _CTYPES_SCALAR = {"i64": "c_int64", "f64": "c_double", "bool": "c_bool"}
 _RUSTC_FLAGS = ["-C", "panic=abort", "-C", "overflow-checks=on"]
 
 
+def _expand_self_traces(traces: list[Trace], sig: Any) -> list[Trace]:
+    """Turn a value-self method's traces into flat ones: the captured ``self``
+    (arg 0) becomes its read fields, matching the ``from_self`` params (which
+    lead ``sig.params``). A trace whose ``self`` is missing a field is dropped."""
+    from_self = [p for p in sig.params if p.from_self]
+    out: list[Trace] = []
+    for args, result in traces:
+        if not args:
+            continue
+        self_obj = args[0]
+        try:
+            fields = tuple(getattr(self_obj, p.name) for p in from_self)
+        except AttributeError:
+            continue
+        out.append((fields + tuple(args[1:]), result))
+    return out
+
+
 def _dedup_traces(traces: list[Trace]) -> list[Trace]:
     """Distinct-by-argument traces (first result kept). Pure functions map an
     input to one output, so the distinct inputs are the evidence; the dups a hot
@@ -86,6 +104,15 @@ def build_python_rust_prompt(e: PyEntry) -> str:
     sig = e.sig
     has_slice = any(p.kind == "slice" for p in sig.params)
     ret_buf = sig.ret.startswith("buf:")
+    self_rule = ""
+    if sig.self_param:
+        fields = [p.name for p in sig.params if p.from_self]
+        mapping = ", ".join(f"`self.{f}` -> parameter `{f}`" for f in fields)
+        self_rule = (
+            f"\n- This is a method being rewritten as a FREE function of its fields. "
+            f"There is no `self`: replace each field read with its parameter — {mapping}. "
+            f"Any other parameter is passed as-is."
+        )
     slice_rule = ""
     if has_slice:
         slice_rule = (
@@ -131,7 +158,7 @@ Rules:
   rejected, so never let one happen silently.
 - Never panic (no `unwrap` on a fallible path, no index out of bounds, no
   divide-by-zero the Python does not have). A panic is a rejection.
-- Deterministic: no I/O, no globals, no time/random.{slice_rule}{prelude_rule}"""
+- Deterministic: no I/O, no globals, no time/random.{self_rule}{slice_rule}{prelude_rule}"""
 
 
 def run_python_rust(
@@ -140,7 +167,7 @@ def run_python_rust(
     *,
     sampler: Sampler,
     traces: dict[str, list[Trace]],
-    query: str = "kind:pure covered:true",
+    query: str = "kind:pure",
     k: int = 3,
     min_traces: int = 3,
     budget_usd: float | None = None,
@@ -171,7 +198,10 @@ def run_python_rust(
     prepared: dict[str, list[Trace]] = {}
     verifiable: list[PyEntry] = []
     for e in entries:
-        t = _dedup_traces(traces.get(e.component_id, []))
+        raw = traces.get(e.component_id, [])
+        if e.sig.self_param:
+            raw = _expand_self_traces(raw, e.sig)
+        t = _dedup_traces(raw)
         if not t:
             excluded.append((e.component_id, "no captured traces"))
             continue
@@ -242,14 +272,21 @@ def _lib_filename() -> str:
 
 def render_python_wrapper(e: PyEntry) -> str:
     """The thin Python body that replaces the original function: same name and
-    parameter names (so callers are unaffected), delegating to the cdylib via
-    the emitted wrapper module. Annotations are dropped — a deliberate,
-    gate-downgraded drift on exactly the rewritten set."""
-    params = ", ".join(p.name for p in e.sig.params)
+    parameter names (so callers are unaffected), delegating to the extension via
+    the emitted wrapper module. For a value-self method the ``def`` keeps its
+    original params (``self``, ...) and the call reads the ``from_self`` params
+    off ``self``. Annotations are dropped — a deliberate, gate-downgraded drift
+    on exactly the rewritten set."""
+    sig = e.sig
+    if sig.self_param:
+        def_params = ", ".join([sig.self_param] + [p.name for p in sig.params if not p.from_self])
+        call_args = ", ".join(f"self.{p.name}" if p.from_self else p.name for p in sig.params)
+    else:
+        def_params = call_args = ", ".join(p.name for p in sig.params)
     return (
-        f"def {e.symbol}({params}):\n"
+        f"def {e.symbol}({def_params}):\n"
         f"    from {_WRAPPER_MODULE} import {e.symbol} as _rs\n"
-        f"    return _rs({params})"
+        f"    return _rs({call_args})"
     )
 
 

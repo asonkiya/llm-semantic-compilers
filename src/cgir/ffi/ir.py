@@ -121,16 +121,27 @@ class Param:
     scalar: str | None = None  # canonical scalar name when kind == "scalar"
     text: bool = False  # kind == "slice": True = str (UTF-8), False = bytes
     mutable: bool = False
+    # A pure method that only reads scalar/str/bytes fields of ``self`` is a pure
+    # function of those fields. Such params are marked ``from_self`` and carry the
+    # field name in ``name`` — the wrapper reads ``self.<name>`` and replay
+    # expands the captured ``self`` the same way. The Rust boundary sees a plain
+    # param either way.
+    from_self: bool = False
 
 
 @dataclass(frozen=True)
 class Signature:
     """A function's FFI-IR signature. ``ret`` is ``"void"``, a canonical
     scalar name, or ``"buf:str"`` / ``"buf:bytes"`` (a Rust-allocated
-    ``RustBuf{ptr,len,cap}`` return, freed via ``cgir_buf_free``)."""
+    ``RustBuf{ptr,len,cap}`` return, freed via ``cgir_buf_free``).
+
+    ``self_param`` is the receiver name (``"self"``/``"cls"``) for a value-self
+    method, else ``None`` — it tells the wrapper to emit ``def f(self, ...)`` and
+    read the ``from_self`` params off ``self``."""
 
     params: tuple[Param, ...]
     ret: str
+    self_param: str | None = None
 
 
 @dataclass

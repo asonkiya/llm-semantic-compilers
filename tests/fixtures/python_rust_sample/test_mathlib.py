@@ -5,7 +5,16 @@ calls are what ``replay.capture()`` records as traces.
 
 from __future__ import annotations
 
-from mathlib import clamp, fnv1a, greet, noop, pick, scale, shout
+from mathlib import Rect, clamp, fnv1a, greet, noop, pick, scale, shout
+
+
+def test_rect_methods() -> None:
+    assert Rect(3, 4).area() == 12
+    assert Rect(0, 9).area() == 0
+    assert Rect(5, 5).area() == 25
+    assert Rect(2, 3).scaled_area(4) == 24
+    assert Rect(1, 1).scaled_area(10) == 10
+    assert Rect(6, 7).scaled_area(0) == 0
 
 
 def test_clamp() -> None:

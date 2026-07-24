@@ -7,6 +7,20 @@ return) and must land in the worklist's ``excluded`` list.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+
+@dataclass
+class Rect:
+    w: int
+    h: int
+
+    def area(self) -> int:  # value-self method: pure function of self.w, self.h
+        return self.w * self.h
+
+    def scaled_area(self, factor: int) -> int:  # self-fields + an explicit param
+        return self.w * self.h * factor
+
 
 def clamp(x: int, lo: int, hi: int) -> int:
     if x < lo:

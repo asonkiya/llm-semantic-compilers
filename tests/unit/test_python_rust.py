@@ -97,11 +97,53 @@ def test_worklist_splits_eligible_from_ineligible(tmp_path: Path) -> None:
     idx = tmp_path / "idx"
     scan_repo(FIXTURE, out=idx)
     entries, excluded = python_rust_worklist(idx, FIXTURE)
-    assert {e.symbol for e in entries} == {"clamp", "fnv1a", "scale", "shout"}
+    # the four free functions + the two value-self methods
+    assert {e.component_id for e in entries} == {
+        "mathlib.clamp",
+        "mathlib.fnv1a",
+        "mathlib.scale",
+        "mathlib.shout",
+        "mathlib.Rect.area",
+        "mathlib.Rect.scaled_area",
+    }
+    area = next(e for e in entries if e.component_id == "mathlib.Rect.area")
+    assert area.sig.self_param == "self"
+    assert [(p.name, p.from_self) for p in area.sig.params] == [("h", True), ("w", True)]
     ex = {cid.rsplit(".", 1)[-1]: reason for cid, reason in excluded}
     assert "container" in ex["pick"] or "non-scalar" in ex["pick"]
     assert "annotation" in ex["greet"]
     assert "void return" in ex["noop"]
+
+
+def test_method_eligibility_and_rejections() -> None:
+    from cgir.ffi.sources.python import class_field_types
+
+    cls = (
+        "class Box:\n    w: int\n    h: int\n    label: str\n"
+        "    def area(self) -> int: return self.w * self.h\n"
+        "    def tag(self, p: str) -> str: return p + self.label\n"
+    )
+    cf = class_field_types(cls)
+    assert cf == {"w": "int", "h": "int", "label": "str"}
+    sig, _ = parse_signature(cls, "area", cf)
+    assert sig.self_param == "self" and sig.ret == "i64"
+    assert all(p.from_self for p in sig.params) and {p.name for p in sig.params} == {"w", "h"}
+    sig, _ = parse_signature(cls, "tag", cf)  # self-fields + explicit param
+    assert [(p.name, p.from_self) for p in sig.params] == [("label", True), ("p", False)]
+
+    def rej(src: str, cf2: dict[str, str] | None) -> str:
+        _, r = parse_signature(src, "f", cf2)
+        return r
+
+    c = "class C:\n  x: int\n  def f(self) -> int: return {}\n"
+    assert "calls a method" in rej(
+        c.format("self.g()") + "  def g(self)->int: return 1", {"x": "int"}
+    )
+    assert "used as a value" in rej(c.format("id(self)"), {"x": "int"})
+    assert "not an annotated class field" in rej(c.format("self.y"), {"x": "int"})
+    assert "reads no fields" in rej(c.format("42"), {"x": "int"})
+    assert "class field annotations unavailable" in rej(c.format("self.x"), None)
+    assert "classmethod" in rej("class C:\n  def f(cls) -> int: return 1\n", {})
 
 
 # --- end-to-end replay-verify (toolchain-gated, fake sampler) ---------------
@@ -123,10 +165,25 @@ _SHOUT = RUSTBUF_PRELUDE + (
     "  let up = match std::str::from_utf8(s) { Ok(t) => t.to_uppercase(), Err(_) => String::new() };\n"
     "  cgir_make_buf(up.into_bytes())\n}"
 )
+# value-self methods rewritten as free functions of self's fields
+_AREA = '#[no_mangle]\npub extern "C" fn area(h: i64, w: i64) -> i64 { w.wrapping_mul(h) }'
+_SCALED = (
+    '#[no_mangle]\npub extern "C" fn scaled_area(factor: i64, h: i64, w: i64) -> i64 '
+    "{ w.wrapping_mul(h).wrapping_mul(factor) }"
+)
+_ALL = 6  # eligible functions in the fixture
 
 
 def _sampler(overrides: dict[str, str] | None = None):
-    table = {"fn clamp": _CLAMP, "fn fnv1a": _FNV, "fn scale": _SCALE, "fn shout": _SHOUT}
+    # "fn scaled_area" must be checked before "fn scale" (substring); dict order.
+    table = {
+        "fn scaled_area": _SCALED,
+        "fn area": _AREA,
+        "fn clamp": _CLAMP,
+        "fn fnv1a": _FNV,
+        "fn scale": _SCALE,
+        "fn shout": _SHOUT,
+    }
     table.update(overrides or {})
 
     def sample(prompt: str, model: str) -> tuple[str, float]:
@@ -152,12 +209,14 @@ def test_end_to_end_all_solved(fixture_index: Path) -> None:
     entries, _ = python_rust_worklist(fixture_index, FIXTURE)
     traces = capture(FIXTURE, {e.component_id: (Path(e.path), e.symbol) for e in entries})
     report = run_python_rust(fixture_index, FIXTURE, sampler=_sampler(), traces=traces, k=1)
-    assert report["totals"]["solved"] == 4
+    assert report["totals"]["solved"] == _ALL
     assert {o["component_id"] for o in report["results"] if o["status"] == "solved"} == {
         "mathlib.clamp",
         "mathlib.fnv1a",
         "mathlib.scale",
         "mathlib.shout",
+        "mathlib.Rect.area",  # value-self methods, rewritten as free functions
+        "mathlib.Rect.scaled_area",
     }
     assert all(o.get("verify") == "replay" for o in report["results"])
 
@@ -304,10 +363,12 @@ def test_apply_splices_wrappers_and_repo_tests_pass_with_rust_inside(tmp_path: P
 
     report = run_python_rust(idx, repo, sampler=_sampler(), traces=traces, k=1, apply=True)
     gate = report["final_gate"]
-    assert gate["applied"] == 4
+    assert gate["applied"] == _ALL
     assert gate["tests_ok"] is True  # the repo's OWN pytest passes with Rust inside
     assert gate["hard_drift_outside_rewritten"] == []  # drift is only on the rewritten set
     assert (repo / "_cgir_rs.py").exists() and list(repo.glob("_cgir_rs_lib.*"))
-    # the original body was replaced by a delegating wrapper
+    # the original body was replaced by a delegating wrapper (incl the value-self
+    # method, which reads its fields off self)
     spliced = (repo / "mathlib.py").read_text()
+    assert "from _cgir_rs import area as _rs" in spliced and "_rs(self.h, self.w)" in spliced
     assert "from _cgir_rs import clamp as _rs" in spliced
