@@ -912,6 +912,32 @@ def rewrite_cmd(
         list[str] | None,
         typer.Option("--c-flag", help="c-rust: a compile flag for the oracle build (repeatable)."),
     ] = None,
+    lift: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--lift",
+            help="c-rust: lift this function (repeatable) out of --c-source into a "
+            "standalone TU — tree-shaking the file-scope tables/#defines/helpers it "
+            "references — then rewrite the lifted TU. For functions inside a large "
+            "single file (an amalgamation) that don't compile in isolation.",
+        ),
+    ] = None,
+    lift_shim: Annotated[
+        Path | None,
+        typer.Option(
+            "--lift-shim",
+            help="c-rust --lift: C header text prepended to the lifted TU (typedefs/"
+            "macros the file gets from headers). Default: a built-in stdint/kernel/"
+            "sqlite-flavored shim.",
+        ),
+    ] = None,
+    lift_out: Annotated[
+        Path | None,
+        typer.Option(
+            "--lift-out",
+            help="c-rust --lift: directory for the lifted TU + its index (default: temp).",
+        ),
+    ] = None,
     n_trials: Annotated[
         int, typer.Option("--n-trials", help="c-rust: differential inputs per candidate.")
     ] = 300,
@@ -1057,6 +1083,9 @@ def rewrite_cmd(
             gate_run,
             gate_input,
             structs,
+            list(lift or []),
+            lift_shim,
+            lift_out,
         )
         return
     if lang == "python-rust":
@@ -1180,6 +1209,9 @@ def _rewrite_c_rust(
     gate_run: str | None = None,
     gate_input: Path | None = None,
     structs: bool = False,
+    lift: list[str] | None = None,
+    lift_shim: Path | None = None,
+    lift_out: Path | None = None,
 ) -> None:
     import shutil
 
@@ -1195,6 +1227,39 @@ def _rewrite_c_rust(
         raise typer.BadParameter("--lang c-rust needs --c-source <amalgamation.c>")
     if not c_source.exists():
         raise typer.BadParameter(f"No such C source: {c_source}")
+
+    if lift:
+        # Lift the named functions (plus their transitive in-file deps) out of
+        # the big file into one standalone TU, index it, and rewrite THAT. The
+        # lift closure contains the targets' helpers, so non-leaf ordering is
+        # implied.
+        import tempfile
+
+        from cgir.ffi.sources.c_lift import DEFAULT_SHIM, lift_symbols
+        from cgir.pipeline import scan_repo
+
+        shim = lift_shim.read_text() if lift_shim else DEFAULT_SHIM
+        tu, unresolved, missing = lift_symbols(c_source.read_text(errors="replace"), lift, shim)
+        if missing:
+            raise typer.BadParameter(
+                f"--lift: no file-scope definition found in {c_source.name} for: "
+                f"{', '.join(missing)}"
+            )
+        assert tu is not None
+        lift_dir = lift_out or Path(tempfile.mkdtemp(prefix="cgir-lift-"))
+        lift_dir.mkdir(parents=True, exist_ok=True)
+        lifted = lift_dir / f"lifted_{c_source.stem}.c"
+        lifted.write_text(tu)
+        typer.echo(
+            f"lifted {', '.join(lift)} (+deps) from {c_source.name} -> {lifted} "
+            f"({len(tu.splitlines())} lines)"
+        )
+        if unresolved:
+            typer.echo(f"  unresolved (must come from the shim or be locals): {unresolved}")
+        index_dir = lift_dir / ".cgir"
+        scan_repo(lift_dir, out=index_dir)
+        c_source = lifted
+        non_leaf = True
     if structs and not (gate_build and gate_run):
         typer.echo(
             "note: struct-pointer functions are gate-only (the isolated differential is "

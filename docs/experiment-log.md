@@ -931,3 +931,66 @@ reuses it across every dependency lookup — re-masking 9.5 MB per dep was the c
 This is the lifter's designed use case landing on the canonical target: a single-file
 C amalgamation where a function's only barrier to extraction is a table/helper
 elsewhere *in the same file*.
+
+### From anecdote to number: the full-SQLite sweep + `--lift` in the CLI (2026-07-24)
+
+Two asks, in order: quantify the lifter's surface on all of sqlite3.c, then make it a
+product surface instead of a scratch script.
+
+**The sweep** (`benchmarks/c_lift_sweep.py`): every scalar-ABI pure function in the
+amalgamation, compiled two ways — the function's own definition + shim (*baseline*,
+the pre-lifter state) vs the lifted TU. Of **92** such functions:
+
+| | compilable standalone |
+|---|---|
+| baseline (no lifter) | **46** |
+| with the lifter | **77** |
+
+**+32 newly unlocked; 84% of the eligible surface now lifts.** The taxonomy of the
+15 that still don't is exactly the external-entanglement wall, in miniature:
+OS/platform calls (`flock`, `errno`, Win32 APIs — ~8), globals (`sqlite3Config`,
+`Mem0Global`, wsd machinery — ~4), and struct-type deps (2). The one "regression"
+is Windows-only (`sqlite3_win32_is_nt`) — its baseline "compiled" only because the
+non-Windows `#if` branch is trivial; lifting pulls Windows-branch deps a
+preprocessor-naive lifter can't know are dead. Documented limit, correctly excluded.
+
+**Three more real bugs the sweep caught** (all fixed + regression-tested):
+- `#if defined(SQLITE_TEST)` at column 0, followed by a brace-opening line, *matched
+  as a function definition of* `defined` — dragging a ~300-line block of unrelated
+  global state into two TUs and breaking them. Fix: `#`-directive lines are never
+  definition sites; `defined` is a preprocessor operator, never a dependency. (Run 1
+  reported 72/92 — inflated by this over-pull accidentally providing definitions.)
+- `xCeil`/`xFloor`/`sqlite3RealSameAsInt` failed only on **libc/libm declarations**
+  (`ceil`, `floor`, `memcmp`). The shim now includes `<math.h>`/`<string.h>` —
+  declarations only, universally linkable, and the differential still verifies the
+  Rust against the real libm-calling C.
+- `percentIsInfinity` broke *because* of the header fix: `memcpy` isn't textually in
+  the shim, so the BFS pulled SQLite's conditional `#define memcpy(D,S,N)` override —
+  which conflicts with `<string.h>`. Fix: libc/libm names are platform-provided and
+  never pulled from the file (a keyword set), which also unlocked `sqlite3IsNaN` and
+  `sqlite3IsOverflow`.
+
+**The CLI** (`--lift`, plus `--lift-shim`/`--lift-out`): one command, no pre-existing
+index —
+
+```
+cgir rewrite --lang c-rust --c-source sqlite3.c --lift sqlite3FtsUnicodeFold --live
+```
+
+lifts the function + its transitive in-file deps into a TU, indexes it, and runs the
+normal engine on it (non-leaf implied — the lift closure contains the helpers).
+Under the hood: `lift_symbols` (multi-symbol, one TU / one oracle dylib), typedef
+extraction (simple + struct-body — SQLite's own `u8` → `UINT8_TYPE` chain now
+self-resolves, so even a minimal shim works), and a shared mask/extraction cache.
+
+**The live battery — 10 one-command rewrites of newly-unlocked functions, 11 solved,
+$0.048 total.** Sampled every 3rd newly-unlocked function. All 10 solved; the
+`sqlite3FtsUnicodeFold` lift pulled the unicode case-fold tables *and* its
+`remove_diacritic` helper into a 214-line TU and the engine rewrote **both**,
+dependency-ordered, for $0.038. The verifier worked for its living: **4 differential
+kills** — 3 plausible-but-wrong float candidates on `degToRad` before attempt 4
+passed, 1 on `remove_diacritic`. Zero false passes.
+
+The arc, in one line: the lifter took SQLite's one-command-rewritable surface from
+46 to 77 of 92 eligible functions, and every sampled unlock rewrote and verified
+for tenths of a cent.

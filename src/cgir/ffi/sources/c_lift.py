@@ -62,18 +62,48 @@ _KEYWORDS = frozenset(
         "NULL",
         "true",
         "false",
-        "u8",
-        "u16",
-        "u32",
-        "u64",
-        "s8",
-        "s16",
-        "s32",
-        "s64",
+        # NOTE: u8/u32-style scalar spellings are deliberately NOT keywords:
+        # an amalgamation may typedef them in-file (SQLite does), in which case
+        # they must be pulled; when a shim provides them instead, shim_names
+        # filtering skips them. size_t/bool stay — they come from headers.
         "size_t",
         "bool",
-        # preprocessor directive keywords — never a referenced symbol
+        # libc/libm — platform-provided, declared by the shim's headers. Never
+        # pull an in-file override (SQLite's conditional `#define memcpy(D,S,N)`
+        # conflicts with <string.h> and breaks the TU).
+        "memcpy",
+        "memmove",
+        "memset",
+        "memcmp",
+        "strlen",
+        "strcmp",
+        "strncmp",
+        "strcpy",
+        "strncpy",
+        "strchr",
+        "strrchr",
+        "strstr",
+        "ceil",
+        "floor",
+        "fabs",
+        "sqrt",
+        "pow",
+        "exp",
+        "log",
+        "sin",
+        "cos",
+        "tan",
+        "atan2",
+        "fmod",
+        "isnan",
+        "isinf",
+        "malloc",
+        "free",
+        "realloc",
+        "calloc",
+        # preprocessor directive keywords / operators — never a referenced symbol
         "define",
+        "defined",
         "undef",
         "include",
         "ifdef",
@@ -156,13 +186,15 @@ def _mask_comments(text: str) -> str:
 
 def _at_col0(text: str, idx: int) -> bool:
     """Whether the line containing ``idx`` begins at column 0 with a
-    non-whitespace character — i.e. the definition's return type / qualifier is
-    flush-left. This is how real-world C writes *file-scope* definitions (SQLite,
-    the kernel, tiny-AES all do); locals inside a function body are indented. It
-    replaces a global brace-depth count, which drifts on a 270k-line
-    amalgamation where a handful of literal braces escape the comment mask."""
+    non-whitespace character that is not ``#`` — i.e. the definition's return
+    type / qualifier is flush-left and the line is not a preprocessor directive
+    (``#if defined(X)`` must never read as a definition of ``defined``). This is
+    how real-world C writes *file-scope* definitions (SQLite, the kernel,
+    tiny-AES all do); locals inside a function body are indented. It replaces a
+    global brace-depth count, which drifts on a 270k-line amalgamation where a
+    handful of literal braces escape the comment mask."""
     ls = _line_start(text, idx)
-    return ls < len(text) and text[ls] not in " \t"
+    return ls < len(text) and text[ls] not in " \t#"
 
 
 def extract_definition(name: str, text: str, masked: str | None = None) -> str | None:
@@ -216,6 +248,15 @@ def extract_definition(name: str, text: str, masked: str | None = None) -> str |
         head = masked[_line_start(masked, m.start()) : m.start()]
         if "(" not in head and "return" not in head:  # not an assignment inside a body
             return text[_line_start(text, m.start()) : m.end()]
+    # typedef: `typedef unsigned char u8;` / `typedef struct Foo Foo;` (no
+    # braces), or `typedef struct {...} Foo;` (brace-matched body).
+    for m in re.finditer(rf"^typedef[^;{{}}\n]*\b{esc}\s*(?:\[[^\]]*\])?\s*;", masked, re.M):
+        return text[m.start() : m.end()]
+    for m in re.finditer(r"^typedef\s+(?:struct|union|enum)\b[^{;]*\{", masked, re.M):
+        end = _match_braces(masked, masked.index("{", m.start()))
+        tail = masked[end : masked.find(";", end) + 1]
+        if re.search(rf"\b{esc}\b", tail):
+            return text[m.start() : masked.find(";", end) + 1]
     # function-like macro: `#define name(args) body` — only reached if no real
     # function of this name exists (it's then the active definition, e.g. a
     # commented-out function beside its macro).
@@ -232,20 +273,71 @@ def _referenced_idents(body: str) -> set[str]:
     return {w for w in re.findall(r"\b([A-Za-z_]\w*)\b", code) if w not in _KEYWORDS}
 
 
-def lift_symbol(source: str, symbol: str, shim: str = "") -> tuple[str | None, list[str]]:
-    """Assemble a standalone TU: ``shim`` + every in-file definition ``symbol``
-    transitively references (tables, ``#define``s, consts, helper functions), in
-    file order, ending with ``symbol``. Returns (tu_source | None if ``symbol``
-    isn't found, sorted unresolved identifiers)."""
-    masked = _mask_comments(source)  # mask once; reused for every dependency lookup
-    target = extract_definition(symbol, source, masked)
-    if target is None:
-        return None, []
+# A reasonable default shim for kernel-/sqlite-flavored C: the scalar typedef
+# spellings and annotation macros a lifted fragment is most likely to need but
+# least likely to define at file scope (they usually live in headers). It
+# deliberately defines NO functions — an unresolved call must fail the compile,
+# not be papered over.
+DEFAULT_SHIM = """\
+#include <stdint.h>
+#include <stddef.h>
+#include <math.h>
+#include <string.h>
+typedef uint8_t u8; typedef int8_t i8;
+typedef uint16_t u16; typedef int16_t i16;
+typedef uint32_t u32; typedef int32_t i32;
+typedef uint64_t u64; typedef int64_t i64;
+#define SQLITE_PRIVATE
+#define SQLITE_API
+#define SQLITE_NOINLINE
+#define ____cacheline_aligned
+#define assert(x)
+#define testcase(x)
+#define ALWAYS(x) (x)
+#define NEVER(x) (x)
+"""
+
+
+def lift_symbols(
+    source: str,
+    symbols: list[str],
+    shim: str = "",
+    masked: str | None = None,
+    cache: dict[str, str | None] | None = None,
+) -> tuple[str | None, list[str], list[str]]:
+    """Assemble one standalone TU covering every symbol in ``symbols``: ``shim``
+    + the union of their transitive in-file definitions (tables, ``#define``s,
+    consts, typedefs, helper functions), in file order. Returns
+    (tu_source | None if *no* symbol was found, sorted unresolved identifiers,
+    symbols that had no definition).
+
+    ``masked`` and ``cache`` (name -> extracted definition, shared across calls)
+    let a sweep over many symbols of the *same* source pay the 9.5 MB masking
+    and per-name extraction scans once instead of per lift."""
+    if masked is None:
+        masked = _mask_comments(source)  # mask once; reused for every dependency lookup
+    if cache is None:
+        cache = {}
+
+    def _extract(name: str) -> str | None:
+        if name not in cache:
+            cache[name] = extract_definition(name, source, masked)
+        return cache[name]
+
+    defs_by_name: dict[str, str] = {}
+    missing: list[str] = []
+    for sym in symbols:
+        d = _extract(sym)
+        if d is None:
+            missing.append(sym)
+        else:
+            defs_by_name[sym] = d
+    if not defs_by_name:
+        return None, [], missing
     shim_names = set(re.findall(r"\b([A-Za-z_]\w*)\b", shim))
     pulled: dict[str, str] = {}  # name -> definition text
     unresolved: set[str] = set()
-    queue = [symbol]
-    defs_by_name = {symbol: target}
+    queue = list(defs_by_name)
     while queue:
         name = queue.pop()
         if name in pulled:
@@ -254,14 +346,27 @@ def lift_symbol(source: str, symbol: str, shim: str = "") -> tuple[str | None, l
         for ref in _referenced_idents(pulled[name]):
             if ref == name or ref in pulled or ref in shim_names:
                 continue
-            d = extract_definition(ref, source, masked)
+            d = _extract(ref)
             if d is not None:
                 defs_by_name[ref] = d
                 queue.append(ref)
             else:
                 unresolved.add(ref)
-    # emit in file order (dependencies defined before use in the source), target last
+    # emit in file order (dependencies defined before use in the source)
     order = sorted(pulled, key=lambda n: source.find(pulled[n]))
     body = "\n\n".join(pulled[n] for n in order)
     tu = (shim + "\n\n" + body + "\n") if shim else body + "\n"
-    return tu, sorted(unresolved - shim_names)
+    return tu, sorted(unresolved - shim_names), missing
+
+
+def lift_symbol(
+    source: str,
+    symbol: str,
+    shim: str = "",
+    masked: str | None = None,
+    cache: dict[str, str | None] | None = None,
+) -> tuple[str | None, list[str]]:
+    """Single-symbol :func:`lift_symbols`. Returns (tu_source | None if
+    ``symbol`` isn't found, sorted unresolved identifiers)."""
+    tu, unresolved, _ = lift_symbols(source, [symbol], shim, masked, cache)
+    return tu, unresolved

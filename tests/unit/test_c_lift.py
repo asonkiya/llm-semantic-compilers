@@ -16,7 +16,7 @@ import subprocess
 
 import pytest
 
-from cgir.ffi.sources.c_lift import extract_definition, lift_symbol
+from cgir.ffi.sources.c_lift import DEFAULT_SHIM, extract_definition, lift_symbol, lift_symbols
 
 # A miniature "amalgamation": a table, a #define, a helper, and the target that
 # reads all three — plus a decoy function whose body declares locals named like
@@ -154,6 +154,149 @@ def test_local_indented_array_is_not_hoisted():
     """`local_arr` is an indented array inside a body — extracting it must fail
     (it is not a file-scope definition), even though its shape matches a table."""
     assert extract_definition("local_arr", _BRACE_TRAP) is None
+
+
+# The SQLite pattern: the file typedefs its own scalar spellings, so a lift
+# with a minimal shim must pull the typedef chain rather than fail on `u8`.
+_TYPEDEF_SRC = """\
+#define UINT8_TYPE unsigned char
+typedef UINT8_TYPE u8;
+typedef struct Pair { int a; int b; } Pair;
+
+static const u8 lut[3] = { 5, 6, 7 };
+
+u8 pick(u8 i) {
+    return lut[i % 3];
+}
+
+int pair_sum_kind(int a, int b) {
+    Pair p = { a, b };
+    return p.a + p.b;
+}
+"""
+
+
+def test_extract_simple_typedef():
+    assert extract_definition("u8", _TYPEDEF_SRC) == "typedef UINT8_TYPE u8;"
+
+
+def test_extract_struct_body_typedef():
+    d = extract_definition("Pair", _TYPEDEF_SRC)
+    assert d is not None and d.startswith("typedef struct Pair") and d.endswith("Pair;")
+
+
+def test_lift_pulls_typedef_chain():
+    """`pick` needs `u8` → `UINT8_TYPE`: both are pulled, so a minimal shim
+    (no scalar typedefs) still yields a compilable TU."""
+    tu, unresolved = lift_symbol(_TYPEDEF_SRC, "pick")
+    assert tu is not None
+    assert "typedef UINT8_TYPE u8;" in tu
+    assert "#define UINT8_TYPE unsigned char" in tu
+    assert not ({"u8", "UINT8_TYPE", "lut"} & set(unresolved))
+
+
+def test_lift_symbols_merges_closures_into_one_tu():
+    tu, _, missing = lift_symbols(_TYPEDEF_SRC, ["pick", "pair_sum_kind"])
+    assert missing == []
+    assert tu is not None
+    assert tu.count("typedef UINT8_TYPE u8;") == 1  # shared deps deduped
+    assert "pick" in tu and "pair_sum_kind" in tu and "Pair" in tu
+
+
+def test_lift_symbols_reports_missing():
+    tu, _, missing = lift_symbols(_TYPEDEF_SRC, ["pick", "no_such_fn"])
+    assert tu is not None  # the found symbol still lifts
+    assert missing == ["no_such_fn"]
+    tu2, _, missing2 = lift_symbols(_TYPEDEF_SRC, ["nope"])
+    assert tu2 is None and missing2 == ["nope"]
+
+
+# `#if defined(X)` at column 0, with a brace-opening line after it — the SQLite
+# countLeadingZeros regression: `defined(...)` must never read as a function
+# definition (it pulled a 300-line block of unrelated global state).
+_PREPROC_TRAP = """\
+#if defined(SOME_FLAG)
+static struct Big { int x; } huge_state =
+{ 42 };
+#endif
+
+static int clz8(unsigned v) {
+#if defined(__GNUC__) \\
+    && !defined(NO_INTRINSIC)
+  return v ? __builtin_clz(v) - 24 : 8;
+#else
+  int n = 0;
+  while( !(v & 0x80) && n < 8 ){ n++; v <<= 1; }
+  return n;
+#endif
+}
+"""
+
+
+def test_preprocessor_directive_is_never_a_definition_site():
+    assert extract_definition("defined", _PREPROC_TRAP) is None
+
+
+def test_lift_function_with_preprocessor_conditionals():
+    """A function whose body has `#if defined(...)` branches lifts alone — the
+    directive's identifiers don't drag in unrelated file-scope state."""
+    tu, unresolved = lift_symbol(_PREPROC_TRAP, "clz8")
+    assert tu is not None
+    assert "huge_state" not in tu  # the unrelated #if block was not pulled
+    assert "defined" not in unresolved  # preprocessor operator, not a dependency
+
+
+def test_default_shim_defines_no_functions():
+    """The shim provides typedefs/macros only — an unresolved *call* must fail
+    the compile rather than be silently satisfied."""
+    assert "(" not in DEFAULT_SHIM.replace("(x)", "").replace("(void*)0", "")
+    assert "typedef" in DEFAULT_SHIM
+
+
+def test_cli_lift_dry_run(tmp_path):
+    """`cgir rewrite --lang c-rust --c-source big.c --lift fn` — one command:
+    lift, index the lifted TU, and show it as regenerable. No pre-existing
+    index needed."""
+    from typer.testing import CliRunner
+
+    from cgir.cli import app
+
+    big = tmp_path / "big.c"
+    big.write_text(_TYPEDEF_SRC)
+    out_dir = tmp_path / "lifted"
+    result = CliRunner().invoke(
+        app,
+        [
+            "rewrite",
+            "--lang",
+            "c-rust",
+            "--c-source",
+            str(big),
+            "--lift",
+            "pair_sum_kind",
+            "--lift-out",
+            str(out_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "lifted pair_sum_kind" in result.output
+    assert "pair_sum_kind" in result.output and "regenerable" in result.output
+    assert (out_dir / "lifted_big.c").exists()
+
+
+def test_cli_lift_unknown_symbol_fails_cleanly(tmp_path):
+    from typer.testing import CliRunner
+
+    from cgir.cli import app
+
+    big = tmp_path / "big.c"
+    big.write_text(_TYPEDEF_SRC)
+    result = CliRunner().invoke(
+        app,
+        ["rewrite", "--lang", "c-rust", "--c-source", str(big), "--lift", "ghost"],
+    )
+    assert result.exit_code != 0
+    assert "ghost" in result.output
 
 
 def test_lift_pulls_transitive_file_scope_deps():
