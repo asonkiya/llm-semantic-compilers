@@ -790,3 +790,41 @@ packaged-repo wrapper imports, and `list`/tuple/`Optional` params are the
 documented next steps. But the thesis holds: the differential driver never
 reads a source language, so the same core now drives two pairs — C→Rust
 (fuzz-verified) and Python→Rust (replay-verified) — and a third is a binding.
+
+## Linux kernel, more ambitious: crypto primitives (2026-07-24)
+
+Beyond the earlier `lib/` utilities, a compute-heavy target: the kernel's
+`crypto/` + `lib/crypto/` (~185 `.c`). Scan: **2,852 components, 2,376 pure
+(83%)** in ~6s — ciphers and hashes are overwhelmingly pure transforms.
+
+**Liftability (the honest wall, re-confirmed at a harder target).** 48 functions
+have a fuzzable scalar/pointer ABI; a compile-filter against a small kernel-type
+shim lifts only **4/45 standalone**. The other 41 are build-entangled exactly as
+`lib/` was, but more so: they need allocator calls (`kvfree`/`vfree`), request
+contexts (`aead_request_ctx`), globals (`fips_enabled`, `EINPROGRESS`), the
+AES S-box *table* (`subw`), or an incomplete `struct serpent_ctx`. Crypto is
+83% pure but its *extractable* pure-leaf surface is ~9% of the ABI-eligible set.
+
+**The real rewrite.** The two that matter are genuine AES primitives —
+`mul_by_x` / `mul_by_x2` from `lib/crypto/aes.c`, the GF(2⁸) `xtime`/`x²time`
+field arithmetic at the heart of MixColumns (`(x<<1) ^ (y>>7)*0x1b` packed over
+four bytes in a `u32`). Live: **2/2 solved by Haiku for $0.002**,
+differential-verified against the compiled kernel. Haiku's Rust used
+`wrapping_shl`/`wrapping_mul` correctly for the C multiply semantics.
+
+**Speed.** These are hot bit-ops (one `mul_by_x` per column per AES round).
+Benchmarked as compiled dylibs (C `-O2` vs Rust `-O`), dlopen'd, over a
+data-dependent loop:
+
+| primitive | Linux C | Haiku Rust | ratio |
+|---|---|---|---|
+| `mul_by_x`  | 2.312 ns | 2.326 ns | 0.99× |
+| `mul_by_x2` | 2.692 ns | 2.644 ns | 1.02× |
+
+Identical — both compile to the same few instructions. The rewrite is
+verified-equivalent *and* performance-neutral (and there's no FFI tax: unlike
+the Python→Rust ctypes boundary, this is C-ABI-to-C-ABI, the way the kernel
+would actually link it). The honest read: the pipeline correctly and freely
+rewrites the kernel's genuine crypto primitives — the binding constraint stays
+*extractability* (getting self-contained TUs out of the build), not the model
+or correctness or speed.
