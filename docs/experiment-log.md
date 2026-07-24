@@ -902,3 +902,32 @@ table access is a real category the function-level pipeline can't target. The li
 correctly resolves those to the macro (and, asked, pulls the table the macro indexes),
 but a `#define` has nothing to export or verify. The rewritable surface here was the
 GF arithmetic (`xtime`/`Multiply`), which the lifter delivered.
+
+### The lifter on the SQLite amalgamation — 270k lines (2026-07-24)
+
+The real amalgamation test: `sqlite3.c` — **269,613 lines, 9.5 MB, one translation
+unit**. Target `sqlite3VdbeSerialTypeLen(u32 serial_type) -> u32`, a pure scalar leaf
+that indexes the file-scope `sqlite3SmallTypeSizes[128]` table defined ~20 lines above
+it but 67k lines into the file. Lifted (shim = `u8`/`u32` + empty `SQLITE_PRIVATE`/
+`assert`) → 33-line TU with the table tree-shaken in, compiles standalone, and the
+pipeline rewrites it **live for $0.003** (differential-verified vs the compiled C).
+One function, pulled clean out of a quarter-million-line file.
+
+**The bug this scale exposed — global brace-counting is fragile.** The file-scope
+check (is this match a top-level definition or a local variable?) counted net `{`
+depth from offset 0. On 270k lines that count *drifts*: a handful of literal braces —
+`'{'` char literals, `}` inside string literals — escape the comment/string mask, and
+by line 91k the running depth was +3 where it should be 0, so the real definition was
+rejected and the lift returned nothing. Any single unbalanced brace anywhere before
+the target breaks a global count. Fix: decide file-scope **locally** — a top-level C
+definition's line begins at **column 0** (its return type/qualifier is flush-left);
+locals inside a body are indented. `_at_col0` replaces the global `_brace_depth`, needs
+no whole-file accounting, and is exactly how SQLite, the kernel, and tiny-AES all write
+top-level defs. Regression-tested with a source that hides an unbalanced brace in a
+char literal before the target. (Also: `lift_symbol` now masks the source once and
+reuses it across every dependency lookup — re-masking 9.5 MB per dep was the cost;
+2.4 s → 1.5 s.)
+
+This is the lifter's designed use case landing on the canonical target: a single-file
+C amalgamation where a function's only barrier to extraction is a table/helper
+elsewhere *in the same file*.

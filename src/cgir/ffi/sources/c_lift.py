@@ -154,22 +154,29 @@ def _mask_comments(text: str) -> str:
     return "".join(out)
 
 
-def _brace_depth(masked: str, idx: int) -> int:
-    """Net ``{`` nesting depth at ``idx`` in comment/string-masked text — so a
-    match inside a function body (a local variable, not a file-scope definition)
-    is rejected."""
-    return masked.count("{", 0, idx) - masked.count("}", 0, idx)
+def _at_col0(text: str, idx: int) -> bool:
+    """Whether the line containing ``idx`` begins at column 0 with a
+    non-whitespace character — i.e. the definition's return type / qualifier is
+    flush-left. This is how real-world C writes *file-scope* definitions (SQLite,
+    the kernel, tiny-AES all do); locals inside a function body are indented. It
+    replaces a global brace-depth count, which drifts on a 270k-line
+    amalgamation where a handful of literal braces escape the comment mask."""
+    ls = _line_start(text, idx)
+    return ls < len(text) and text[ls] not in " \t"
 
 
-def extract_definition(name: str, text: str) -> str | None:
+def extract_definition(name: str, text: str, masked: str | None = None) -> str | None:
     """The file-scope definition of ``name`` — a ``#define``, a
     ``name[...] = {...};`` table, a ``name = ...;`` const, or a
     ``name(...) {...}`` function — brace-matched, or None. Matching runs against
     a comment/string-masked copy (so uses, and code inside comments, are never
     mistaken for a definition), but the returned text is sliced from the
-    original."""
+    original. ``masked`` may be passed pre-computed (``lift_symbol`` masks the
+    source once and reuses it — masking a 9.5 MB amalgamation per dependency
+    would otherwise dominate)."""
     esc = re.escape(name)
-    masked = _mask_comments(text)
+    if masked is None:
+        masked = _mask_comments(text)
     # object-like macro: `#define name value` (a constant; name NOT immediately
     # followed by `(`). Function-like macros are handled LAST, below, so a real
     # function wins over a `#define name(args) ...` alias for it (the common
@@ -179,7 +186,7 @@ def extract_definition(name: str, text: str) -> str | None:
         return text[m.start() : m.end()]
     # array/table definition: `... name[...] = { ... };`
     for m in re.finditer(rf"(?<![\w.>]){esc}\s*\[[^\]]*\]\s*=\s*", masked):
-        if _brace_depth(masked, m.start()) != 0:
+        if not _at_col0(masked, m.start()):
             continue  # a local array inside a function body, not a file-scope table
         brace = masked.find("{", m.end())
         semi = masked.find(";", m.end())
@@ -193,7 +200,7 @@ def extract_definition(name: str, text: str) -> str | None:
     # use like `getSBoxInvert(num)` doesn't run its param scan on into a later
     # function's `(...) {`.
     for m in re.finditer(rf"(?<![\w.>]){esc}\s*\(", masked):
-        if _brace_depth(masked, m.start()) != 0:
+        if not _at_col0(masked, m.start()):
             continue  # a call nested in a body, not a file-scope definition
         close = _match_parens(masked, masked.index("(", m.end() - 1))
         if close == -1:
@@ -204,7 +211,7 @@ def extract_definition(name: str, text: str) -> str | None:
             return text[_line_start(text, m.start()) : _match_braces(masked, brace)]
     # scalar const: `... name = ...;` at file scope (best-effort, single line)
     for m in re.finditer(rf"(?<![\w.>]){esc}\s*=\s*[^;{{}}]*;", masked):
-        if _brace_depth(masked, m.start()) != 0:
+        if not _at_col0(masked, m.start()):
             continue  # a local variable / assignment inside a function body
         head = masked[_line_start(masked, m.start()) : m.start()]
         if "(" not in head and "return" not in head:  # not an assignment inside a body
@@ -230,7 +237,8 @@ def lift_symbol(source: str, symbol: str, shim: str = "") -> tuple[str | None, l
     transitively references (tables, ``#define``s, consts, helper functions), in
     file order, ending with ``symbol``. Returns (tu_source | None if ``symbol``
     isn't found, sorted unresolved identifiers)."""
-    target = extract_definition(symbol, source)
+    masked = _mask_comments(source)  # mask once; reused for every dependency lookup
+    target = extract_definition(symbol, source, masked)
     if target is None:
         return None, []
     shim_names = set(re.findall(r"\b([A-Za-z_]\w*)\b", shim))
@@ -246,7 +254,7 @@ def lift_symbol(source: str, symbol: str, shim: str = "") -> tuple[str | None, l
         for ref in _referenced_idents(pulled[name]):
             if ref == name or ref in pulled or ref in shim_names:
                 continue
-            d = extract_definition(ref, source)
+            d = extract_definition(ref, source, masked)
             if d is not None:
                 defs_by_name[ref] = d
                 queue.append(ref)

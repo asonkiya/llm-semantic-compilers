@@ -125,6 +125,37 @@ def test_lift_macro_pulls_only_its_real_data_deps():
     assert "consume" not in tu  # the adjacent function is not a dependency
 
 
+# An unbalanced brace hidden in a char/string literal *before* the target — this
+# is what defeats a naive global brace-count on a real amalgamation (SQLite has a
+# handful of literal braces). File-scope is decided by column-0, not by counting,
+# so the table and its reader are still found.
+_BRACE_TRAP = r"""
+static int brace_char = '{';        /* a lone '{' in a char literal */
+static const char *j = "unbalanced } brace in a string {{{";
+
+static const int sizes[4] = { 10, 20, 30, 40 };
+
+static int size_of(int i) {
+    int local_arr[2] = { 1, 2 };    /* a local, indented array — must NOT lift */
+    return sizes[i] + local_arr[0];
+}
+"""
+
+
+def test_file_scope_survives_unbalanced_braces_in_literals():
+    d = extract_definition("size_of", _BRACE_TRAP)
+    assert d is not None and d.startswith("static int size_of(int i)")
+    tu, _ = lift_symbol(_BRACE_TRAP, "size_of")
+    assert tu is not None
+    assert "sizes[4] =" in tu  # the file-scope table is pulled despite the trap
+
+
+def test_local_indented_array_is_not_hoisted():
+    """`local_arr` is an indented array inside a body — extracting it must fail
+    (it is not a file-scope definition), even though its shape matches a table."""
+    assert extract_definition("local_arr", _BRACE_TRAP) is None
+
+
 def test_lift_pulls_transitive_file_scope_deps():
     tu, unresolved = lift_symbol(_SRC, "target")
     assert tu is not None
