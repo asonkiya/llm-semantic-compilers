@@ -81,6 +81,50 @@ def test_extract_absent_symbol_is_none():
     assert extract_definition("nonexistent", _SRC) is None
 
 
+# A function-like macro immediately followed by a real function — the tiny-AES-c
+# idiom (`#define getSBoxValue(num) (sbox[(num)])` then `KeyExpansion`). The
+# macro's param list must not run on into the next function's `(...) {`.
+_MACRO_THEN_FN = """\
+static const unsigned char tbl[4] = { 9, 8, 7, 6 };
+
+#define lookup(i) (tbl[(i)])
+
+/* a comment between them */
+static unsigned consume(unsigned n) {
+    unsigned s = 0;
+    for (unsigned i = 0; i < n; i++) s += lookup(i);
+    return s;
+}
+"""
+
+
+def test_extract_function_like_macro_does_not_overgrab_next_function():
+    d = extract_definition("lookup", _MACRO_THEN_FN)
+    assert d is not None
+    assert d.strip() == "#define lookup(i) (tbl[(i)])"  # exactly the macro, one line
+    assert "consume" not in d  # not the adjacent function
+
+
+def test_extract_prefers_real_function_over_a_commented_out_one():
+    """A commented-out function beside its macro: the macro is the definition."""
+    src = (
+        "#define getval(x) ((x) + 1)\n"
+        "/*\nstatic int getval(int x) { return x + 1; }\n*/\n"
+        "int use(int y) { return getval(y); }\n"
+    )
+    d = extract_definition("getval", src)
+    assert d is not None and d.strip() == "#define getval(x) ((x) + 1)"
+
+
+def test_lift_macro_pulls_only_its_real_data_deps():
+    """Lifting the macro pulls the table it reads, not the unrelated function
+    that happens to sit next to it in the file."""
+    tu, _ = lift_symbol(_MACRO_THEN_FN, "lookup")
+    assert tu is not None
+    assert "tbl[4] =" in tu  # the table the macro indexes
+    assert "consume" not in tu  # the adjacent function is not a dependency
+
+
 def test_lift_pulls_transitive_file_scope_deps():
     tu, unresolved = lift_symbol(_SRC, "target")
     assert tu is not None

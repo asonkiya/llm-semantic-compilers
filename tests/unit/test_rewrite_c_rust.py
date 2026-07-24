@@ -57,6 +57,11 @@ static int strlen_c(const char *z) {
   while (z[n]) n++;
   return n;
 }
+
+#include <stdint.h>
+static uint8_t gf_double(uint8_t x) {
+  return (uint8_t)((x << 1) ^ (((x >> 7) & 1) * 0x1b));
+}
 """
 
 
@@ -90,6 +95,16 @@ def test_worklist_scalar_only(tmp_path: Path) -> None:
     names = {e.name for e in entries}
     assert "abs32" in names and "add_mod" in names
     assert "strlen_c" not in names  # pointer param, pointers=False
+
+
+def test_worklist_accepts_stdint_types(tmp_path: Path) -> None:
+    """C99 <stdint.h> spellings (uint8_t/…) — what single-file userspace
+    libraries use — parse and map to the right fixed-width Rust scalar."""
+    repo, idx = _index(tmp_path)
+    entries, _ = c_rust_worklist(idx, repo / "unit.c", pointers=False)
+    e = next(e for e in entries if e.name == "gf_double")
+    assert e.params == [("uint8_t", "x")] and e.ret == "uint8_t"
+    assert 'pub extern "C" fn gf_double(x: u8) -> u8' in rust_signature(e)
 
 
 def test_worklist_pointers_opt_in(tmp_path: Path) -> None:

@@ -860,3 +860,45 @@ inside `mul_by_x`) as if they were file-scope consts and hoisted them out —
 where `w` is undefined — *regressing* two baseline lifts. Fixed with a
 comment/string-aware brace-depth check: only depth-0 matches are definitions.
 5/45 with zero regressions is the post-fix number.
+
+### The lifter on a real single-file userspace library — tiny-AES-c (2026-07-24)
+
+The kernel finding was that the lifter's leverage is *userspace* single-file
+libraries, so: tiny-AES-c (`aes.c`, 572 lines — one S-box `sbox[256]`, an inverse
+`rsbox[256]`, the `Rcon` table, and the AES round functions). Running the lifter
+against real, non-kernel C surfaced three concrete gaps — each fixed, each tested —
+before it produced a live rewrite:
+
+1. **stdint types.** The C ABI parser (`ffi/sources/c.py` `SCALAR_RE`) knew kernel
+   spellings (`u8`/`u32`) but not C99 `<stdint.h>` (`uint8_t`/`uint32_t`) — which is
+   what essentially *every* userspace single-file library uses. So the pipeline
+   rejected all of tiny-AES as "not scalar-parseable". Added the fixed-width types to
+   `SCALAR_RE` and to `TYPE_MAP` (`uint8_t→(u8,c_ubyte)`, …); the fuzz harness already
+   emitted `uint8_t` via `_C_INFO`, so only parse + Rust-mapping were missing.
+2. **Definitions inside comments.** `extract_definition`'s function/table/scalar
+   branches matched code *inside* `/* */` — tiny-AES ships commented-out reference
+   implementations right beside the macros that replace them. Fixed by running all
+   matching against a comment/string-masked copy (offsets preserved; returned text
+   sliced from the original).
+3. **Function-like-macro over-grab.** tiny-AES defines `getSBoxValue`/`Multiply` as
+   *both* a `#define name(args) …` and (under `#if`/commented) a function. The
+   function-def regex used `[^;{}]*` for the parameter list, which for the macro *use*
+   `getSBoxValue(num)` ran on across newlines into the **next** function's `(...) {` —
+   swallowing an unrelated function. Fixed with real paren-balancing (`_match_parens`)
+   and requiring `{` immediately after the matched `)`; and the `#define` handling now
+   prefers a real function over a function-like-macro alias for it (the common
+   optional-inline idiom), matching what the tree-sitter adapter sees.
+
+**Live result:** `Multiply` (the GF(2⁸) multiply) lifted *together with* the `xtime`
+helper it calls, and `xtime` itself — both rewritten to Rust and differential-verified
+against the compiled C, **2/2 for $0.002** (`--non-leaf`, dependency-ordered: `xtime`
+first, then `Multiply` calling the Rust `xtime` via `extern "C"`). This is the
+userspace *helper-dependency* analog of the kernel's table case.
+
+**Honest limit this library also showed:** tiny-AES does its actual S-box lookups
+through **macros** (`#define getSBoxValue(num) (sbox[(num)])`), not functions — so
+there is no function ABI to rewrite for the table reads, lifter or not. Macro-based
+table access is a real category the function-level pipeline can't target. The lifter
+correctly resolves those to the macro (and, asked, pulls the table the macro indexes),
+but a `#define` has nothing to export or verify. The rewritable surface here was the
+GF arithmetic (`xtime`/`Multiply`), which the lifter delivered.

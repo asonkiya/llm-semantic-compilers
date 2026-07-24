@@ -72,6 +72,17 @@ _KEYWORDS = frozenset(
         "s64",
         "size_t",
         "bool",
+        # preprocessor directive keywords — never a referenced symbol
+        "define",
+        "undef",
+        "include",
+        "ifdef",
+        "ifndef",
+        "endif",
+        "elif",
+        "pragma",
+        "error",
+        "line",
     ]
 )
 
@@ -89,77 +100,129 @@ def _match_braces(text: str, open_idx: int) -> int:
     return len(text)
 
 
+def _match_parens(text: str, open_idx: int) -> int:
+    """Index just past the ``)`` matching the ``(`` at ``open_idx`` (or -1)."""
+    depth = 0
+    for i in range(open_idx, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return -1
+
+
 def _line_start(text: str, idx: int) -> int:
     nl = text.rfind("\n", 0, idx)
     return nl + 1 if nl != -1 else 0
 
 
-def _brace_depth(text: str, idx: int) -> int:
-    """Net ``{`` nesting depth at ``idx``, skipping braces inside ``//`` and
-    ``/* */`` comments and string/char literals — so a match inside a function
-    body (a local variable, not a file-scope definition) is rejected."""
-    depth = i = 0
-    n = len(text)
-    while i < idx and i < n:
+def _mask_comments(text: str) -> str:
+    """``text`` with ``//`` and ``/* */`` comments and string/char literals
+    replaced by same-length runs of spaces (newlines kept). Offsets are
+    preserved, so matches found in the mask slice correctly from the original —
+    and a definition that only appears *inside a comment* (a commented-out
+    function, common in real single-file libraries) never matches."""
+    out = list(text)
+    i, n = 0, len(text)
+    while i < n:
         c = text[i]
         if c == "/" and i + 1 < n and text[i + 1] == "/":
-            nl = text.find("\n", i)
-            i = n if nl == -1 else nl
+            end = text.find("\n", i)
+            end = n if end == -1 else end
+            for j in range(i, end):
+                out[j] = " "
+            i = end
         elif c == "/" and i + 1 < n and text[i + 1] == "*":
             end = text.find("*/", i + 2)
-            i = n if end == -1 else end + 2
+            end = n if end == -1 else end + 2
+            for j in range(i, end):
+                if out[j] != "\n":
+                    out[j] = " "
+            i = end
         elif c in "\"'":
-            i += 1
-            while i < n and text[i] != c:
-                i += 2 if text[i] == "\\" else 1
-            i += 1
+            j = i + 1
+            while j < n and text[j] != c:
+                j += 2 if text[j] == "\\" else 1
+            for k in range(i, min(j + 1, n)):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j + 1
         else:
-            if c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
             i += 1
-    return depth
+    return "".join(out)
+
+
+def _brace_depth(masked: str, idx: int) -> int:
+    """Net ``{`` nesting depth at ``idx`` in comment/string-masked text — so a
+    match inside a function body (a local variable, not a file-scope definition)
+    is rejected."""
+    return masked.count("{", 0, idx) - masked.count("}", 0, idx)
 
 
 def extract_definition(name: str, text: str) -> str | None:
     """The file-scope definition of ``name`` — a ``#define``, a
     ``name[...] = {...};`` table, a ``name = ...;`` const, or a
-    ``name(...) {...}`` function — brace-matched, or None. Uses (``name[i]``,
-    ``name()`` calls) are skipped: only a definition shape matches."""
+    ``name(...) {...}`` function — brace-matched, or None. Matching runs against
+    a comment/string-masked copy (so uses, and code inside comments, are never
+    mistaken for a definition), but the returned text is sliced from the
+    original."""
     esc = re.escape(name)
-    # #define name ...   (with line continuations)
-    m = re.search(rf"^[ \t]*#[ \t]*define[ \t]+{esc}\b.*(?:\\\n.*)*", text, re.M)
+    masked = _mask_comments(text)
+    # object-like macro: `#define name value` (a constant; name NOT immediately
+    # followed by `(`). Function-like macros are handled LAST, below, so a real
+    # function wins over a `#define name(args) ...` alias for it (the common
+    # optional-inline idiom, e.g. tiny-AES `Multiply`/`getSBoxValue`).
+    m = re.search(rf"^[ \t]*#[ \t]*define[ \t]+{esc}(?=[ \t]).*(?:\\\n.*)*", masked, re.M)
     if m:
         return text[m.start() : m.end()]
     # array/table definition: `... name[...] = { ... };`
-    for m in re.finditer(rf"(?<![\w.>]){esc}\s*\[[^\]]*\]\s*=\s*", text):
-        if _brace_depth(text, m.start()) != 0:
+    for m in re.finditer(rf"(?<![\w.>]){esc}\s*\[[^\]]*\]\s*=\s*", masked):
+        if _brace_depth(masked, m.start()) != 0:
             continue  # a local array inside a function body, not a file-scope table
-        brace = text.find("{", m.end())
-        semi = text.find(";", m.end())
+        brace = masked.find("{", m.end())
+        semi = masked.find(";", m.end())
         if brace != -1 and (semi == -1 or brace < semi):
-            end = _match_braces(text, brace)
-            end = text.find(";", end) + 1 if text[end : text.find(";", end)].strip() == "" else end
+            end = _match_braces(masked, brace)
+            nsemi = masked.find(";", end)
+            end = nsemi + 1 if masked[end:nsemi].strip() == "" else end
             return text[_line_start(text, m.start()) : end]
-    # function definition: `... name(...) { ... }` (not a call/prototype)
-    for m in re.finditer(rf"(?<![\w.>]){esc}\s*\([^;{{}}]*\)\s*\{{", text):
-        if _brace_depth(text, m.start()) != 0:
-            continue  # a call/definition nested in a body, not a file-scope function
-        brace = text.index("{", m.end() - 1)
-        return text[_line_start(text, m.start()) : _match_braces(text, brace)]
+    # function definition: `name(params) {` where the `{` follows the *matched*
+    # close paren directly (only whitespace between). Paren-balanced — so a macro
+    # use like `getSBoxInvert(num)` doesn't run its param scan on into a later
+    # function's `(...) {`.
+    for m in re.finditer(rf"(?<![\w.>]){esc}\s*\(", masked):
+        if _brace_depth(masked, m.start()) != 0:
+            continue  # a call nested in a body, not a file-scope definition
+        close = _match_parens(masked, masked.index("(", m.end() - 1))
+        if close == -1:
+            continue
+        rest = masked[close:]
+        if re.match(r"\s*\{", rest):
+            brace = masked.index("{", close)
+            return text[_line_start(text, m.start()) : _match_braces(masked, brace)]
     # scalar const: `... name = ...;` at file scope (best-effort, single line)
-    for m in re.finditer(rf"(?<![\w.>]){esc}\s*=\s*[^;{{}}]*;", text):
-        if _brace_depth(text, m.start()) != 0:
+    for m in re.finditer(rf"(?<![\w.>]){esc}\s*=\s*[^;{{}}]*;", masked):
+        if _brace_depth(masked, m.start()) != 0:
             continue  # a local variable / assignment inside a function body
-        head = text[_line_start(text, m.start()) : m.start()]
+        head = masked[_line_start(masked, m.start()) : m.start()]
         if "(" not in head and "return" not in head:  # not an assignment inside a body
             return text[_line_start(text, m.start()) : m.end()]
+    # function-like macro: `#define name(args) body` — only reached if no real
+    # function of this name exists (it's then the active definition, e.g. a
+    # commented-out function beside its macro).
+    m = re.search(rf"^[ \t]*#[ \t]*define[ \t]+{esc}\(.*(?:\\\n.*)*", masked, re.M)
+    if m:
+        return text[m.start() : m.end()]
     return None
 
 
 def _referenced_idents(body: str) -> set[str]:
-    return {w for w in re.findall(r"\b([A-Za-z_]\w*)\b", body) if w not in _KEYWORDS}
+    """Identifiers referenced in ``body`` (a definition), ignoring C keywords and
+    tokens that appear only in comments/strings — those aren't real dependencies."""
+    code = _mask_comments(body)
+    return {w for w in re.findall(r"\b([A-Za-z_]\w*)\b", code) if w not in _KEYWORDS}
 
 
 def lift_symbol(source: str, symbol: str, shim: str = "") -> tuple[str | None, list[str]]:

@@ -18,7 +18,11 @@ from cgir.ffi.targets.rust import _build_rust_staticlib, extern_block
 
 SCALAR_RE = (
     r"(?:const\s+)?(?:unsigned\s+|signed\s+)?"
-    r"(?:void|int|double|float|char|short|long(?:\s+long)?|"
+    # C99 <stdint.h> fixed-width types first (longest-match; what single-file
+    # userspace libraries overwhelmingly use), then C builtins and the kernel /
+    # sqlite spellings.
+    r"(?:uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t|size_t|"
+    r"void|int|double|float|char|short|long(?:\s+long)?|"
     r"u8|u16|u32|u64|i8|i16|i32|i64|sqlite3_u?int64|sqlite_u?int64|"
     r"LogEst|tRowcnt|Bool)"
 )
