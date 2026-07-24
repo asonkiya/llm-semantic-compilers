@@ -45,6 +45,21 @@ tuples as `#[repr(C)]` returns), not by the parser missing things. The eligible
 leaves are a real, if narrow, slice — and each is cheap to rewrite and
 mechanically verifiable.
 
+### Update: value-self methods (231 → 301, 0.87% → 1.14%)
+
+Methods were the single biggest excluded bucket, so `python-rust` now handles the
+addressable subset: a pure method that only *reads* scalar/str/bytes fields of
+`self` is a pure function of those fields (`def area(self) -> int: return self.w *
+self.h` → `fn area(w: i64, h: i64) -> i64`), and a method that ignores `self` but
+takes params is a function of those params. Across the 26 repos this lifts
+eligible from **231 to 301 (+30%)**. It's an honest, bounded gain — the remaining
+~16k methods stay out for real reasons: they **call other methods** (4,659 — not
+pure field reads), read **un-annotated** `__init__`-set fields (thousands — a v2:
+infer field types from captured `self` values instead of class-body annotations),
+or are **`@property`/classmethods** (decorated / `cls`). The lever moved the
+number, but it also showed the next lever is *field-annotation coverage*, not the
+method machinery.
+
 ## Bug found by the sweep
 
 `parse_signature` matched only `ast.FunctionDef`, so **370 `async def` functions**

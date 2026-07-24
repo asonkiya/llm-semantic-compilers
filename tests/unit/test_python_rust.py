@@ -141,7 +141,10 @@ def test_method_eligibility_and_rejections() -> None:
     )
     assert "used as a value" in rej(c.format("id(self)"), {"x": "int"})
     assert "not an annotated class field" in rej(c.format("self.y"), {"x": "int"})
-    assert "reads no fields" in rej(c.format("42"), {"x": "int"})
+    assert "neither self's fields nor any parameter" in rej(c.format("42"), {"x": "int"})
+    # a method that ignores self but takes a param IS eligible (function of the param)
+    sig2, r2 = parse_signature("class C:\n  def f(self, x: int) -> int: return x * 2\n", "f", {})
+    assert r2 == "" and [(p.name, p.from_self) for p in sig2.params] == [("x", False)]
     assert "class field annotations unavailable" in rej(c.format("self.x"), None)
     assert "classmethod" in rej("class C:\n  def f(cls) -> int: return 1\n", {})
 

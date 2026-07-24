@@ -159,8 +159,8 @@ def parse_signature(
         fields, reason = _self_field_reads(fn, "self")
         if reason:
             return None, reason
-        if not fields:
-            return None, "method reads no fields of self (nothing to pass)"
+        # `fields` may be empty — a method that ignores self is a pure function
+        # of its explicit params (the final check rejects only if it has neither).
         for fname in sorted(fields):
             if fname not in class_fields:
                 return None, f"self.{fname} is not an annotated class field"
@@ -182,6 +182,9 @@ def parse_signature(
         if p is None:
             return None, f"param `{arg.arg}`: {err}"
         explicit.append(p)
+
+    if self_param and not from_self and not explicit:
+        return None, "method uses neither self's fields nor any parameter"
 
     if fn.returns is None:
         return None, "return type annotation missing"
