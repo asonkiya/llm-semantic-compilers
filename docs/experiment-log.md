@@ -1057,3 +1057,46 @@ and a *verified-rewritable* surface of ~10. The ceiling is the struct-context AB
 the model, the lifter, or the shim — and closing it means teaching the differential to
 construct valid cipher contexts (`--structs` + per-cipher layouts), which is the next
 real lever if the kernel is the target.
+
+### `--structs` on the kernel: measure the struct wall directly (2026-07-24)
+
+The previous sweep *excluded* struct-pointer functions; `--structs` admits them (the
+worklist supplies each function's in-file-extracted `struct_defs` to the compile, so a
+function counts compilable iff its layout is in-file-resolvable). Across `crypto/` +
+`lib/crypto/` (216 files):
+
+| | `--pointers` | `+ --structs` |
+|---|---|---|
+| eligible functions | 89 | **734** |
+| of which struct-ptr | 0 | **618** |
+| lift-compilable | 10 | **35** |
+
+Admitting struct ABIs is **8×** the eligible surface (struct-context is 84% of it),
+and lifting+layouts takes compilable **10 → 35 (+25)**. The unlocks are *real crypto
+compute*, not glue: the entire ECC big-integer `vli_*` suite (`vli_cmp`, `vli_num_bits`,
+`vli_test_bit`, `vli_from_le64`, …) and the **Twofish key schedule** (`__twofish_setkey`).
+But 583 of the 618 struct functions still don't compile — their barrier is the kernel's
+deep type/API web (`container_of`, `IS_ERR`, `__percpu`, `CRYPTO_ALG_TYPE_*`, request
+chains), which lives in headers and is *not* faked by the shim. Lifting adds +6 over
+the layouts+shim; the struct wall is real, and ~5% of it is in-file-resolvable.
+
+**A bug `--structs` surfaced (fixed + regression-tested).** `vli_cmp(const u64 *left,
+…)` parses as `struct:u64` — `u64 *` isn't a byte-pointer element, so it's treated as a
+struct pointer. But there's no `struct u64` to extract, so `struct_defs` was empty, and
+`gate_only` was defined as `bool(struct_defs)` → **False** → the isolated differential
+ran and **KeyError'd** on the `struct:u64` param it has no input-codegen for. Fix:
+`gate_only` is now *any* struct-typed param, not "we extracted a layout" — a struct
+param can't be byte-fuzzed whether or not we have its definition. `vli_cmp` now lifts,
+rewrites, and returns cleanly **gate-required** ($0.0014) instead of crashing:
+
+```
+cgir rewrite --lang c-rust --c-source ecc.c --lift vli_cmp \
+    --lift-shim benchmarks/kernel_shim.h --structs --live
+→ solved 1/1 (1 gate-required — not differential-verified, need --gate)
+```
+
+That "gate-required" is the honest verification state for struct functions: the
+isolated byte-fuzzer can't build a valid `vli`/`ctx` instance, so behavioral proof
+needs the whole-program gate (`--apply --gate-build/--gate-run`) on real instances —
+exactly the "next lever" the prior entry named, now with the sweep number attached
+(35 compilable, gate-verifiable; behavioral verification still gated).

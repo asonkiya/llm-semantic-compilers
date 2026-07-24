@@ -76,22 +76,35 @@ def sweep_file(
     workdir: Path,
     pointers: bool,
     non_leaf: bool,
+    structs: bool,
     tu_dir: Path | None,
 ) -> dict:
-    """Sweep one .c file: worklist -> per-function baseline vs lifted compile."""
+    """Sweep one .c file: worklist -> per-function baseline vs lifted compile.
+
+    With ``structs``, single-level struct-pointer functions are included and the
+    worklist's extracted struct layouts (``entry.struct_defs`` — what the real
+    pipeline prepends) are fed into the compile as extra shim, so a function is
+    counted compilable iff its struct context is in-file-resolvable."""
     src_text = source.read_text(errors="replace")
-    entries, excluded = c_rust_worklist(index, source, pointers=pointers, include_nonleaf=non_leaf)
+    entries, excluded = c_rust_worklist(
+        index, source, pointers=pointers, include_nonleaf=non_leaf, structs=structs
+    )
     masked = _mask_comments(src_text)
     cache: dict[str, str | None] = {}
     rows = []
     for e in entries:
+        # struct-pointer functions need their layout; hand the worklist's
+        # extracted defs to both baseline and lifted so the delta isolates
+        # lifting's table/helper contribution, not the struct context.
+        struct_ctx = "\n\n".join(e.struct_defs[k] for k in sorted(e.struct_defs))
+        e_shim = shim + ("\n\n" + struct_ctx if struct_ctx else "")
         d = extract_definition(e.name, src_text, masked)
         base_ok, _ = (
-            _compiles(shim + "\n" + d + "\n", workdir, f"base_{source.stem}_{e.name}")
+            _compiles(e_shim + "\n" + d + "\n", workdir, f"base_{source.stem}_{e.name}")
             if d
             else (False, "")
         )
-        tu, unresolved = lift_symbol(src_text, e.name, shim=shim, masked=masked, cache=cache)
+        tu, unresolved = lift_symbol(src_text, e.name, shim=e_shim, masked=masked, cache=cache)
         lift_ok, lift_err = (
             _compiles(tu, workdir, f"lift_{source.stem}_{e.name}")
             if tu
@@ -105,6 +118,7 @@ def sweep_file(
                 "name": e.name,
                 "ret": e.ret,
                 "params": e.params,
+                "is_struct": bool(e.struct_defs),
                 "baseline_ok": base_ok,
                 "lifted_ok": lift_ok,
                 "tu_lines": len(tu.splitlines()) if tu else 0,
@@ -131,6 +145,13 @@ def main() -> int:
     ap.add_argument(
         "--pointers", action="store_true", help="include char*/byte-buffer pointer ABIs"
     )
+    ap.add_argument(
+        "--structs",
+        action="store_true",
+        help="include single-level struct-pointer ABIs (the worklist's struct layouts "
+        "are supplied to the compile; measures how much of the struct wall is "
+        "in-file-resolvable)",
+    )
     args = ap.parse_args()
     if not (args.source or args.source_dir):
         ap.error("one of --source or --source-dir is required")
@@ -156,7 +177,9 @@ def main() -> int:
     t0 = time.time()
     for i, f in enumerate(files):
         try:
-            r = sweep_file(f, index, shim, workdir, args.pointers, args.non_leaf, args.tu_dir)
+            r = sweep_file(
+                f, index, shim, workdir, args.pointers, args.non_leaf, args.structs, args.tu_dir
+            )
         except Exception as exc:  # a single unparseable file must not sink the sweep
             print(f"  ! {f.name}: {type(exc).__name__}: {exc}", flush=True)
             continue
@@ -193,13 +216,17 @@ def main() -> int:
         args.out.write_text(json.dumps(report, indent=1))
 
     label = str(args.source_dir) if args.source_dir else args.source.name
-    abi = "scalar/pointer-ABI" if args.pointers else "scalar-ABI"
+    abi = "scalar" + ("/pointer" if args.pointers else "") + ("/struct" if args.structs else "")
+    n_struct = sum(x.get("is_struct", False) for x in rows)
+    n_struct_lift = sum(x.get("is_struct", False) and x["lifted_ok"] for x in rows)
     print(f"\n=== sweep: {label} ({len(files)} file(s)) ===")
-    print(f"{abi} pure functions : {len(rows)}")
+    print(f"{abi}-ABI pure functions : {len(rows)}")
     print(f"baseline compilable       : {baseline_ok}")
     print(f"lifted compilable         : {lifted_ok}")
     print(f"newly unlocked by lifting : {len(newly)}")
     print(f"regressed by lifting      : {len(regressed)}  {regressed[:8]}")
+    if args.structs:
+        print(f"struct-ptr functions      : {n_struct}  (lift-compilable: {n_struct_lift})")
     return 0
 
 

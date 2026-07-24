@@ -172,7 +172,13 @@ class CEntry:
 
     @property
     def gate_only(self) -> bool:
-        return bool(self.struct_defs)
+        # Any struct-typed param makes a function gate-only: the isolated
+        # byte-fuzzer can't construct a valid instance to pass, and the
+        # differential's input generator has no codegen for a `struct:` type.
+        # True even when `struct_defs` is empty (the pointee is external or a
+        # non-struct like `u64 *` parsed as `struct:u64`) — we just couldn't
+        # give the model a layout to mirror; it stays gate-verified either way.
+        return any(t.startswith("struct:") for t, _ in self.params)
 
 
 # Forward-looking name; CEntry retained everywhere for compatibility.

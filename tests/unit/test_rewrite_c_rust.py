@@ -312,6 +312,23 @@ def test_struct_worklist_opt_in_and_gate_only(tmp_path: Path) -> None:
     assert "int y" in e.struct_defs["Ymd"]
 
 
+def test_struct_param_is_gate_only_even_without_extracted_layout() -> None:
+    """A struct-typed param makes a function gate-only regardless of whether we
+    extracted its layout. `u64 *` parses as `struct:u64` with no `struct u64`
+    def in the file (struct_defs empty) — it must still skip the isolated
+    differential (whose input generator has no codegen for a struct type) rather
+    than reach it and KeyError. Regression for the ecc.c vli_* crash."""
+    e = CEntry(
+        "m.vli_cmp",
+        "vli_cmp",
+        "int",
+        [("struct:u64:const", "left"), ("struct:u64:const", "right"), ("unsigned int", "n")],
+        "int vli_cmp(const u64 *left, const u64 *right, unsigned int n){...}",
+    )
+    assert not e.struct_defs  # no `struct u64` layout was (or could be) extracted
+    assert e.gate_only is True  # ...but it's still gate-only, not differential-fuzzed
+
+
 def test_struct_signature_and_repr_c_prompt() -> None:
     e = CEntry(
         "m.day_number",
