@@ -17,6 +17,7 @@ from cgir.ffi.ir import Param, Signature
 from cgir.ffi.replay_ffi import (
     _run_batches,
     replay_against_dylib,
+    usable_traces,
     validate_traces,
 )
 
@@ -228,3 +229,20 @@ def test_validation_accepts_str_subclasses() -> None:
 def test_empty_traces_report_honestly() -> None:
     verdict = replay_against_dylib(Path("/nonexistent.dylib"), "f", sig("i64", ret="i64"), [])
     assert verdict == "replay: no captured traces to replay"
+
+
+def test_usable_traces_drops_bad_keeps_good():
+    """A -> int helper that returns None on its error inputs (doctest Traceback
+    cases) stays verifiable on the inputs where it returns a real int."""
+    s = sig("i64", ret="i64")
+    traces = [((100,), 9), ((0,), None), ((-10,), None), ((6,), 4)]
+    good = usable_traces(s, traces)
+    assert good == [((100,), 9), ((6,), 4)]  # None-result traces dropped
+    # the strict validator still reports the first offender (for the dry-run msg)
+    assert "result" in validate_traces(s, traces)
+
+
+def test_usable_traces_all_good_is_identity():
+    s = sig("i64", ret="i64")
+    traces = [((1,), 1), ((2,), 3)]
+    assert usable_traces(s, traces) == traces

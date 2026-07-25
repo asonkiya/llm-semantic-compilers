@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from cgir.ffi.driver import exported_symbols
-from cgir.ffi.replay_ffi import Trace, replay_against_dylib, validate_traces
+from cgir.ffi.replay_ffi import Trace, replay_against_dylib, usable_traces, validate_traces
 from cgir.ffi.sources.python import PyEntry, python_rust_worklist
 from cgir.ffi.targets.rust import (
     RUSTBUF_PRELUDE,
@@ -205,16 +205,24 @@ def run_python_rust(
         if not t:
             excluded.append((e.component_id, "no captured traces"))
             continue
-        reason = validate_traces(e.sig, t)
-        if reason:
-            excluded.append((e.component_id, reason))
+        # Drop individually-unrepresentable traces (e.g. a `-> int` helper that
+        # returns None on its documented error inputs) rather than disqualifying
+        # the whole function; verify the Rust on the inputs that do cross the FFI.
+        usable = usable_traces(e.sig, t)
+        if not usable:
+            excluded.append((e.component_id, validate_traces(e.sig, t) or "no representable traces"))
             continue
-        if len(t) < min_traces:
+        if len(usable) < min_traces:
+            dropped = len(t) - len(usable)
+            extra = f"; {dropped} out-of-contract dropped" if dropped else ""
             excluded.append(
-                (e.component_id, f"only {len(t)} distinct inputs (< min-traces {min_traces})")
+                (
+                    e.component_id,
+                    f"only {len(usable)} representable inputs (< min-traces {min_traces}){extra}",
+                )
             )
             continue
-        prepared[e.component_id] = t
+        prepared[e.component_id] = usable
         verifiable.append(e)
 
     counter = {"n": 0}

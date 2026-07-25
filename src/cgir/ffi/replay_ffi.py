@@ -104,9 +104,10 @@ def _check_value(kind: str, v: Any) -> str:
 
 def validate_traces(sig: Signature, traces: list[Trace]) -> str:
     """ "" when every recorded (args, result) can soundly cross the FFI;
-    otherwise the reason. A violation marks the whole FUNCTION out of scope,
-    not just the offending trace — the Python original demonstrably handles
-    values the Rust version cannot even be handed."""
+    otherwise the reason for the first offending trace (a dry-run diagnostic).
+    The live path filters with :func:`usable_traces` instead, so one
+    out-of-contract recording doesn't disqualify an otherwise-verifiable
+    function."""
     if sig.ret == "void":
         return "traces unusable: void/None return is out of scope for v1"
     kinds, ret = _kinds(sig)
@@ -121,6 +122,28 @@ def validate_traces(sig: Signature, traces: list[Trace]) -> str:
         if err:
             return f"traces unusable: trace #{i} result: {err}"
     return ""
+
+
+def usable_traces(sig: Signature, traces: list[Trace]) -> list[Trace]:
+    """The subset of ``traces`` that can soundly cross the FFI — dropping the
+    rest instead of disqualifying the whole function. A ``-> int`` helper that
+    returns ``None`` on its documented error inputs (a common shape: doctests
+    with ``Traceback`` cases) is still verifiable on the inputs where it returns
+    a representable value, and the Rust rewrite is then verified exactly on
+    those. ``void``/None-return functions have no usable traces (out of scope)."""
+    if sig.ret == "void":
+        return []
+    kinds, ret = _kinds(sig)
+    out: list[Trace] = []
+    for args, expected in traces:
+        if len(args) != len(kinds):
+            continue
+        if any(_check_value(kind, v) for kind, v in zip(kinds, args, strict=True)):
+            continue
+        if _check_value(ret, expected):
+            continue
+        out.append((args, expected))
+    return out
 
 
 def _fmt_args(args: tuple[Any, ...]) -> str:
