@@ -15,6 +15,17 @@ from pathlib import Path
 
 from cgir.ffi.ir import _C_INFO, TYPE_MAP, CEntry
 
+# The driver self-terminates via alarm() after this many seconds — below the
+# Python-side subprocess timeout (120s), so in the normal slow-candidate case
+# the child exits first and the parent wakes on the exit event. This is the
+# layer that holds when the Python timeout doesn't: a candidate mass-writing
+# through a wild pointer (fuzzed size params run to 2^31) can put the child in
+# a page-fault storm where SIGKILL delivery — and with it subprocess.run's
+# post-timeout wait() — stalls, wedging the whole run (seen live: a battery
+# blocked 11+ min on a driver whose run() had timeout=120). SIGALRM is raised
+# in-kernel by the child's own timer, needing nothing from the parent.
+DRIVER_ALARM_S = 90
+
 
 def exported_symbols(dylib: Path, names: list[str]) -> set[str]:
     import ctypes
@@ -108,6 +119,7 @@ def _driver_source(e: CEntry) -> str:
 #include <setjmp.h>
 #include <signal.h>
 #include <math.h>
+#include <unistd.h>
 
 #define BUFSZ 4096
 typedef {ret_c} (*fn_t)({sig});
@@ -165,6 +177,10 @@ static void fill_str(uint8_t* b) {{
 
 int main(int argc, char** argv) {{
     if (argc < 5) return 2;
+    /* Hard self-deadline: SIGALRM (default action) if the fuzz loop is still
+       running — e.g. a candidate writing 2^31 bytes through a small buffer,
+       trial after trial. Deliberately NOT trapped by install_handlers. */
+    alarm({DRIVER_ALARM_S});
     long n = atol(argv[3]);
     S = strtoull(argv[4], 0, 10);
     /* GLOBAL so the oracle's de-static'd symbols satisfy a non-leaf
@@ -240,6 +256,12 @@ def differential(orig: Path, cand: Path, e: CEntry, n: int, seed: int) -> str:
         # strcmp that walks past a non-NUL-terminated buffer) is a rejection,
         # not a crash of the whole run — the loop escalates or moves on.
         return "differential: candidate timed out (likely non-terminating on some input)"
+    if run.returncode == -14:  # SIGALRM: the driver's own alarm() deadline fired
+        return (
+            f"differential: candidate timed out (driver self-terminated after "
+            f"{DRIVER_ALARM_S}s — likely non-terminating or pathologically slow "
+            f"on fuzzed inputs)"
+        )
     if run.returncode != 0:
         return f"differential: driver died (rc={run.returncode})"
     v = json.loads(run.stdout.strip().splitlines()[-1])
