@@ -62,5 +62,20 @@ and fails the check on divergence.
   total equivalence. It is exactly as strong as your test suite, plus a margin —
   and it says so.
 
-Python today (the replay oracle is language-neutral in principle; other languages
-follow the same source-binding seam as the rewrite pairs).
+## Languages
+
+**Python and JavaScript/TypeScript.** `cgir verify-diff` dispatches by file
+extension and runs both in one pass on a mixed repo:
+
+- **Python** — inputs recorded via a `sys.setprofile` hook over `pytest`; old/new
+  run in-process.
+- **JS/TS** — inputs recorded by a CommonJS `require` hook over `node --test`
+  (mocha and plain node too; `jest`/`vitest` sandbox their own module registry and
+  need a one-line setup wrap); old/new run in a Node harness, with TypeScript
+  transpiled through the repo's own `esbuild` or `typescript@5`. Node is the only
+  extra dependency — absent it, JS/TS changes are reported `unverified`, never
+  silently skipped.
+
+Both speak the identical three-bucket contract with the same value semantics
+(float tolerance, NaN, deep structural equality). Other languages follow the same
+source-binding seam as the rewrite pairs.

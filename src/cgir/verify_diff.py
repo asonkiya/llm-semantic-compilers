@@ -249,28 +249,49 @@ def verify_diff(
     Requires ``pytest`` (or ``capture_argv``) to record inputs."""
     from cgir.replay import capture
 
+    report = DiffReport()
     changed, notes = changed_py_functions(repo, base_ref)
-    report = DiffReport(notes=notes)
-    if not changed:
-        report.notes.append(f"no changed Python functions vs {base_ref}")
-        return report
+    report.notes.extend(notes)
 
-    targets = {cf.qualname: (Path(cf.path), cf.func_name) for cf in changed}
-    try:
-        traces: dict[str, list[Trace]] = capture(repo, targets, driver_argv=capture_argv)
-    except Exception as exc:
-        report.notes.append(f"trace capture failed (need a passing test suite): {exc}")
-        traces = {}
+    if changed:
+        targets = {cf.qualname: (Path(cf.path), cf.func_name) for cf in changed}
+        try:
+            traces: dict[str, list[Trace]] = capture(repo, targets, driver_argv=capture_argv)
+        except Exception as exc:
+            report.notes.append(f"python trace capture failed (need a passing test suite): {exc}")
+            traces = {}
+        for cf in changed:
+            recorded = [args for args, _ in traces.get(cf.qualname, [])]
+            args_all = list(recorded)
+            n_fuzz = 0
+            if fuzz_rounds and recorded:
+                fuzzed = fuzz_around(recorded, fuzz_rounds)
+                args_all += fuzzed
+                n_fuzz = len(fuzzed)
+            v = differential_replay(repo, cf.qualname, cf.old_src, cf.new_src, args_all)
+            v.fuzzed = n_fuzz if v.status != UNVERIFIED else 0
+            report.verdicts.append(v)
 
-    for cf in changed:
-        recorded = [args for args, _ in traces.get(cf.qualname, [])]
-        args_all = list(recorded)
-        n_fuzz = 0
-        if fuzz_rounds and recorded:
-            fuzzed = fuzz_around(recorded, fuzz_rounds)
-            args_all += fuzzed
-            n_fuzz = len(fuzzed)
-        v = differential_replay(repo, cf.qualname, cf.old_src, cf.new_src, args_all)
-        v.fuzzed = n_fuzz if v.status != UNVERIFIED else 0
-        report.verdicts.append(v)
+    # JS/TS changed functions ride the Node oracle (same three-bucket contract).
+    report.verdicts.extend(_js_verdicts(repo, base_ref, fuzz_rounds))
+
+    if not report.verdicts and not any("failed" in n for n in report.notes):
+        report.notes.append(f"no changed Python or JS/TS functions vs {base_ref}")
     return report
+
+
+def _js_verdicts(repo: Path, base_ref: str, fuzz_rounds: int) -> list[Verdict]:
+    """Verdicts for changed JS/TS functions, or [] if none / node absent."""
+    try:
+        from cgir.js_verify import changed_js_functions, node_available, verify_diff_js
+    except Exception:
+        return []
+    changed, _notes = changed_js_functions(repo, base_ref)
+    if not changed:
+        return []
+    if not node_available():
+        return [
+            Verdict(cf.qualname, UNVERIFIED, "node not on PATH (needed for JS/TS)")
+            for cf in changed
+        ]
+    return verify_diff_js(repo, base_ref, fuzz_rounds=fuzz_rounds)

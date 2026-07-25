@@ -71,6 +71,7 @@ cgir verify-diff main --fuzz 5
 
 Every changed function lands in one honest bucket — `preserving` / `diverged`
 (with the counterexample) / `unverified` (with the reason) — never a silent pass.
+Works on **Python and JavaScript/TypeScript** (one pass, dispatched by extension).
 Non-zero exit on divergence drops it straight into CI as a merge gate
 ([action](./.github/actions/verify-diff/action.yml), [docs](./docs/verify-diff.md)).
 It is exactly as strong as your test suite, plus a fuzz margin — and it says so.
