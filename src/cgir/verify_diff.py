@@ -82,13 +82,16 @@ def differential_replay(
     for args in arg_tuples:
         old_exc = new_exc = None
         old_out = new_out = None
+        # SystemExit (argparse / sys.exit) is a BaseException; catching only
+        # Exception would let a CLI function crash the whole verify-diff run.
+        # Treat it as a raised outcome to compare, not a harness death.
         try:
             old_out = old_fn(*args)
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:
             old_exc = exc
         try:
             new_out = new_fn(*args)
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:
             new_exc = exc
         if old_exc or new_exc:
             # both raising the same exception type is preserved behavior

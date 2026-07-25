@@ -196,7 +196,11 @@ def replay(repo: Path, qualname: str, candidate: str, traces: list[Trace]) -> tu
     for args, expected in traces:
         try:
             got = fn(*args)
-        except Exception as exc:
+        # SystemExit (argparse / sys.exit in a CLI function) is a BaseException,
+        # not Exception — catching only Exception let it escape and crash the
+        # whole rewrite run. A candidate that exits is a failed replay, not a
+        # harness death. KeyboardInterrupt is deliberately NOT swallowed.
+        except (Exception, SystemExit) as exc:
             return False, f"replay raised on {args!r}: {type(exc).__name__}: {exc}"
         if not _eq(got, expected):
             return False, f"replay mismatch on {args!r}: expected {expected!r}, got {got!r}"

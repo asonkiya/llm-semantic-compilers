@@ -170,3 +170,16 @@ def test_verify_diff_passes_a_behavior_preserving_refactor(repo):
     by = {v.qualname: v for v in report.verdicts}
     assert by["mathlib.scale"].status == PRESERVING
     assert report.ok
+
+
+def test_systemexit_candidate_does_not_crash(tmp_path):
+    """A CLI/argparse function raises SystemExit (a BaseException). It must be a
+    caught outcome, not a crash of the whole run — the slugify rewrite pass
+    found this escaping and killing the process."""
+    (tmp_path / "m.py").write_text("def f(x):\n    return x\n")
+    old = "def f(x):\n    return x\n"
+    new = "def f(x):\n    import sys\n    sys.exit(2)\n"  # SystemExit
+    v = differential_replay(tmp_path, "m.f", old, new, [(1,)])
+    assert v.status == DIVERGED and "SystemExit" in v.detail
+    both = "def f(x):\n    import sys\n    sys.exit(1)\n"
+    assert differential_replay(tmp_path, "m.f", both, both, [(1,)]).status == PRESERVING
