@@ -226,3 +226,31 @@ def test_verify_diff_js_end_to_end(tmp_path):
     assert by["tax"].status == DIVERGED, by["tax"]
     assert "120" in by["tax"].detail
     assert by["round2"].status == PRESERVING, by["round2"]
+
+
+def test_jest_cmd_injects_setup_file(monkeypatch, tmp_path):
+    """jest sandboxes its module registry, so capture must inject a setup file
+    (--setupFilesAfterEnv) that wraps target exports inside jest — the require-
+    hook alone is blind to jest. node --test must NOT get the flag."""
+    import cgir.js_verify as jv
+
+    seen = {}
+
+    class _R:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = list(cmd)
+        return _R()
+
+    monkeypatch.setattr(jv.subprocess, "run", fake_run)
+    (tmp_path / "x.js").write_text("function f(){return 1} module.exports={f};")
+    tgt = {"x.js:f": ("x.js", "f")}
+
+    jv.capture_js(tmp_path, tgt, test_cmd=["npx", "jest"])
+    assert any("--setupFilesAfterEnv=" in c for c in seen["cmd"])
+
+    jv.capture_js(tmp_path, tgt, test_cmd=["node", "--test"])
+    assert not any("setupFilesAfterEnv" in c for c in seen["cmd"])

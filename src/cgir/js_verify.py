@@ -349,6 +349,46 @@ Module._load = function(request, parent, isMain){
 process.on("exit", () => { try { fs.writeFileSync(OUT + "." + process.pid, JSON.stringify(records)); } catch(e){} });
 """
 
+# jest (and vitest) run tests in a sandboxed module registry, so the require-hook
+# above never sees the target module. Injected instead as a jest setup file
+# (--setupFilesAfterEnv), which runs INSIDE each test file's registry: it
+# requires the target by its absolute path (the same key the test file's
+# `require('./x')` resolves to) and wraps the export there. Records flush on
+# jest's afterAll and on exit; a random filename suffix keeps parallel workers
+# from clobbering each other (merged Python-side like the child-process case).
+_JS_JEST_SETUP = r"""
+"use strict";
+const fs = require("fs");
+const TARGETS = JSON.parse(process.env.CGIR_TARGETS);
+const OUT = process.env.CGIR_CAP_OUT;
+const records = {};
+function jsonSafe(v){ try { return JSON.parse(JSON.stringify(v === undefined ? null : v)); } catch(e){ return Symbol.for("cgir-unsafe"); } }
+const UNSAFE = Symbol.for("cgir-unsafe");
+function wrap(){
+  for (const [file, name] of TARGETS){
+    let m; try { m = require(file); } catch(e){ continue; }
+    if (m && typeof m[name] === "function" && !m[name].__cgirWrapped){
+      const fn = m[name];
+      const wrapped = function(){
+        const args = Array.prototype.slice.call(arguments);
+        const ret = fn.apply(this, args);
+        if (!(ret && typeof ret.then === "function")){
+          const a = jsonSafe(args), r = jsonSafe(ret);
+          if (a !== UNSAFE && r !== UNSAFE){ const k = file + "\x00" + name; (records[k] = records[k] || []).push([a, r]); }
+        }
+        return ret;
+      };
+      wrapped.__cgirWrapped = true;
+      try { m[name] = wrapped; } catch(e){}
+    }
+  }
+}
+wrap();
+function flush(){ try { fs.writeFileSync(OUT + "." + process.pid + "." + Math.random().toString(36).slice(2), JSON.stringify(records)); } catch(e){} }
+if (typeof afterAll === "function") { try { afterAll(flush); } catch(e){} }
+process.on("exit", flush);
+"""
+
 
 def capture_js(
     repo: Path,
@@ -376,7 +416,14 @@ def capture_js(
         "CGIR_CAP_OUT": str(out_file),
         "NODE_OPTIONS": f"--require {hook}",
     }
-    cmd = test_cmd or ["node", "--test"]
+    cmd = list(test_cmd or ["node", "--test"])
+    # jest/vitest sandbox their module registry, so the require-hook is blind to
+    # the target calls. Inject a setup file that wraps exports inside jest's own
+    # registry (the require-hook still runs, harmlessly, for anything outside it).
+    if any("jest" in part for part in cmd):
+        setup = work / "cgir_jest_setup.cjs"
+        setup.write_text(_JS_JEST_SETUP)
+        cmd += [f"--setupFilesAfterEnv={setup}"]
     try:
         subprocess.run(cmd, cwd=str(repo), env=env, capture_output=True, text=True, timeout=timeout)
     except (subprocess.TimeoutExpired, FileNotFoundError):

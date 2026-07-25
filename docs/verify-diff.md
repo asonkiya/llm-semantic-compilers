@@ -70,11 +70,13 @@ extension and runs both in one pass on a mixed repo:
 - **Python** — inputs recorded via a `sys.setprofile` hook over `pytest`; old/new
   run in-process.
 - **JS/TS** — inputs recorded by a CommonJS `require` hook over `node --test`
-  (mocha and plain node too; `jest`/`vitest` sandbox their own module registry and
-  need a one-line setup wrap); old/new run in a Node harness, with TypeScript
-  transpiled through the repo's own `esbuild` or `typescript@5`. Node is the only
-  extra dependency — absent it, JS/TS changes are reported `unverified`, never
-  silently skipped.
+  (mocha and plain node too). **jest** is supported directly: because it sandboxes
+  its module registry, capture injects a `--setupFilesAfterEnv` file that wraps
+  the target inside jest itself (pass `--js-test "npx jest"`). Old/new run in a
+  Node harness, with TypeScript transpiled through the repo's own `esbuild` or
+  `typescript@5`. Node is the only extra dependency — absent it, JS/TS changes are
+  reported `unverified`, never silently skipped. (vitest's sandbox needs a config
+  `setupFiles` entry rather than a CLI flag — a follow-up.)
 
 Both speak the identical three-bucket contract with the same value semantics
 (float tolerance, NaN, deep structural equality). Other languages follow the same
