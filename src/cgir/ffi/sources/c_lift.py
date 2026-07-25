@@ -276,6 +276,32 @@ def build_def_index(
         val = text[m.start() : semi + 1]
         for tn in re.findall(r"\b(\w+)\b", masked[end : semi + 1]):
             put(tn, val, m.start())
+    # 6b. plain-tag struct/union/enum definition — the KERNEL's house style
+    # (`struct shash_desc { ... };`, no typedef; the first header-aware kernel
+    # sweep found these blind: `shash_desc` unresolved 133x while defined in a
+    # pulled header). Indexed under the tag (references spell `struct tag`, and
+    # _referenced_idents yields the bare tag). A function returning a struct
+    # can't match: the brace must follow the tag directly. The slice runs to
+    # the closing `;` so `} __attribute__((...));` tails are kept.
+    for m in re.finditer(r"^(?:static\s+)?(?:struct|union|enum)\s+(\w+)\s*\{", masked, re.M):
+        end = _match_braces(masked, masked.index("{", m.start()))
+        semi = masked.find(";", end)
+        if semi != -1:
+            put(m.group(1), text[m.start() : semi + 1], m.start())
+    # 6c. enum ENUMERATORS — `CRYPTO_ALG_TYPE_*`-style constants are referenced
+    # bare, so each one resolves to its whole enum definition. Anonymous enums
+    # (`enum { A, B };`) have only enumerators.
+    for m in re.finditer(r"^(?:static\s+)?enum(?:\s+\w+)?\s*\{", masked, re.M):
+        end = _match_braces(masked, masked.index("{", m.start()))
+        semi = masked.find(";", end)
+        if semi == -1:
+            continue
+        val = text[m.start() : semi + 1]
+        body = masked[masked.index("{", m.start()) + 1 : end - 1]
+        for entry in body.split(","):
+            t = re.match(r"\s*([A-Za-z_]\w*)", entry)
+            if t:
+                put(t.group(1), val, m.start())
     # 7. function-like macro: `#define name(args) body` — lowest precedence, so a
     # real function of the same name (populated in pass 3) already won.
     for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+(\w+)\(.*(?:\\\n.*)*", masked, re.M):
@@ -495,7 +521,15 @@ def lift_symbols(
         order = sorted(pulled, key=lambda n: ranks.get(n, (1 << 30, source.find(pulled[n]))))
     else:
         order = sorted(pulled, key=lambda n: source.find(pulled[n]))
-    body = "\n\n".join(pulled[n] for n in order)
+    # several names can share one definition (an enum's tag + its enumerators)
+    # — emit each definition once.
+    seen_defs: set[str] = set()
+    parts: list[str] = []
+    for n in order:
+        if pulled[n] not in seen_defs:
+            seen_defs.add(pulled[n])
+            parts.append(pulled[n])
+    body = "\n\n".join(parts)
     tu = (shim + "\n\n" + body + "\n") if shim else body + "\n"
     return tu, sorted(unresolved - shim_names), missing
 

@@ -531,3 +531,68 @@ def test_header_cache_is_shared_across_lifts(tmp_path):
     n = len(cache)
     lift_symbols_from_file(c, ["use"], include_dirs=[inc], header_cache=cache)
     assert len(cache) == n  # second lift reused every entry
+
+
+# Kernel house style: PLAIN `struct Name { ... };` and `enum { ... };` — no
+# typedef. The first header-aware kernel sweep showed the index blind to these
+# (shash_desc unresolved 133 times while defined in the pulled headers).
+_KERNEL_STYLE = """\
+struct sctx {
+    unsigned int state[8];
+    unsigned long count;
+} __attribute__((aligned(8)));
+
+enum flags {
+    FL_INIT = 1,
+    FL_FINAL = 4,
+};
+
+enum { ANON_A = 10, ANON_B };
+
+static inline void ctx_reset(struct sctx *c) {
+    c->count = FL_INIT + ANON_A;
+}
+
+int step(struct sctx *c) {
+    ctx_reset(c);
+    return (int)c->count + FL_FINAL;
+}
+"""
+
+
+def test_extract_plain_struct_definition():
+    d = extract_definition("sctx", _KERNEL_STYLE)
+    assert d is not None and d.startswith("struct sctx {") and "count" in d
+    assert d.rstrip().endswith(";")  # through the attribute tail to the semicolon
+
+
+def test_extract_enum_by_tag_and_by_enumerator():
+    by_tag = extract_definition("flags", _KERNEL_STYLE)
+    assert by_tag is not None and "FL_FINAL" in by_tag
+    # enumerators resolve to their whole enum definition — named and anonymous
+    assert extract_definition("FL_INIT", _KERNEL_STYLE) == by_tag
+    anon = extract_definition("ANON_A", _KERNEL_STYLE)
+    assert anon is not None and anon.startswith("enum {") and "ANON_B" in anon
+
+
+def test_lift_kernel_style_function_pulls_struct_enum_helper():
+    tu, unresolved, missing = lift_symbols(_KERNEL_STYLE, ["step"])
+    assert missing == []
+    assert tu is not None
+    for dep in ("struct sctx {", "enum flags {", "ANON_A", "ctx_reset"):
+        assert dep in tu, dep
+    assert not ({"sctx", "flags", "FL_INIT", "FL_FINAL", "ANON_A", "ctx_reset"} & set(unresolved))
+
+
+@pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler")
+def test_lifted_kernel_style_tu_compiles(tmp_path):
+    tu, _, _ = lift_symbols(_KERNEL_STYLE, ["step"])
+    assert tu is not None
+    c = tmp_path / "k.c"
+    c.write_text(tu)
+    r = subprocess.run(
+        ["cc", "-c", "-w", str(c), "-o", str(tmp_path / "k.o")],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
