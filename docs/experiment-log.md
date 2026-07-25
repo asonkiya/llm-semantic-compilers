@@ -1100,3 +1100,56 @@ isolated byte-fuzzer can't build a valid `vli`/`ctx` instance, so behavioral pro
 needs the whole-program gate (`--apply --gate-build/--gate-run`) on real instances —
 exactly the "next lever" the prior entry named, now with the sweep number attached
 (35 compilable, gate-verifiable; behavioral verification still gated).
+
+### `--structs` on SQLite: amalgamation vs kernel — and a hang the scale exposed (2026-07-24)
+
+Ran the same `--structs` sweep on the SQLite amalgamation to test a hypothesis: an
+amalgamation keeps *all* its structs in the one `sqlite3.c`, so struct-context
+functions should be far more in-file-resolvable than the kernel's ~5% (whose contexts
+live in external headers). **The hypothesis was wrong, in an instructive way.**
+
+Full `sqlite3.c` (269k lines), `--pointers --structs --non-leaf`, 602 eligible fns:
+
+| surface | fns | baseline cc | lifted cc | lift made a TU |
+|---|---|---|---|---|
+| scalar / pointer | 220 | 97 | **162** (+65) | 220 / 220 |
+| struct-pointer   | 382 | 1  | **1**        | 380 / 382 |
+
+Two very different stories under one sweep:
+
+- **Scalar/pointer is where lifting delivers: 97→162 (+65, 74% compilable).** Every one
+  produced a TU; the 58 misses are external OS calls / globals, not lifting failures.
+  Real unlocks: the whole FTS5 **Porter stemmer** suite (`fts5Porter_MGt1`, `_Vowel`,
+  `_Ostar`…), `sqlite3StrICmp`, UTF-8 helpers, `binCollFunc`, `estLog` — each pulled its
+  in-file table/helper closure into a standalone TU.
+- **Struct-context does NOT benefit from the amalgamation.** 380 of 382 struct functions
+  *lifted fine* — their layouts are in-file, closures resolve (median TU 66 lines, one
+  5,135) — **but 379 of those 380 fail to `cc`.** The amalgamation solves *type
+  resolution* and not *isolation*: a struct function's full call+type graph pulls half
+  the database engine (Parse/Vdbe/Select/Expr are one giant connected component), which
+  won't compile standalone. The one win, `allConstraintsUsed(sqlite3_index_constraint_
+  usage *aUsage, int nCons)`, takes a **flat POD array struct** — the un-entangled shape
+  that isolates.
+
+So SQLite's struct compile rate (1/382 ≈ **0.3%**) is *lower* than the kernel's (35/734 ≈
+4.8%) — because the kernel's "wins" were mostly `u64 *`-misparsed-as-`struct:u64`
+pseudo-structs (ECC `vli_*`) with tiny closures, while SQLite's are genuine multi-field
+AST structs. **Corrected takeaway: struct-context is the wall in *both* — the kernel
+because contexts are external, the amalgamation because in-file contexts are all mutually
+entangled. Lifting's robust leverage is the scalar/pointer surface (+65 here), not
+struct ABIs, regardless of amalgamation-vs-kernel.**
+
+**The hang this sweep exposed (root-caused + fixed, commit 5d83dbe).** The first
+`--structs` run wedged for 1.5h pegging a core with *no compiler children* — a pure-
+Python spin. `extract_definition` ran ~7 full-file regex passes over the 9.5 MB source
+**per queried name** (~0.65s each, hit or miss). A struct function pulls a closure of
+~90 identifiers — most of them struct field names and locals that resolve to `None` but
+still pay the full scan → ~48s for one function; a function reaching a god-struct blew
+the closure into the thousands and never returned. Scalar/pointer sweeps never hit it
+(tiny closures). Fix: `build_def_index()` scans the file **once** (2.8s → 8,430 defs)
+into a `name→def` dict; every lookup is O(1). `sqlite3WalkExprList`: >15s (killed) →
+**0.01s**. Proven byte-identical to the old per-name extractor (0 mismatches / 529
+sampled names). A `MAX_CLOSURE=400` backstop was added but barely bites (2 of 382) — the
+struct wall is compile-failure, not closure size. The lesson for the sweep harness: a
+per-file `try/except` catches *exceptions* but not *hangs*; the durable fix was making
+the inner loop incapable of blowing up, not wrapping it.
