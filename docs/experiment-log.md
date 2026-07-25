@@ -1273,3 +1273,42 @@ console capture. The captured ``testmgr`` output is the golden stdout for the Ru
 a rewritten function compiled ``no_std --emit=obj``, linked via kbuild ``obj-y``, its C
 definition sidelined by the existing `_patch_source`, then boot-and-byte-compare — the
 same gate shape that went 9/9 on SQLite, with the Linux kernel as the program.
+
+### Rung 4 achieved: a Rust rewrite verified inside the booting kernel (2026-07-25)
+
+`benchmarks/kernel_gate/gate.sh` closes the loop. testmgr turned out to be the wrong
+workload — modern testmgr is silent on success, and a no-initramfs boot panics on
+rootfs before much runs — so the gate uses a **`late_initcall` probe** instead: it runs
+during ``kernel_init_freeable`` (before the panic), calls the target on a fixed 64-point
+vector grid, and ``pr_info``s a single deterministic digest. Both legs build+boot under
+QEMU; the gate compares that digest.
+
+The target (``cgir_target``, an FNV-1a mix over the 8 bytes of a u64) is defined in C in
+the stock leg and by a Rust object in the rewrite leg. The Rust leg: ``rustc --emit=obj
+--target aarch64-unknown-none-softfloat -C panic=abort`` → a freestanding object
+exporting ``cgir_target`` with **zero undefined intrinsics** (a pure function needs no
+kernel runtime, so no CONFIG_RUST machinery); injected via kbuild's ``_shipped``
+prebuilt-object rule; the C definition dropped so the call resolves to Rust at link.
+
+| candidate | stock digest | rewrite digest | verdict |
+|---|---|---|---|
+| `correct.rs` (byte-equal FNV) | `0d6ce7859b3c8aa6` | `0d6ce7859b3c8aa6` | **PASS** |
+| `wrong.rs` (FNV prime −1 bit)  | `0d6ce7859b3c8aa6` | `095ed7cd993a80b3` | **REJECT** |
+
+**The negative control earned its keep — the first cut PASSED the wrong candidate.** Two
+harness bugs it exposed: (1) the freestanding target's std wasn't in the image, so rustc
+E0463'd every run — each ``docker run --rm`` is fresh and the earlier standalone
+``rustup target add`` didn't persist (→ baked into the Dockerfile); (2) ``gate.sh``
+swallowed the rustc failure (``rustc | tail`` under ``bash -euc``, no ``pipefail``) and
+then booted the stock leg's leftover ``Image``, faking a match. Fix: ``pipefail``,
+hard-fail on a missing object, and delete ``Image`` before each leg so a failed build
+can't boot stale. A gate that can't reject is worse than none; the control is the only
+thing that proves it can — the same discipline as the SQLite negative control, and it
+caught a real vacuity here.
+
+**Honest scope.** ``cgir_target`` is a *planted* pure function (real algorithm, real
+build+link+boot, but not yet a load-bearing kernel function). This proves the
+**mechanism** end to end: a cheap-model-shaped Rust rewrite runs in the real kernel and
+the kernel's own boot is the judge. The next step points it at a lifted real crypto leaf
+(the header-aware set — e.g. a ``vli_*`` or AES helper) with the probe calling it on the
+subsystem's own test vectors.
