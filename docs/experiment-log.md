@@ -1336,6 +1336,24 @@ rewrite" value, now demonstrated end-to-end in the real kernel rather than in an
 TU. This is the honest upgrade from the planted ``cgir_target``: load-bearing kernel
 code, model-generated, kernel-toolchain-compiled, boot-verified.
 
+**And a second subsystem + the gate-required class (``vli_cmp``, ECC).** Extended the gate
+to a ``u64``-array ABI (``vli_gate.sh`` + ``vli_probe.c``, exercising the function over a
+grid of fixed 4-digit big-integers) and verified ``vli_cmp(const u64*, const u64*,
+unsigned)`` from ``crypto/ecc.c`` — the elliptic-curve big-integer comparison:
+
+| real kernel function | subsystem / class | verdict | digest |
+|---|---|---|---|
+| `vli_cmp` | ECC big-int, **gate-required** (`u64*` pseudo-struct) | **PASS** | `ff35a57b289bf3d5` |
+| `vli_cmp` (sign flipped) | negative control | **REJECT** | `af87ef21…` ≠ stock |
+
+This matters because ``vli_cmp`` is exactly the **gate-required** class — a pointer ABI the
+isolated byte-differential *cannot* fuzz (the SQLite whole-program gate existed precisely
+for this class). Verifying it in-kernel on real ``u64`` arrays closes that loop for the
+kernel: **4 real crypto functions across two subsystems (AES + ECC) and two ABI classes
+(scalar/table + pseudo-struct), all model-generated, all boot-verified, with negative
+controls rejecting in both classes.** The kernel path is now demonstrably: rewrite in
+place → kbuild compiles with the real toolchain → the booting kernel is the judge.
+
 **A finding that reshapes the kernel strategy.** Probing why ~630 header-lifted kernel
 TUs failed the *macOS* compile check showed the failures are a **cross-compilation
 artifact**, not a lifter weakness: compiling kernel C with macOS ``cc`` collides Darwin
