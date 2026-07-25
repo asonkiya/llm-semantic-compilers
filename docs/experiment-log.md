@@ -1354,6 +1354,21 @@ kernel: **4 real crypto functions across two subsystems (AES + ECC) and two ABI 
 controls rejecting in both classes.** The kernel path is now demonstrably: rewrite in
 place → kbuild compiles with the real toolchain → the booting kernel is the judge.
 
+**Non-leaf works in-kernel too (``vli`` family).** Verified three more ECC functions in
+one build — ``vli_test_bit``, ``vli_num_digits``, and the **non-leaf ``vli_num_bits``**
+(which calls ``vli_num_digits``): both rewritten to Rust, assembled into one object, and
+the Rust→Rust ``extern "C"`` call resolves at link inside the kernel. PASS
+(``7af37e893148c50a``). So the non-leaf case is not a barrier when the callee is itself a
+rewrite candidate — the AES ``mix_columns`` non-leaf was blocked only because its callee
+``ror32`` is a kernel bitops helper outside the candidate set, a scope limit, not a
+mechanism gap.
+
+**Final overnight tally: 7 real Linux kernel crypto functions** (AES: ``mul_by_x``,
+``mul_by_x2``, ``subw``; ECC: ``vli_cmp``, ``vli_test_bit``, ``vli_num_digits``,
+``vli_num_bits``), all model-generated Rust, all verified inside a booting kernel across
+two subsystems, two ABI classes, leaf and non-leaf — with negative controls rejecting in
+both classes and 0 false results. See ``docs/overnight-2026-07-25.md`` for the full run.
+
 **A finding that reshapes the kernel strategy.** Probing why ~630 header-lifted kernel
 TUs failed the *macOS* compile check showed the failures are a **cross-compilation
 artifact**, not a lifter weakness: compiling kernel C with macOS ``cc`` collides Darwin

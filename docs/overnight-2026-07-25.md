@@ -107,3 +107,15 @@ SCOREBOARD (real Linux kernel functions, model Rust, verified inside booting ker
 31 targets, $0.31, 677s. Note: these are ISOLATED-TU rewrites (macOS-cc verified for
 the differential ones); the IN-KERNEL gate (above) is the authoritative kernel proof.
 Next: non-leaf real function (mix_columns calls mul_by_x) via the in-kernel gate.
+
+### [05:45] vli family PASS — non-leaf works in-kernel
+GATE PASS (vli_family): 7af37e893148c50a. Three ECC fns in one object/probe:
+vli_test_bit, vli_num_digits, and NON-LEAF vli_num_bits (calls vli_num_digits —
+both rewritten, Rust→Rust extern call resolves in-kernel). So non-leaf DOES work
+when the callee is itself a rewrite candidate; AES mix_columns was blocked only
+because ror32 isn't a candidate.
+
+FINAL: 7 real Linux kernel crypto functions verified in-kernel (model Rust, boot-judged):
+  AES: mul_by_x, mul_by_x2, subw(+S-box table)
+  ECC: vli_cmp, vli_test_bit, vli_num_digits, vli_num_bits(non-leaf)
+Negative controls (AES wrong-poly, ECC wrong-sign): both REJECT. 0 false results.
