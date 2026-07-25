@@ -1313,6 +1313,46 @@ the kernel's own boot is the judge. The next step points it at a lifted real cry
 (the header-aware set — e.g. a ``vli_*`` or AES helper) with the probe calling it on the
 subsystem's own test vectors.
 
+### Real-repo pass: verify-diff + the rewrite engine on open-source repos (2026-07-25)
+
+Ran verify-diff and the live rewrite loop against real OSS repos, both to prove
+they work outside fixtures and to find what fixtures hid. They found real bugs —
+three, all fixed:
+
+**verify-diff (behavior-preservation gate).** inflection (Python, flat pkg),
+python-slugify (Python, `src`-style pkg), bytes.js (JS, mocha), a TS module, and a
+jest project. Regression→diverged and refactor→preserving landed correctly on all
+of them; jest honestly reported `unverified` (it sandboxes its module registry).
+Two bugs surfaced: (1) the Python capture harness ran from a tempdir so pytest
+couldn't import the repo's package by name and captured nothing — fixed by putting
+`os.getcwd()` on sys.path; (2) the JS harness reconstructed a function *alone*, so
+`bytes.parse`'s module-level regex/table were undefined and both versions threw
+`ReferenceError` identically → a **false `preserving`** on a genuine regression.
+Fixed by evaluating the whole module (old file vs new file) with a real
+`createRequire`, exactly as the Python path execs in the module namespace.
+
+**The rewrite engine (live, cheap model).**
+
+| repo | pair | solved | cost | note |
+|---|---|---|---|---|
+| inflection | python→python | **11/12** | $0.03 | `singularize` unsolved (big regex rule-table) |
+| python-slugify | python→python | 2/7 | $0.09 | real refactor (merged two guard clauses), replay-verified |
+| inflection | **python→rust** | **5/10** | $0.41 | real string fns → compiled, replay-verified Rust |
+
+Every "solved" is replay-verified against the repo's own recorded test I/O — a
+spot-checked `smart_truncate` rewrite genuinely restructured the code (not an
+echo), and `dasherize` became a real `#[no_mangle] extern "C"` Rust function with
+RustBuf string marshalling. python→rust's unsolved 5 (pluralize/singularize rule
+tables, transliterate's unicode maps) resist an exact Rust port — an honest
+boundary (stage kills: 17 rustc, 9 replay).
+
+**Third bug, from the rewrite pass:** the slugify run *crashed* — replaying a CLI
+function triggered argparse, which raises `SystemExit` (a BaseException, not
+Exception), and `replay()`/`differential_replay` caught only Exception, so it
+escaped and killed the whole run. Fixed to catch `(Exception, SystemExit)`: one
+pathological function is now a failed replay, never a harness death. Same lesson
+as the differential-driver alarm and the sweep timeout — isolate per-unit failure.
+
 ### Rung 4 on REAL kernel functions: 3 model-rewritten AES routines verified in-kernel (2026-07-25)
 
 Generalized the gate (``gate_fn.sh`` + ``probe/fn_probe.c.tmpl``) to any real
