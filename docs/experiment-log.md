@@ -1203,3 +1203,28 @@ Two harness facts this battery bought: (1) the credit-wall run proved **clean re
 (59 prior rows kept, 104 rerun, results merged); (2) it exposed the differential-driver
 wedge fixed in the entry below/commit `cc37b24` — `randomFill`'s candidate stalling
 SIGKILL delivery under a page-fault storm, now bounded by the driver's own `alarm()`.
+
+### Whole-program gate: all 9 gate-required functions verified (2026-07-25)
+
+The battery left 9 solves marked *gate-required* — struct/pseudo-struct-pointer ABIs
+the byte-fuzzer can't exercise (`allConstraintsUsed`, `hasColumn` (`i16*`),
+`rtrimCollFunc`, `sqlite3AddInt64/SubInt64/MulInt64`, `sqlite3Multiply128/160`). Ran
+the real gate on every one: per TU, a *workload* `main()` appended inside the TU (the
+targets are `static`) constructing **real instances** — valid
+`sqlite3_index_constraint_usage` arrays, 225-point i64 edge grids over the
+`INT64_MIN/MAX` overflow boundaries, 128/160-bit multiply hi/lo checks, collation keys
+with trailing spaces and embedded NULs — then
+`cgir rewrite … --apply --gate-build 'cc -O1 -w {source} {lib} -o {out}' --gate-run '{out}'`:
+stock build first, then each winner linked in alone, stdout required byte-identical.
+
+**Result: 9/9 verified, 0 rejections, 8 linked artifacts (patched C + Rust staticlib +
+shared lib), ~$0.035 of fresh rewrites.** The `SubInt64` TU gated both its functions
+(Rust `sqlite3SubInt64` reaching `sqlite3AddInt64` via `extern "C"` in one build, and
+each verified with only itself replaced).
+
+**Negative control (the pass is not vacuous):** a plausible-but-wrong `sqlite3AddInt64`
+(clamps to `i64::MAX` on overflow instead of C's leave-and-flag semantics) fed to the
+same gate on the same workload → rejected `diverged`. The workloads discriminate.
+
+This closes the verification ladder for the battery: 137 differential-verified + 9
+gate-verified = **146/146 solves behaviorally proven**, still 0 false passes.
