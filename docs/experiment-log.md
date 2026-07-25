@@ -1338,6 +1338,7 @@ Fixed by evaluating the whole module (old file vs new file) with a real
 | inflection | python→python | **11/12** | $0.03 | `singularize` unsolved (big regex rule-table) |
 | python-slugify | python→python | 2/7 | $0.09 | real refactor (merged two guard clauses), replay-verified |
 | inflection | **python→rust** | **5/10** | $0.41 | real string fns → compiled, replay-verified Rust |
+| basic_maths (TheAlgorithms) | **python→rust** | **3/3** | $0.006 | pure int→int arithmetic — one attempt each, 0 stage kills |
 
 Every "solved" is replay-verified against the repo's own recorded test I/O — a
 spot-checked `smart_truncate` rewrite genuinely restructured the code (not an
@@ -1352,6 +1353,19 @@ Exception), and `replay()`/`differential_replay` caught only Exception, so it
 escaped and killed the whole run. Fixed to catch `(Exception, SystemExit)`: one
 pathological function is now a failed replay, never a harness death. Same lesson
 as the differential-driver alarm and the sweep timeout — isolate per-unit failure.
+
+**Fourth bug, from the numeric pass:** python→rust returned 0/3 on clean int→int
+functions. `validate_traces` disqualified a whole `-> int` function because *some*
+recorded traces had a None result — the doctest error cases
+(`number_of_divisors(0)` returns None where the doctest expects a Traceback). One
+out-of-contract recording sank an otherwise-verifiable function. Fixed with
+`usable_traces`: drop the unrepresentable traces, verify the Rust on the inputs
+that do cross the FFI (reporting the drop). The numeric contrast is the headline —
+pure arithmetic ports to Rust in **one attempt each** (0 stage kills), where the
+regex string functions needed 4; `euler_phi` became a correct i128 totient with
+prime factorization, replay-verified. Two capture-discovery limits also noted:
+pytest's default naming skips a repo's `tests.py`, and doctests supply only the
+docstring's inputs (min-traces then applies).
 
 ### Rung 4 on REAL kernel functions: 3 model-rewritten AES routines verified in-kernel (2026-07-25)
 
