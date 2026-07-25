@@ -1153,3 +1153,19 @@ sampled names). A `MAX_CLOSURE=400` backstop was added but barely bites (2 of 38
 struct wall is compile-failure, not closure size. The lesson for the sweep harness: a
 per-file `try/except` catches *exceptions* but not *hangs*; the durable fix was making
 the inner loop incapable of blowing up, not wrapping it.
+
+**Kernel re-verification with the fixed lifter (same day).** Re-ran both kernel
+`--structs` sweeps (crypto/ 148 files, lib/crypto/ 68 files, fresh scans, kernel shim)
+on the `build_def_index` lifter to confirm the committed numbers survive the rewrite:
+**identical to the row — 731/731 (file,name) rows match, 0 verdict diffs, worklists
+693+41, baseline 27+2, lifted 30+5, 0 regressed — and `MAX_CLOSURE` never fires in the
+kernel** (its closures are small; the cap exists for amalgamation god-structs). Both
+sweeps + scans now finish in ~6 min wall.
+
+One footgun surfaced en route: a first re-run against *stale per-directory indexes*
+produced a silently smaller worklist (528+30) — the worklist's defining-file check is a
+*basename* proxy (`Path(span.path).name == c_source.name`, `c.py`), and the kernel has
+duplicate basenames across directories (`crypto/sha256.c` vs `lib/crypto/sha256.c`), so
+index scope shifts which components attribute to a swept file and non-leaf candidacy
+cascades from there. Sweep numbers are only comparable under same-scope scans; the
+sweep's default (scan the swept tree fresh) is the canonical condition.
