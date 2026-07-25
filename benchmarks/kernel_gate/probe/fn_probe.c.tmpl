@@ -1,0 +1,21 @@
+#include <linux/init.h>
+#include <linux/kernel.h>
+#include <linux/printk.h>
+#include <linux/types.h>
+
+extern u32 @FN@(u32 x);
+
+static int __init cgir_fn_probe_init(void)
+{
+	u64 digest = 0x9e3779b97f4a7c15ULL;
+	u32 x = 0x12345678u;
+	int i;
+
+	for (i = 0; i < 256; i++) {
+		x = @FN@(x ^ (u32)(i * 2654435761u));
+		digest ^= (u64)x + (digest << 6) + (digest >> 2) + (u64)i;
+	}
+	pr_info("CGIR_PROBE @FN@ digest=%016llx\n", digest);
+	return 0;
+}
+late_initcall(cgir_fn_probe_init);

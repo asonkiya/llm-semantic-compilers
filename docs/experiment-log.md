@@ -1312,3 +1312,36 @@ build+link+boot, but not yet a load-bearing kernel function). This proves the
 the kernel's own boot is the judge. The next step points it at a lifted real crypto leaf
 (the header-aware set — e.g. a ``vli_*`` or AES helper) with the probe calling it on the
 subsystem's own test vectors.
+
+### Rung 4 on REAL kernel functions: 3 model-rewritten AES routines verified in-kernel (2026-07-25)
+
+Generalized the gate (``gate_fn.sh`` + ``probe/fn_probe.c.tmpl``) to any real
+``u32->u32`` kernel function, and pointed the **live cheap-model pipeline** at three
+genuine Linux AES primitives from ``crypto/aes_generic.c`` — the model wrote the Rust,
+kbuild compiled it with the kernel toolchain, and a ``late_initcall`` probe verified the
+boot digest stock-vs-Rust:
+
+| real kernel function | what it is | verdict | digest |
+|---|---|---|---|
+| `mul_by_x`  | GF(2⁸) ×x, pure bit-twiddle | **PASS** | `574c81fc56c361fb` |
+| `mul_by_x2` | GF(2⁸) ×x², pure bit-twiddle | **PASS** | `f4d92da8c6a53765` |
+| `subw`      | S-box word transform, **256-entry table** | **PASS** | `2798f60600c34773` |
+| `mul_by_x` (poly 0x1c) | deliberately wrong reduction | **REJECT** | `c8612be0…` ≠ stock |
+
+3/3 correct rewrites verified inside a booting kernel, 1/1 wrong rewrite rejected, 0
+false results. ``subw`` is the important one: the model **embedded the full 256-entry AES
+S-box** in the Rust (the table the C reads from a file-scope array), kbuild built it, and
+the boot proved it byte-identical — the lifter's core "tree-shake the table into the
+rewrite" value, now demonstrated end-to-end in the real kernel rather than in an isolated
+TU. This is the honest upgrade from the planted ``cgir_target``: load-bearing kernel
+code, model-generated, kernel-toolchain-compiled, boot-verified.
+
+**A finding that reshapes the kernel strategy.** Probing why ~630 header-lifted kernel
+TUs failed the *macOS* compile check showed the failures are a **cross-compilation
+artifact**, not a lifter weakness: compiling kernel C with macOS ``cc`` collides Darwin
+libc types with kernel types (``__kernel_ssize_t`` vs ``__darwin_ssize_t``) and leaves
+annotation macros (``__rcu``) undefined. The lesson: **for the kernel, lifting to a
+standalone TU is the wrong tool** — it fights the header ecosystem. The in-place kbuild
+gate is right, because kbuild already owns the correct toolchain, flags, and header tree.
+The lifter's real domain remains userspace amalgamations (SQLite); the kernel path is
+rewrite-in-place + boot-gate, exactly what these three AES results do.
