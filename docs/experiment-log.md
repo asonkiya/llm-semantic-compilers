@@ -1169,3 +1169,37 @@ duplicate basenames across directories (`crypto/sha256.c` vs `lib/crypto/sha256.
 index scope shifts which components attribute to a swept file and non-leaf candidacy
 cascades from there. Sweep numbers are only comparable under same-scope scans; the
 sweep's default (scan the swept tree fresh) is the canonical condition.
+
+### Live rewrite battery over all 163 lifted SQLite TUs (2026-07-25)
+
+Ran the full C→Rust pipeline live on **every** compilable TU the `--structs` sweep
+produced (one scan of the TU dir → per-TU: compile-as-oracle → cheap model →
+rustc → contract scan → differential fuzz; struct/pseudo-struct params downgrade to
+gate-required instead of fuzzing). Scoreboard:
+
+| | |
+|---|---|
+| TUs run | **163/163** (0 errors) |
+| fn components (incl. closure deps) | 171 |
+| **solved** | **146 (85%)** — 137 differential-verified, 9 gate-required |
+| targets solved | 125/163 |
+| total cost | **$1.01** (~$0.007/solved fn) |
+| attempt-level kills | 94 differential, 51 rustc — **0 false passes** |
+
+Texture: **21 TUs were multi-function closure rewrites** (the FTS5 Porter suite tops
+out at 4 dep-ordered functions per TU). The 9 gate-required solves are the struct fn
+(`allConstraintsUsed`) plus the `sqlite3AddInt64/SubInt64/MulInt64/Multiply128/160`
+overflow-check family — `i64*` out-params parse as pseudo-structs, so they compile+
+rewrite but await the whole-program gate. 18 TUs scanned to zero worklist components
+(all `sqlite3_*` public-API wrappers whose target doesn't re-classify as an eligible
+pure fn from the standalone TU — a lifter/scan interaction to look at, not a rewrite
+failure). The 20 unsolved targets: 16 die at `differential` — dominated by **hash and
+bit-twiddling functions** (`fts3StrHash`, `fts5HashKey*`, `sqlite3Get4byte/Put4byte`,
+`randomFill`) where the cheap model fumbles C unsigned-overflow/aliasing semantics and
+the differential correctly refuses every attempt — and 4 at `rustc` (unicode-table
+giants; `sqlite3FtsUnicodeIsalnum` burned the per-TU budget at $0.116).
+
+Two harness facts this battery bought: (1) the credit-wall run proved **clean resume**
+(59 prior rows kept, 104 rerun, results merged); (2) it exposed the differential-driver
+wedge fixed in the entry below/commit `cc37b24` — `randomFill`'s candidate stalling
+SIGKILL delivery under a page-fault storm, now bounded by the driver's own `alarm()`.
