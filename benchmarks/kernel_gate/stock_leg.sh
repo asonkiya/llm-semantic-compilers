@@ -31,7 +31,8 @@ docker run --rm -v "$VOL":/build "$IMG" bash -c "
   make -s defconfig &&
   ./scripts/config -e CRYPTO_MANAGER -d CRYPTO_MANAGER_DISABLE_TESTS \
     -e CRYPTO_SELFTESTS -e CRYPTO_NULL -e CRYPTO_CBC -e CRYPTO_ECB \
-    -e CRYPTO_SHA256 -e CRYPTO_SHA512 -e CRYPTO_AES -e IKCONFIG &&
+    -e CRYPTO_SHA256 -e CRYPTO_SHA512 -e CRYPTO_AES -e IKCONFIG \
+    -e DYNAMIC_DEBUG &&
   make -s olddefconfig
 "
 
@@ -42,9 +43,9 @@ docker run --rm -v "$VOL":/build "$IMG" bash -c "
 
 echo "[stock] booting under QEMU, capturing console (120s cap)..."
 docker run --rm -v "$VOL":/build "$IMG" bash -c "
-  timeout 120 qemu-system-aarch64 -M virt -cpu max -m 1024 -nographic \
+  timeout 120 qemu-system-aarch64 -M virt -cpu max -m 1024 -nographic -net none \
     -kernel /build/linux/arch/arm64/boot/Image \
-    -append 'console=ttyAMA0 panic=-1' -no-reboot 2>&1 || true
+    -append 'console=ttyAMA0 panic=-1 dyndbg=\"file testmgr.c +p\"' -no-reboot 2>&1 || true
 " > "$OUT/stock-console.txt"
 
 # normalized golden: strip timestamps + addresses; keep the semantic lines

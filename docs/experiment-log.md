@@ -1228,3 +1228,48 @@ same gate on the same workload → rejected `diverged`. The workloads discrimina
 
 This closes the verification ladder for the battery: 137 differential-verified + 9
 gate-verified = **146/146 solves behaviorally proven**, still 0 false passes.
+
+### Header-aware lifting: the kernel measurement (2026-07-25)
+
+Built the next lever the kernel probes pointed at: resolve definitions across the
+``#include`` closure instead of one ``.c`` file (`resolve_includes` post-order walk +
+`build_multi_index` union with per-header caching + cross-file emission ranks; plain-tag
+``struct``/``union``/``enum`` + enumerator indexing — the kernel's no-typedef house
+style, which the index was blind to). `--lift-include` on the CLI, `--include` on the
+sweep. Red-green throughout.
+
+**The true kernel numbers** (crypto/ + lib/crypto/, full tree, arm64 include roots):
+
+| | single-file lift | header-aware |
+|---|---|---|
+| crypto/ lift-compilable | 30 | **44** |
+| lib/crypto/ lift-compilable | 2 | **13** |
+| total | 35 | **57 (+63%)** |
+
+Real unlocks: the ECC `vli_*` suite now lifts *with* its real header types (no
+pseudo-struct handout), `aria_set_decrypt_key`, DH/RSA/ECDH param helpers, MD5
+export/import. lib/crypto's 6.5× is the signal — that's the kernel's most
+rewrite-shaped code, and headers were most of its wall.
+
+**Two hard-won lessons en route.** (1) The first two "header-aware" sweeps measured
+nothing: the kernel checkout was *sparse* — ``include/`` didn't exist on disk, the
+resolver correctly resolved nothing, and the +1/+2 deltas were shim-handling noise.
+Materializing the full tree (and raising the include-closure cap 400→2000; sha3.c's
+closure needs 534 files before ``crypto/hash.h`` lands) produced the real jump. Check
+the substrate before trusting a null result. (2) The remaining ~630 failures are NOT
+closure-size (uncapped probes lift in 0.0s, ~7.7k-line TUs) — they die on **shim/header
+collision**: `kernel_shim.h` typedefs ``u64`` as ``unsigned long long`` while the pulled
+``linux/types.h`` says ``unsigned long`` on arm64, plus compiler-builtin/CONFIG_
+vocabulary. Next lever: drop shim lines the closure already defines (shim-vs-closure
+dedup), not more pulling.
+
+### Rung 4 begun: the kernel itself as the gated program (2026-07-25)
+
+`benchmarks/kernel_gate/`: an arm64 container (kbuild toolchain + Rust + QEMU — macOS
+can't run kbuild natively; Apple-silicon Docker runs arm64 at native speed) and
+`stock_leg.sh` — kernel tree copied into a container-native volume (bind-mount builds
+crawl), ``defconfig`` + built-in crypto self-tests, QEMU boot, timestamp-normalized
+console capture. The captured ``testmgr`` output is the golden stdout for the Rust leg:
+a rewritten function compiled ``no_std --emit=obj``, linked via kbuild ``obj-y``, its C
+definition sidelined by the existing `_patch_source`, then boot-and-byte-compare — the
+same gate shape that went 9/9 on SQLite, with the Linux kernel as the program.
