@@ -19,6 +19,7 @@ must be covered by ``shim`` (types/macros) or the function isn't liftable.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 # C keywords / builtins that are never file-scope definitions to pull in.
 _KEYWORDS = frozenset(
@@ -197,7 +198,11 @@ def _at_col0(text: str, idx: int) -> bool:
     return ls < len(text) and text[ls] not in " \t#"
 
 
-def build_def_index(text: str, masked: str | None = None) -> dict[str, str]:
+def build_def_index(
+    text: str,
+    masked: str | None = None,
+    positions: dict[str, int] | None = None,
+) -> dict[str, str]:
     """Map every file-scope definition name -> its source text, in ONE pass over
     the file. This is :func:`extract_definition` with the loop inverted: rather
     than scan the whole 9.5 MB source once per *queried* name (~0.65s each — and
@@ -210,18 +215,24 @@ def build_def_index(text: str, masked: str | None = None) -> dict[str, str]:
     by trying its patterns in sequence: object-macro > table > function > const
     > simple-typedef > struct-typedef > function-macro. First writer wins (a real
     function beats a ``#define name(args)`` alias for it — the optional-inline
-    idiom, tiny-AES ``Multiply``)."""
+    idiom, tiny-AES ``Multiply``).
+
+    ``positions`` (optional, filled in place) records each winning name's start
+    offset in ``text`` — :func:`build_multi_index` uses it to emit pulled defs
+    in dependency order across files."""
     if masked is None:
         masked = _mask_comments(text)
     idx: dict[str, str] = {}
 
-    def put(name: str, val: str) -> None:
+    def put(name: str, val: str, at: int) -> None:
         if name not in idx:
             idx[name] = val
+            if positions is not None:
+                positions[name] = at
 
     # 1. object-like macro: `#define name value` (name NOT followed by `(`).
     for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+(\w+)(?=[ \t]).*(?:\\\n.*)*", masked, re.M):
-        put(m.group(1), text[m.start() : m.end()])
+        put(m.group(1), text[m.start() : m.end()], m.start())
     # 2. array/table: `... name[...] = { ... };`
     for m in re.finditer(r"(?<![\w.>])(\w+)\s*\[[^\]]*\]\s*=\s*", masked):
         if not _at_col0(masked, m.start()):
@@ -232,7 +243,7 @@ def build_def_index(text: str, masked: str | None = None) -> dict[str, str]:
             end = _match_braces(masked, brace)
             nsemi = masked.find(";", end)
             end = nsemi + 1 if masked[end:nsemi].strip() == "" else end
-            put(m.group(1), text[_line_start(text, m.start()) : end])
+            put(m.group(1), text[_line_start(text, m.start()) : end], m.start())
     # 3. function definition: `name(params) {`, paren-balanced, `{` follows `)`.
     for m in re.finditer(r"(?<![\w.>])(\w+)\s*\(", masked):
         if m.group(1) in idx or not _at_col0(masked, m.start()):
@@ -242,17 +253,21 @@ def build_def_index(text: str, masked: str | None = None) -> dict[str, str]:
             continue
         if re.match(r"\s*\{", masked[close:]):
             brace = masked.index("{", close)
-            put(m.group(1), text[_line_start(text, m.start()) : _match_braces(masked, brace)])
+            put(
+                m.group(1),
+                text[_line_start(text, m.start()) : _match_braces(masked, brace)],
+                m.start(),
+            )
     # 4. scalar const: `... name = ...;` at file scope (single line).
     for m in re.finditer(r"(?<![\w.>])(\w+)\s*=\s*[^;{}]*;", masked):
         if m.group(1) in idx or not _at_col0(masked, m.start()):
             continue
         head = masked[_line_start(masked, m.start()) : m.start()]
         if "(" not in head and "return" not in head:
-            put(m.group(1), text[_line_start(text, m.start()) : m.end()])
+            put(m.group(1), text[_line_start(text, m.start()) : m.end()], m.start())
     # 5. simple typedef: `typedef unsigned char u8;` / `typedef struct Foo Foo;`.
     for m in re.finditer(r"^typedef[^;{}\n]*\b(\w+)\s*(?:\[[^\]]*\])?\s*;", masked, re.M):
-        put(m.group(1), text[m.start() : m.end()])
+        put(m.group(1), text[m.start() : m.end()], m.start())
     # 6. struct/union/enum typedef with a body: `typedef struct {...} Foo;` — the
     # trailing names (`Foo`, `*PFoo`) all resolve to this definition.
     for m in re.finditer(r"^typedef\s+(?:struct|union|enum)\b[^{;]*\{", masked, re.M):
@@ -260,11 +275,11 @@ def build_def_index(text: str, masked: str | None = None) -> dict[str, str]:
         semi = masked.find(";", end)
         val = text[m.start() : semi + 1]
         for tn in re.findall(r"\b(\w+)\b", masked[end : semi + 1]):
-            put(tn, val)
+            put(tn, val, m.start())
     # 7. function-like macro: `#define name(args) body` — lowest precedence, so a
     # real function of the same name (populated in pass 3) already won.
     for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+(\w+)\(.*(?:\\\n.*)*", masked, re.M):
-        put(m.group(1), text[m.start() : m.end()])
+        put(m.group(1), text[m.start() : m.end()], m.start())
     return idx
 
 
@@ -285,6 +300,86 @@ def extract_definition(
     if index is None:
         index = build_def_index(text, masked)
     return index.get(name)
+
+
+_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]+(?:"([^"]+)"|<([^>]+)>)', re.M)
+
+
+def resolve_includes(path: Path, include_dirs: list[Path], max_files: int = 400) -> list[Path]:
+    """The transitive ``#include`` closure of ``path``, post-order — every
+    header lands before every file that includes it, and ``path`` itself is
+    last. That is dependency order for emission: a header's typedefs/structs/
+    inline helpers must precede the ``.c`` code that uses them.
+
+    Quoted includes resolve relative to the including file first, then the
+    ``-I`` dirs; angled includes search the dirs only. Unresolvable includes
+    (generated headers absent from a source-only checkout, libc headers) are
+    skipped — the shim and the compile check cover or catch what they defined.
+    Cycles are visited once; ``max_files`` bounds runaway closures (the kernel's
+    include graph is enormous and the deep tail is config plumbing, not
+    definitions a pure function needs)."""
+    order: list[Path] = []
+    seen: set[Path] = set()
+
+    def visit(p: Path) -> None:
+        rp = p.resolve()
+        if rp in seen or len(order) >= max_files:
+            return
+        seen.add(rp)
+        try:
+            text = p.read_text(errors="replace")
+        except OSError:
+            return
+        for m in _INCLUDE_RE.finditer(text):
+            name = m.group(1) or m.group(2)
+            candidates = ([p.parent / name] if m.group(1) else []) + [
+                d / name for d in include_dirs
+            ]
+            for c in candidates:
+                if c.is_file():
+                    visit(c)
+                    break
+        order.append(p)
+
+    visit(path)
+    return order
+
+
+def build_multi_index(
+    files: list[Path],
+    cache: dict[str, tuple[dict[str, str], dict[str, int]]] | None = None,
+) -> tuple[dict[str, str], dict[str, tuple[int, int]]]:
+    """One definition index over a whole include closure (``files`` as
+    :func:`resolve_includes` returns them: dependency order, main file last).
+
+    Returns ``(index, ranks)``: ``index`` is name -> definition text with the
+    main file winning name clashes (its ``static`` definition IS the TU's
+    definition; a same-named header helper must not shadow it) and headers
+    otherwise first-come; ``ranks`` is name -> (file position, offset) for the
+    winning definition, giving :func:`lift_symbols` a cross-file emission order.
+    ``cache`` (path -> per-file index) lets a sweep over many ``.c`` files of
+    one tree index each shared header exactly once."""
+    per: list[tuple[dict[str, str], dict[str, int]]] = []
+    for p in files:
+        key = str(p.resolve())
+        if cache is not None and key in cache:
+            per.append(cache[key])
+            continue
+        pos: dict[str, int] = {}
+        idx = build_def_index(p.read_text(errors="replace"), positions=pos)
+        per.append((idx, pos))
+        if cache is not None:
+            cache[key] = (idx, pos)
+    merged: dict[str, str] = {}
+    ranks: dict[str, tuple[int, int]] = {}
+    main_i = len(files) - 1
+    for fi in [main_i, *range(main_i)]:  # main file first = wins clashes
+        idx, pos = per[fi]
+        for name, val in idx.items():
+            if name not in merged:
+                merged[name] = val
+                ranks[name] = (fi, pos.get(name, 0))
+    return merged, ranks
 
 
 def _referenced_idents(body: str) -> set[str]:
@@ -335,6 +430,7 @@ def lift_symbols(
     masked: str | None = None,
     cache: dict[str, str | None] | None = None,
     index: dict[str, str] | None = None,
+    ranks: dict[str, tuple[int, int]] | None = None,
 ) -> tuple[str | None, list[str], list[str]]:
     """Assemble one standalone TU covering every symbol in ``symbols``: ``shim``
     + the union of their transitive in-file definitions (tables, ``#define``s,
@@ -343,14 +439,17 @@ def lift_symbols(
     symbols that had no definition).
 
     ``masked`` and ``index`` (name -> definition text, from
-    :func:`build_def_index`) let a sweep over many symbols of the *same* source
-    pay the 9.5 MB masking and single indexing scan once instead of per lift.
-    ``cache`` is accepted for backward compatibility and kept in sync. A closure
-    exceeding :data:`MAX_CLOSURE` distinct defs aborts the lift (returns None)
-    rather than running away over a god-struct's entire graph."""
-    if masked is None:
-        masked = _mask_comments(source)  # mask once; reused below
+    :func:`build_def_index` or :func:`build_multi_index`) let a sweep over many
+    symbols of the *same* source pay the 9.5 MB masking and single indexing
+    scan once instead of per lift. ``ranks`` (from :func:`build_multi_index`)
+    orders emission across an include closure — headers' defs before the main
+    file's; without it, order is offset-in-``source``. ``cache`` is accepted
+    for backward compatibility and kept in sync. A closure exceeding
+    :data:`MAX_CLOSURE` distinct defs aborts the lift (returns None) rather
+    than running away over a god-struct's entire graph."""
     if index is None:
+        if masked is None:
+            masked = _mask_comments(source)  # mask once; reused below
         index = build_def_index(source, masked)  # one scan; every lookup O(1)
     if cache is None:
         cache = {}
@@ -390,8 +489,12 @@ def lift_symbols(
                 queue.append(ref)
             else:
                 unresolved.add(ref)
-    # emit in file order (dependencies defined before use in the source)
-    order = sorted(pulled, key=lambda n: source.find(pulled[n]))
+    # emit in dependency order: cross-file ranks when lifting through headers
+    # (a header's defs precede its includers'), else offset in the one source.
+    if ranks is not None:
+        order = sorted(pulled, key=lambda n: ranks.get(n, (1 << 30, source.find(pulled[n]))))
+    else:
+        order = sorted(pulled, key=lambda n: source.find(pulled[n]))
     body = "\n\n".join(pulled[n] for n in order)
     tu = (shim + "\n\n" + body + "\n") if shim else body + "\n"
     return tu, sorted(unresolved - shim_names), missing
@@ -409,3 +512,26 @@ def lift_symbol(
     ``symbol`` isn't found, sorted unresolved identifiers)."""
     tu, unresolved, _ = lift_symbols(source, [symbol], shim, masked, cache, index)
     return tu, unresolved
+
+
+def lift_symbols_from_file(
+    c_path: Path,
+    symbols: list[str],
+    shim: str = "",
+    include_dirs: list[Path] | None = None,
+    header_cache: dict[str, tuple[dict[str, str], dict[str, int]]] | None = None,
+    max_files: int = 400,
+) -> tuple[str | None, list[str], list[str]]:
+    """Header-aware :func:`lift_symbols`: with ``include_dirs``, definitions
+    are resolved across the file's whole ``#include`` closure — the kernel
+    shape, where the struct layouts, ``static inline`` helpers, and macros a
+    function needs live in headers, not its own ``.c``. Without
+    ``include_dirs`` this is exactly the single-file lift. ``header_cache``
+    (path -> per-file index) makes a sweep over one tree index each shared
+    header once."""
+    source = Path(c_path).read_text(errors="replace")
+    if not include_dirs:
+        return lift_symbols(source, symbols, shim)
+    files = resolve_includes(Path(c_path), [Path(d) for d in include_dirs], max_files)
+    index, ranks = build_multi_index(files, cache=header_cache)
+    return lift_symbols(source, symbols, shim, index=index, ranks=ranks)

@@ -39,8 +39,11 @@ from cgir.ffi.sources.c_lift import (
 from cgir.ffi.sources.c_lift import (
     _mask_comments,
     build_def_index,
+    build_multi_index,
     extract_definition,
     lift_symbol,
+    lift_symbols,
+    resolve_includes,
 )
 from cgir.pipeline import scan_repo
 
@@ -79,13 +82,21 @@ def sweep_file(
     non_leaf: bool,
     structs: bool,
     tu_dir: Path | None,
+    include_dirs: list[Path] | None = None,
+    hdr_cache: dict | None = None,
 ) -> dict:
     """Sweep one .c file: worklist -> per-function baseline vs lifted compile.
 
     With ``structs``, single-level struct-pointer functions are included and the
     worklist's extracted struct layouts (``entry.struct_defs`` — what the real
     pipeline prepends) are fed into the compile as extra shim, so a function is
-    counted compilable iff its struct context is in-file-resolvable."""
+    counted compilable iff its struct context is in-file-resolvable.
+
+    With ``include_dirs``, the LIFTED side resolves definitions across the
+    file's #include closure (struct layouts / static-inline helpers / macros in
+    headers) and gets NO struct_defs handout — header-aware lifting must pull
+    the struct context itself, so the delta measures exactly that. Baseline is
+    unchanged (function + shim + handed struct layouts)."""
     src_text = source.read_text(errors="replace")
     entries, excluded = c_rust_worklist(
         index, source, pointers=pointers, include_nonleaf=non_leaf, structs=structs
@@ -95,6 +106,10 @@ def sweep_file(
     # extract/lift below is then an O(1) lookup instead of a fresh 9.5 MB scan
     # (without this the struct sweep's ~600 functions rebuild it ~600x).
     index = build_def_index(src_text, masked)
+    multi_index = ranks = None
+    if include_dirs:
+        files = resolve_includes(source, include_dirs)
+        multi_index, ranks = build_multi_index(files, cache=hdr_cache)
     rows = []
     for e in entries:
         # struct-pointer functions need their layout; hand the worklist's
@@ -108,7 +123,12 @@ def sweep_file(
             if d
             else (False, "")
         )
-        tu, unresolved = lift_symbol(src_text, e.name, shim=e_shim, masked=masked, index=index)
+        if multi_index is not None:
+            tu, unresolved, _missing = lift_symbols(
+                src_text, [e.name], shim=shim, index=multi_index, ranks=ranks
+            )
+        else:
+            tu, unresolved = lift_symbol(src_text, e.name, shim=e_shim, masked=masked, index=index)
         lift_ok, lift_err = (
             _compiles(tu, workdir, f"lift_{source.stem}_{e.name}")
             if tu
@@ -156,6 +176,14 @@ def main() -> int:
         "are supplied to the compile; measures how much of the struct wall is "
         "in-file-resolvable)",
     )
+    ap.add_argument(
+        "--include",
+        type=Path,
+        action="append",
+        default=None,
+        help="header-aware lifting: resolve definitions across each file's #include "
+        "closure rooted here (repeatable, e.g. linux/include + arch includes)",
+    )
     args = ap.parse_args()
     if not (args.source or args.source_dir):
         ap.error("one of --source or --source-dir is required")
@@ -178,11 +206,21 @@ def main() -> int:
 
     rows: list[dict] = []
     excluded: list = []
+    hdr_cache: dict = {}  # shared across files: each header indexed once
     t0 = time.time()
     for i, f in enumerate(files):
         try:
             r = sweep_file(
-                f, index, shim, workdir, args.pointers, args.non_leaf, args.structs, args.tu_dir
+                f,
+                index,
+                shim,
+                workdir,
+                args.pointers,
+                args.non_leaf,
+                args.structs,
+                args.tu_dir,
+                include_dirs=args.include,
+                hdr_cache=hdr_cache,
             )
         except Exception as exc:  # a single unparseable file must not sink the sweep
             print(f"  ! {f.name}: {type(exc).__name__}: {exc}", flush=True)

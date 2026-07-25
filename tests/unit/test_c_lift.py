@@ -410,3 +410,124 @@ def test_lifted_tu_compiles_standalone(tmp_path):
         text=True,
     )
     assert r.returncode == 0, r.stderr
+
+
+# ---------------------------------------------------------------------------
+# Header-aware lifting: the kernel's definitions live in HEADERS (struct
+# layouts, static-inline helpers, macros), so a single-file tree-shake can't
+# reach them. resolve_includes() walks the #include closure, build_multi_index
+# unions per-file def-indexes (the .c wins name clashes), and lift emits pulled
+# defs in dependency order (headers before their includers). The compile check
+# stays the arbiter of every pull.
+# ---------------------------------------------------------------------------
+
+
+def _header_tree(tmp_path):
+    inc = tmp_path / "include"
+    inc.mkdir()
+    (inc / "types.h").write_text("typedef unsigned char myu8;\n")
+    (inc / "tab.h").write_text(
+        '#include "types.h"\n'
+        "static const myu8 TAB[3] = { 1, 2, 3 };\n"
+        "static inline myu8 pick2(myu8 i) { return TAB[i % 3]; }\n"
+    )
+    (inc / "loop_a.h").write_text('#include "loop_b.h"\ntypedef int aa_t;\n')
+    (inc / "loop_b.h").write_text('#include "loop_a.h"\ntypedef int bb_t;\n')
+    c = tmp_path / "main.c"
+    c.write_text(
+        "#include <tab.h>\n"
+        '#include "gone_missing.h"\n'
+        "\n"
+        "int use(int i) {\n"
+        "  return pick2((myu8)i) + 1;\n"
+        "}\n"
+    )
+    return c, inc
+
+
+def test_resolve_includes_walks_closure_in_dependency_order(tmp_path):
+    from cgir.ffi.sources.c_lift import resolve_includes
+
+    c, inc = _header_tree(tmp_path)
+    files = resolve_includes(c, [inc])
+    names = [f.name for f in files]
+    # post-order: a header lands before every file that includes it; the .c is last
+    assert names[-1] == "main.c"
+    assert names.index("types.h") < names.index("tab.h") < names.index("main.c")
+    # the missing include is skipped, not fatal
+    assert "gone_missing.h" not in names
+
+
+def test_resolve_includes_survives_cycles(tmp_path):
+    from cgir.ffi.sources.c_lift import resolve_includes
+
+    _, inc = _header_tree(tmp_path)
+    a = inc / "loop_a.h"
+    files = resolve_includes(a, [inc])
+    assert [f.name for f in files].count("loop_a.h") == 1  # visited once, no recursion blowup
+
+
+def test_multi_index_main_file_wins_name_clash(tmp_path):
+    from cgir.ffi.sources.c_lift import build_multi_index, resolve_includes
+
+    inc = tmp_path / "include"
+    inc.mkdir()
+    (inc / "dup.h").write_text("static inline int both(int x) { return x + 100; }\n")
+    c = tmp_path / "main.c"
+    c.write_text('#include "include/dup.h"\nstatic int both(int x) { return x + 1; }\n')
+    index, ranks = build_multi_index(resolve_includes(c, [inc]))
+    assert "+ 1" in index["both"] and "+ 100" not in index["both"]
+    assert "both" in ranks
+
+
+def test_lift_pulls_struct_and_inline_helper_from_header(tmp_path):
+    """The kernel shape: the target's table, helper, and typedef chain live in
+    headers. Header-aware lift pulls all of them into one compilable TU;
+    single-file lift (the old behavior, still the default) leaves them
+    unresolved."""
+    from cgir.ffi.sources.c_lift import lift_symbols_from_file
+
+    c, inc = _header_tree(tmp_path)
+    # old behavior preserved: no include dirs -> helper unresolved
+    tu0, unresolved0, _ = lift_symbols_from_file(c, ["use"])
+    assert tu0 is not None and "pick2" in unresolved0
+    # header-aware: everything pulled, dependency-ordered, compilable
+    tu, unresolved, missing = lift_symbols_from_file(c, ["use"], include_dirs=[inc])
+    assert missing == []
+    assert tu is not None
+    assert "typedef unsigned char myu8;" in tu
+    assert "TAB[3]" in tu and "pick2" in tu
+    assert not ({"pick2", "TAB", "myu8"} & set(unresolved))
+    # dependency order: typedef before table before helper before target
+    assert tu.index("typedef unsigned char myu8") < tu.index("TAB[3]") < tu.index("int use")
+
+
+@pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler")
+def test_header_aware_lifted_tu_compiles(tmp_path):
+    from cgir.ffi.sources.c_lift import lift_symbols_from_file
+
+    c, inc = _header_tree(tmp_path)
+    tu, _, _ = lift_symbols_from_file(c, ["use"], include_dirs=[inc])
+    assert tu is not None
+    out = tmp_path / "lifted.c"
+    out.write_text(tu)
+    r = subprocess.run(
+        ["cc", "-c", "-w", str(out), "-o", str(tmp_path / "lifted.o")],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+
+
+def test_header_cache_is_shared_across_lifts(tmp_path):
+    """A sweep over many files of one tree indexes each header once — the
+    cache maps path -> per-file index and is filled on first use."""
+    from cgir.ffi.sources.c_lift import lift_symbols_from_file
+
+    c, inc = _header_tree(tmp_path)
+    cache: dict = {}
+    lift_symbols_from_file(c, ["use"], include_dirs=[inc], header_cache=cache)
+    assert any("tab.h" in k for k in cache)
+    n = len(cache)
+    lift_symbols_from_file(c, ["use"], include_dirs=[inc], header_cache=cache)
+    assert len(cache) == n  # second lift reused every entry

@@ -938,6 +938,15 @@ def rewrite_cmd(
             help="c-rust --lift: directory for the lifted TU + its index (default: temp).",
         ),
     ] = None,
+    lift_include: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--lift-include",
+            help="c-rust --lift: resolve definitions across the file's #include closure "
+            "rooted at these dirs (repeatable) — pulls struct layouts, static-inline "
+            "helpers, and macros that live in headers, the kernel shape.",
+        ),
+    ] = None,
     n_trials: Annotated[
         int, typer.Option("--n-trials", help="c-rust: differential inputs per candidate.")
     ] = 300,
@@ -1086,6 +1095,7 @@ def rewrite_cmd(
             list(lift or []),
             lift_shim,
             lift_out,
+            list(lift_include or []),
         )
         return
     if lang == "python-rust":
@@ -1212,6 +1222,7 @@ def _rewrite_c_rust(
     lift: list[str] | None = None,
     lift_shim: Path | None = None,
     lift_out: Path | None = None,
+    lift_include: list[Path] | None = None,
 ) -> None:
     import shutil
 
@@ -1235,11 +1246,13 @@ def _rewrite_c_rust(
         # implied.
         import tempfile
 
-        from cgir.ffi.sources.c_lift import DEFAULT_SHIM, lift_symbols
+        from cgir.ffi.sources.c_lift import DEFAULT_SHIM, lift_symbols_from_file
         from cgir.pipeline import scan_repo
 
         shim = lift_shim.read_text() if lift_shim else DEFAULT_SHIM
-        tu, unresolved, missing = lift_symbols(c_source.read_text(errors="replace"), lift, shim)
+        tu, unresolved, missing = lift_symbols_from_file(
+            c_source, lift, shim, include_dirs=lift_include or None
+        )
         if missing:
             raise typer.BadParameter(
                 f"--lift: no file-scope definition found in {c_source.name} for: "
