@@ -1116,7 +1116,21 @@ def rewrite_cmd(
         )
         return
     if lang != "python":
-        raise typer.BadParameter(f"--lang must be python, c-rust, or python-rust, got {lang!r}")
+        # 'python' is the same-language in-repo loop below; everything else is a
+        # rewrite pair. Builtins (c-rust/python-rust) are dispatched above with
+        # their CLI flags; a name the registry knows but we didn't dispatch is a
+        # plugin the CLI can't yet plumb flags for — say so precisely.
+        from cgir.rewrite_pairs import available_pairs, pair_for
+
+        if pair_for(lang) is not None:
+            raise typer.BadParameter(
+                f"rewrite pair {lang!r} is installed but has no CLI flag surface yet; "
+                "invoke it via the API (cgir.rewrite_pairs.pair_for) for now."
+            )
+        raise typer.BadParameter(
+            f"--lang must be 'python' or an installed rewrite pair "
+            f"({', '.join(available_pairs())}), got {lang!r}"
+        )
 
     if oracle not in ("tests", "replay"):
         raise typer.BadParameter(f"--oracle must be tests or replay, got {oracle!r}")
