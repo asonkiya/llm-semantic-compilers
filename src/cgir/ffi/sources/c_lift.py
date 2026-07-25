@@ -331,7 +331,7 @@ def extract_definition(
 _INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]+(?:"([^"]+)"|<([^>]+)>)', re.M)
 
 
-def resolve_includes(path: Path, include_dirs: list[Path], max_files: int = 400) -> list[Path]:
+def resolve_includes(path: Path, include_dirs: list[Path], max_files: int = 2000) -> list[Path]:
     """The transitive ``#include`` closure of ``path``, post-order — every
     header lands before every file that includes it, and ``path`` itself is
     last. That is dependency order for emission: a header's typedefs/structs/
@@ -385,6 +385,8 @@ def build_multi_index(
     winning definition, giving :func:`lift_symbols` a cross-file emission order.
     ``cache`` (path -> per-file index) lets a sweep over many ``.c`` files of
     one tree index each shared header exactly once."""
+    if not files:
+        return {}, {}
     per: list[tuple[dict[str, str], dict[str, int]]] = []
     for p in files:
         key = str(p.resolve())
@@ -446,7 +448,7 @@ typedef uint64_t u64; typedef int64_t i64;
 # `Parse`/`Vdbe`, whose struct graph pulls most of the schema) blow past it, and
 # those aren't isolatable into a standalone TU anyway. The cap keeps lift O(cap),
 # never O(whole symbol table). See tests/unit/test_c_lift.py::test_closure_cap.
-MAX_CLOSURE = 400
+MAX_CLOSURE = 3000
 
 
 def lift_symbols(
@@ -554,7 +556,7 @@ def lift_symbols_from_file(
     shim: str = "",
     include_dirs: list[Path] | None = None,
     header_cache: dict[str, tuple[dict[str, str], dict[str, int]]] | None = None,
-    max_files: int = 400,
+    max_files: int = 2000,
 ) -> tuple[str | None, list[str], list[str]]:
     """Header-aware :func:`lift_symbols`: with ``include_dirs``, definitions
     are resolved across the file's whole ``#include`` closure — the kernel
