@@ -24,7 +24,7 @@ from cgir.rewrite_pairs import (
 
 def test_builtins_are_registered():
     names = available_pairs()
-    assert "c-rust" in names and "python-rust" in names
+    assert {"c-rust", "python-rust", "python-python"} <= set(names)
     cr = pair_for("c-rust")
     assert cr is not None and "differential" in cr.description.lower()
     assert isinstance(cr, RewritePair)  # runtime-checkable structural check

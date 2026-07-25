@@ -1,0 +1,52 @@
+# cgir verify-diff — reusable action: block a PR that changes behavior.
+#
+# Drop this into a workflow to gate merges on behavior preservation. It records
+# each changed function's real inputs by running your test suite, then runs the
+# base and PR implementations on them and fails if any diverge.
+#
+#   - uses: ./.github/actions/verify-diff
+#     with:
+#       base-ref: origin/${{ github.base_ref }}
+#       fuzz: "5"
+#
+# Requires: the repo installs cgir (pip install codegraph-ir) and its own test
+# deps, and a full-history checkout (fetch-depth: 0) so the base ref exists.
+name: cgir verify-diff
+description: Prove the PR's changed functions are behavior-preserving against your tests.
+inputs:
+  base-ref:
+    description: Git ref to compare the working tree against.
+    required: false
+    default: origin/main
+  fuzz:
+    description: Also check up to N edge-value mutations around each recorded input.
+    required: false
+    default: "0"
+  repo:
+    description: Repo root.
+    required: false
+    default: "."
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        cgir verify-diff "${{ inputs.base-ref }}" \
+          --repo "${{ inputs.repo }}" \
+          --fuzz "${{ inputs.fuzz }}" \
+          --out cgir-verify-diff.json
+    - if: always()
+      shell: bash
+      run: |
+        if [ -f cgir-verify-diff.json ]; then
+          echo "### cgir verify-diff" >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+        import json
+        r = json.load(open("cgir-verify-diff.json"))
+        s = r["summary"]
+        print(f"**{s['preserving']} preserving · {s['diverged']} diverged · {s['unverified']} unverified** (base `{r['base_ref']}`)\n")
+        for v in sorted(r["verdicts"], key=lambda v: v["status"] != "diverged"):
+            mark = {"preserving": "✅", "diverged": "❌", "unverified": "⚠️"}.get(v["status"], "?")
+            print(f"- {mark} `{v['qualname']}` — {v['detail']}")
+        PY
+        fi

@@ -72,6 +72,38 @@ def _run_python_rust(
     )
 
 
+def _run_python_python(
+    index_dir: Path,
+    source: Path,
+    *,
+    sampler: Sampler,
+    opts: dict[str, Any],
+    k: int,
+    budget_usd: float | None,
+    ledger_path: Path | None,
+    log: Any,
+) -> dict[str, Any]:
+    # Same-language: regenerate a repo's pure, test-covered functions and verify
+    # each against the repo's own tests (or replayed traces). ``source`` is the
+    # repo root. This is the founding cgir engine, now a first-class pair.
+    from cgir.rewrite import rewrite_repo
+
+    return rewrite_repo(
+        index_dir,
+        source,
+        sampler=sampler,
+        query=opts.get("query", "kind:pure covered:true"),
+        k=k,
+        mode=opts.get("mode", "translate"),
+        run_tests=opts.get("run_tests", True),
+        oracle=opts.get("oracle"),
+        budget_usd=budget_usd,
+        ledger_path=ledger_path,
+        apply=opts.get("apply", False),
+        log=log,
+    )
+
+
 BUILTIN_PAIRS = (
     FunctionPair(
         name="c-rust",
@@ -82,5 +114,10 @@ BUILTIN_PAIRS = (
         name="python-rust",
         description="Python → Rust, verified by replaying recorded (args, result) traces.",
         call=_run_python_rust,
+    ),
+    FunctionPair(
+        name="python-python",
+        description="Python → Python: regenerate pure functions, verified against the repo's tests.",
+        call=_run_python_python,
     ),
 )

@@ -1564,5 +1564,66 @@ def regenerate_cmd(
     typer.echo(result.code)
 
 
+@app.command(name="verify-diff")
+def verify_diff_cmd(
+    base_ref: Annotated[
+        str, typer.Argument(help="Git ref to compare the working tree against.")
+    ] = "HEAD",
+    repo: Annotated[Path, typer.Option("--repo", help="Repo root.")] = Path("."),
+    fuzz: Annotated[
+        int,
+        typer.Option(
+            "--fuzz", help="Also check up to N edge-value mutations around each recorded input."
+        ),
+    ] = 0,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Write the full JSON report here.")
+    ] = None,
+) -> None:
+    """Prove changed functions are behavior-preserving against the repo's tests.
+
+    Records each changed function's real inputs by running the suite, then runs
+    the OLD and NEW implementations on them (optionally fuzzed) and reports:
+    preserving / diverged (with a counterexample) / unverified (with a reason).
+    Exits non-zero if anything diverged — usable directly as a CI merge gate.
+    """
+    import json as _json
+
+    from cgir.verify_diff import DIVERGED, PRESERVING, UNVERIFIED, verify_diff
+
+    report = verify_diff(repo, base_ref, fuzz_rounds=fuzz)
+    for note in report.notes:
+        typer.echo(f"note: {note}")
+
+    mark = {PRESERVING: "✓", DIVERGED: "✗", UNVERIFIED: "?"}
+    for v in sorted(report.verdicts, key=lambda v: (v.status != DIVERGED, v.qualname)):
+        line = f"  {mark.get(v.status, '?')} {v.qualname}: {v.status} — {v.detail}"
+        if v.fuzzed:
+            line += f" (+{v.fuzzed} fuzzed)"
+        typer.echo(line)
+
+    s = report.summary
+    typer.echo(f"\n{s[PRESERVING]} preserving, {s[DIVERGED]} diverged, {s[UNVERIFIED]} unverified")
+    if out is not None:
+        out.write_text(
+            _json.dumps(
+                {
+                    "base_ref": base_ref,
+                    "ok": report.ok,
+                    "summary": s,
+                    "verdicts": [vars(v) for v in report.verdicts],
+                    "notes": report.notes,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+    if not report.ok:
+        typer.echo("FAIL: a change altered behavior on a tested input.")
+        raise typer.Exit(code=1)
+    if s[UNVERIFIED] and not s[PRESERVING]:
+        typer.echo("nothing could be verified (no changed function is covered by a test).")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
