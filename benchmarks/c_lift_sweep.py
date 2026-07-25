@@ -38,6 +38,7 @@ from cgir.ffi.sources.c_lift import (
 )
 from cgir.ffi.sources.c_lift import (
     _mask_comments,
+    build_def_index,
     extract_definition,
     lift_symbol,
 )
@@ -90,7 +91,10 @@ def sweep_file(
         index, source, pointers=pointers, include_nonleaf=non_leaf, structs=structs
     )
     masked = _mask_comments(src_text)
-    cache: dict[str, str | None] = {}
+    # One pass builds the whole name->definition index; every per-function
+    # extract/lift below is then an O(1) lookup instead of a fresh 9.5 MB scan
+    # (without this the struct sweep's ~600 functions rebuild it ~600x).
+    index = build_def_index(src_text, masked)
     rows = []
     for e in entries:
         # struct-pointer functions need their layout; hand the worklist's
@@ -98,13 +102,13 @@ def sweep_file(
         # lifting's table/helper contribution, not the struct context.
         struct_ctx = "\n\n".join(e.struct_defs[k] for k in sorted(e.struct_defs))
         e_shim = shim + ("\n\n" + struct_ctx if struct_ctx else "")
-        d = extract_definition(e.name, src_text, masked)
+        d = extract_definition(e.name, src_text, masked, index=index)
         base_ok, _ = (
             _compiles(e_shim + "\n" + d + "\n", workdir, f"base_{source.stem}_{e.name}")
             if d
             else (False, "")
         )
-        tu, unresolved = lift_symbol(src_text, e.name, shim=e_shim, masked=masked, cache=cache)
+        tu, unresolved = lift_symbol(src_text, e.name, shim=e_shim, masked=masked, index=index)
         lift_ok, lift_err = (
             _compiles(tu, workdir, f"lift_{source.stem}_{e.name}")
             if tu
