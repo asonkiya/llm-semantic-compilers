@@ -17,5 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --default-toolchain stable --profile minimal
 ENV PATH="/root/.cargo/bin:${PATH}"
+# The freestanding target the gate compiles pure functions against — installed
+# in the image so every (ephemeral) `docker run` has it (E0463 otherwise).
+RUN rustup target add aarch64-unknown-none-softfloat
 
 WORKDIR /kernel
