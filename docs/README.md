@@ -8,6 +8,8 @@ These are the working docs for **CodeGraph IR** (CGIR). The authoritative produc
 | [`status.md`](./status.md) | What's implemented today, what's stubbed, test coverage, recent milestone completions |
 | [`roadmap.md`](./roadmap.md) | P1 / P2 / future milestones with ordering rationale |
 | [`development.md`](./development.md) | Install, common commands, red-green TDD workflow, milestone-tag conventions |
+| [`verify-diff.md`](./verify-diff.md) | The behavior-preservation gate — prove a change didn't alter behavior vs a ref |
+| [`design-rewrite-pairs.md`](./design-rewrite-pairs.md) | The pluggable verified-rewrite engine (`cgir.rewrite_pairs`) and how to add a pair |
 
 If you're starting cold:
 

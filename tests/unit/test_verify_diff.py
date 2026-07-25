@@ -135,7 +135,7 @@ def test_changed_functions_detects_the_edit(repo):
         "def scale(x, k):\n    return x + k\n\n\ndef clamp(x, lo, hi):\n"
         "    return lo if x < lo else hi if x > hi else x\n"
     )
-    changed, notes = changed_py_functions(repo, "HEAD")
+    changed, _notes = changed_py_functions(repo, "HEAD")
     names = {c.qualname for c in changed}
     assert "mathlib.scale" in names and "mathlib.clamp" not in names
     scale = next(c for c in changed if c.qualname == "mathlib.scale")
