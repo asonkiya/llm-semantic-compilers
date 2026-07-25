@@ -243,6 +243,7 @@ def verify_diff(
     *,
     fuzz_rounds: int = 0,
     capture_argv: list[str] | None = None,
+    js_test_cmd: list[str] | None = None,
 ) -> DiffReport:
     """End to end: find changed functions, record their real inputs by running
     the repo's tests, and differentially replay old vs new (optionally fuzzed).
@@ -273,14 +274,16 @@ def verify_diff(
             report.verdicts.append(v)
 
     # JS/TS changed functions ride the Node oracle (same three-bucket contract).
-    report.verdicts.extend(_js_verdicts(repo, base_ref, fuzz_rounds))
+    report.verdicts.extend(_js_verdicts(repo, base_ref, fuzz_rounds, js_test_cmd))
 
     if not report.verdicts and not any("failed" in n for n in report.notes):
         report.notes.append(f"no changed Python or JS/TS functions vs {base_ref}")
     return report
 
 
-def _js_verdicts(repo: Path, base_ref: str, fuzz_rounds: int) -> list[Verdict]:
+def _js_verdicts(
+    repo: Path, base_ref: str, fuzz_rounds: int, test_cmd: list[str] | None = None
+) -> list[Verdict]:
     """Verdicts for changed JS/TS functions, or [] if none / node absent."""
     try:
         from cgir.js_verify import changed_js_functions, node_available, verify_diff_js
@@ -294,4 +297,4 @@ def _js_verdicts(repo: Path, base_ref: str, fuzz_rounds: int) -> list[Verdict]:
             Verdict(cf.qualname, UNVERIFIED, "node not on PATH (needed for JS/TS)")
             for cf in changed
         ]
-    return verify_diff_js(repo, base_ref, fuzz_rounds=fuzz_rounds)
+    return verify_diff_js(repo, base_ref, fuzz_rounds=fuzz_rounds, test_cmd=test_cmd)

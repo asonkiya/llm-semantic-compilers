@@ -44,37 +44,65 @@ def node_available() -> bool:
 _JS_REPLAY_HARNESS = r"""
 "use strict";
 const fs = require("fs");
+const path = require("path");
+const { createRequire } = require("module");
 const P = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-// P: {functionName, oldSrc, newSrc, argTuples, isTS, repo}
+// P: {functionName, oldSrc, newSrc, argTuples, isTS, repo} — oldSrc/newSrc are
+// the WHOLE module file (each version), not just the function, so the target
+// resolves its module-level dependencies (regexes, tables, imports) exactly as
+// it does at runtime. Evaluating the function alone would leave those undefined
+// and make both versions throw identically — a false "preserving".
 
-function transpile(src) {
-  if (!P.isTS) return src;
-  // Prefer esbuild (stable transform API, ubiquitous in JS toolchains); fall
-  // back to typescript@5's transpileModule. TypeScript 7 (the native port)
-  // drops the JS transpileModule export, so we feature-check rather than assume.
+function esbuildTransform(src, loader) {
   try {
     const esbuild = require(require.resolve("esbuild", { paths: [P.repo] }));
-    return esbuild.transformSync(src, { loader: "ts", format: "cjs", target: "es2020" }).code;
-  } catch (e) { if (e && e.code !== "MODULE_NOT_FOUND" && !/Cannot find module/.test(String(e.message))) throw e; }
-  try {
-    const ts = require(require.resolve("typescript", { paths: [P.repo] }));
-    if (ts && typeof ts.transpileModule === "function") {
-      return ts.transpileModule(src, { compilerOptions: { target: "ES2020", module: "CommonJS" } }).outputText;
-    }
-  } catch (e) { if (e && e.code !== "MODULE_NOT_FOUND" && !/Cannot find module/.test(String(e.message))) throw e; }
-  const err = new Error("no usable TS transpiler in the repo (install esbuild or typescript@5)");
-  err.cgir = "no-ts";
-  throw err;
+    return esbuild.transformSync(src, { loader: loader, format: "cjs", target: "es2020" }).code;
+  } catch (e) {
+    if (e && e.code !== "MODULE_NOT_FOUND" && !/Cannot find module/.test(String(e.message))) throw e;
+    return null;
+  }
 }
 
-function reconstruct(src, name) {
-  let s = src.replace(/^\s*export\s+default\s+/, "").replace(/^\s*export\s+/, "");
-  s = transpile(s);
+function transpile(src) {
+  // TypeScript must be transpiled (esbuild, or typescript@5's transpileModule —
+  // TS 7's native port drops it, so we feature-check).
+  if (P.isTS) {
+    const out = esbuildTransform(src, "ts");
+    if (out !== null) return out;
+    try {
+      const ts = require(require.resolve("typescript", { paths: [P.repo] }));
+      if (ts && typeof ts.transpileModule === "function") {
+        return ts.transpileModule(src, { compilerOptions: { target: "ES2020", module: "CommonJS" } }).outputText;
+      }
+    } catch (e) { if (e && e.code !== "MODULE_NOT_FOUND" && !/Cannot find module/.test(String(e.message))) throw e; }
+    const err = new Error("no usable TS transpiler in the repo (install esbuild or typescript@5)");
+    err.cgir = "no-ts";
+    throw err;
+  }
+  // Plain JS: CommonJS evaluates directly. ESM (import/export) must be normalised
+  // to CJS first — esbuild if present, else an honest error.
+  if (/^\s*(import|export)\s/m.test(src)) {
+    const out = esbuildTransform(src, "js");
+    if (out !== null) return out;
+    const err = new Error("ESM module needs esbuild to replay (install esbuild in the repo)");
+    err.cgir = "no-esbuild";
+    throw err;
+  }
+  return src;
+}
+
+function reconstruct(moduleSrc, name) {
+  const s = transpile(moduleSrc);
+  const mod = { exports: {} };
+  // A real require rooted in the repo so the module's own imports resolve.
+  const req = createRequire(path.join(P.repo, "__cgir_replay__.js"));
   const factory = new Function(
-    '"use strict";\n' + s + '\n; return (typeof ' + name + ' !== "undefined") ? ' + name + " : undefined;"
+    "module", "exports", "require", "__filename", "__dirname",
+    '"use strict";\n' + s + "\n; return (typeof " + name + ' !== "undefined") ? ' + name +
+      " : (module.exports && (module.exports." + name + " || (module.exports.default && module.exports.default." + name + ")));"
   );
-  const fn = factory();
-  if (typeof fn !== "function") { const e = new Error("'" + name + "' is not a function after evaluation"); e.cgir = "not-fn"; throw e; }
+  const fn = factory(mod, mod.exports, req, path.join(P.repo, "__cgir_replay__.js"), P.repo);
+  if (typeof fn !== "function") { const e = new Error("'" + name + "' is not a function after evaluating the module"); e.cgir = "not-fn"; throw e; }
   return fn;
 }
 
@@ -259,13 +287,16 @@ def changed_js_functions(repo: Path, base_ref: str) -> tuple[list[ChangedJsFunct
             old_source = _git(repo, "show", f"{base_ref}:{rel}")
         except subprocess.CalledProcessError:
             continue  # newly added
+        new_source = new_file.read_text(errors="replace")
         old_defs = _js_func_defs(old_source, ext)
-        new_defs = _js_func_defs(new_file.read_text(errors="replace"), ext)
-        for name, new_src in new_defs.items():
-            if name in old_defs and old_defs[name] != new_src:
+        new_defs = _js_func_defs(new_source, ext)
+        for name in new_defs:
+            # detect change at function granularity, but carry the WHOLE file
+            # (old + new) so replay resolves module-level deps like the real module.
+            if name in old_defs and old_defs[name] != new_defs[name]:
                 changed.append(
                     ChangedJsFunction(
-                        f"{rel}:{name}", rel, name, old_defs[name], new_src, ext in _TS_EXTS
+                        f"{rel}:{name}", rel, name, old_source, new_source, ext in _TS_EXTS
                     )
                 )
     return changed, notes

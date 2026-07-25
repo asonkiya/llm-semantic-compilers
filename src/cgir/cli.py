@@ -1579,6 +1579,13 @@ def verify_diff_cmd(
     out: Annotated[
         Path | None, typer.Option("--out", help="Write the full JSON report here.")
     ] = None,
+    js_test: Annotated[
+        str | None,
+        typer.Option(
+            "--js-test",
+            help="Command to record JS/TS inputs (default 'node --test'); e.g. 'npx mocha'.",
+        ),
+    ] = None,
 ) -> None:
     """Prove changed functions are behavior-preserving against the repo's tests.
 
@@ -1591,7 +1598,9 @@ def verify_diff_cmd(
 
     from cgir.verify_diff import DIVERGED, PRESERVING, UNVERIFIED, verify_diff
 
-    report = verify_diff(repo, base_ref, fuzz_rounds=fuzz)
+    report = verify_diff(
+        repo, base_ref, fuzz_rounds=fuzz, js_test_cmd=js_test.split() if js_test else None
+    )
     for note in report.notes:
         typer.echo(f"note: {note}")
 

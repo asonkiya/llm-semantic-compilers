@@ -39,8 +39,14 @@ from typing import Any
 Trace = tuple[tuple[Any, ...], Any]
 
 _CAPTURE_HARNESS = """\
-import copy, pickle, runpy, sys
+import copy, os, pickle, runpy, sys
 from collections import defaultdict
+
+# The harness file lives in a tempdir, so sys.path[0] is that tempdir, not the
+# repo — pytest run via runpy then can't import the repo's own package by name
+# ("module X has no attribute ..."), collecting nothing. Put the repo cwd first,
+# exactly as a normal `pytest` invocation in the repo would.
+sys.path.insert(0, os.getcwd())
 
 TARGETS = set(tuple(t) for t in {targets!r})  # (abs_filename, func_name)
 CAP = {cap!r}

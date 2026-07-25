@@ -84,10 +84,29 @@ def test_broken_new_source_is_unverified_not_crash(tmp_path):
     assert v.status == UNVERIFIED and "new version" in v.detail
 
 
-def test_export_prefix_is_stripped(tmp_path):
+def test_commonjs_module_exports_resolves(tmp_path):
+    old = "function area(w, h) { return w * h; }\nmodule.exports = { area };"
+    new = "function area(w, h) { return h * w; }\nmodule.exports = { area };"
+    assert _run(tmp_path, "area", old, new, [[3, 4]]).status == PRESERVING
+
+
+def test_module_level_dependency_resolves_not_false_preserving(tmp_path):
+    """The bug the real-repo pass caught: a function that references a
+    module-level binding must be evaluated in the WHOLE module, or both versions
+    throw ReferenceError identically and the gate falsely reports 'preserving'.
+    Here old and new genuinely differ and must diverge."""
+    old = "const K = 1024;\nfunction f(n) { return n * K; }\nmodule.exports = { f };"
+    new = "const K = 1024;\nfunction f(n) { return n * K + 1; }\nmodule.exports = { f };"
+    v = _run(tmp_path, "f", old, new, [[2]])
+    assert v.status == DIVERGED and "2048" in v.detail and "2049" in v.detail
+
+
+def test_esm_without_esbuild_is_unverified_not_false_pass(tmp_path):
     old = "export function area(w, h) { return w * h; }"
     new = "export function area(w, h) { return h * w; }"
-    assert _run(tmp_path, "area", old, new, [[3, 4]]).status == PRESERVING
+    v = _run(tmp_path, "area", old, new, [[3, 4]])
+    # our test repo has no esbuild — honest 'unverified', never a silent pass
+    assert v.status == UNVERIFIED and "esbuild" in v.detail
 
 
 _TS_PROBE = (
