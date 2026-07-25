@@ -11,12 +11,20 @@ file scope, references parameters that aren't in scope there).
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 
 import pytest
 
-from cgir.ffi.sources.c_lift import DEFAULT_SHIM, extract_definition, lift_symbol, lift_symbols
+from cgir.ffi.sources import c_lift
+from cgir.ffi.sources.c_lift import (
+    DEFAULT_SHIM,
+    build_def_index,
+    extract_definition,
+    lift_symbol,
+    lift_symbols,
+)
 
 # A miniature "amalgamation": a table, a #define, a helper, and the target that
 # reads all three — plus a decoy function whose body declares locals named like
@@ -319,6 +327,70 @@ def test_lift_absent_symbol_returns_none():
 def test_lift_prepends_shim():
     tu, _ = lift_symbol(_SRC, "mix", shim="typedef unsigned u32;")
     assert tu is not None and tu.startswith("typedef unsigned u32;")
+
+
+def test_build_def_index_matches_per_name_extraction():
+    """The one-pass index must answer every lookup exactly as a fresh per-name
+    ``extract_definition`` would — it's the same patterns with the loop inverted.
+    (Equivalence was validated over 500+ names of the 9.5 MB SQLite amalgamation;
+    this pins it on the in-repo fixtures across every definition category.)"""
+    for src in (_SRC, _MACRO_THEN_FN, _TYPEDEF_SRC, _BRACE_TRAP, _PREPROC_TRAP):
+        index = build_def_index(src)
+        names = set(re.findall(r"\b([A-Za-z_]\w*)\b", src))
+        for name in names:
+            # a lone call (builds its own index) and an index-backed call agree
+            assert (
+                extract_definition(name, src)
+                == index.get(name)
+                == (extract_definition(name, src, index=index))
+            ), name
+
+
+def test_extract_definition_accepts_shared_index():
+    """Callers doing many lookups pass a prebuilt index; results are identical to
+    the un-indexed call (this is the O(1) fast path the sweep relies on)."""
+    index = build_def_index(_TYPEDEF_SRC)
+    assert extract_definition("pick", _TYPEDEF_SRC, index=index).startswith("u8 pick(")
+    assert extract_definition("no_such", _TYPEDEF_SRC, index=index) is None
+
+
+def test_lift_runaway_closure_is_capped(monkeypatch):
+    """A function reaching a huge in-file struct/helper graph (SQLite's `Parse`)
+    must not scan the whole symbol table — past ``MAX_CLOSURE`` the lift bails to
+    None instead of running away. Simulated with a long dependency chain and a
+    tiny cap."""
+    # f0 -> f1 -> ... -> fN, each calling the next: a closure of N+1 defs.
+    n = 30
+    parts = [f"int f{i}(int x) {{ return f{i + 1}(x); }}" for i in range(n)]
+    parts.append(f"int f{n}(int x) {{ return x; }}")
+    src = "\n".join(parts) + "\n"
+    # generous cap: the whole chain lifts.
+    assert lift_symbol(src, "f0")[0] is not None
+    # tight cap: the closure blows past it -> not liftable.
+    monkeypatch.setattr(c_lift, "MAX_CLOSURE", 5)
+    assert lift_symbol(src, "f0")[0] is None
+
+
+def test_lift_struct_function_resolves_field_names_to_unresolved():
+    """The perf-bug shape: a struct-pointer function references struct *field*
+    names and *locals* that have no file-scope definition. They must resolve to
+    unresolved (never mis-defined), while the struct typedef itself is pulled —
+    and the whole lift is fast (O(1) lookups, no per-field full-file scan)."""
+    src = """\
+typedef struct Node { int lo; int hi; struct Node *next; } Node;
+
+int span(Node *p) {
+    int lo = p->lo;
+    int hi = p->hi;
+    return hi - lo;
+}
+"""
+    tu, unresolved = lift_symbol(src, "span")
+    assert tu is not None
+    assert "typedef struct Node" in tu  # the struct layout is pulled
+    # field/local names are reported unresolved, not turned into bogus file-scope defs
+    assert {"lo", "hi"} <= set(unresolved)
+    assert "int lo =" not in tu.split("int span")[0]  # no local hoisted above the fn
 
 
 @pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler")

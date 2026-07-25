@@ -197,73 +197,94 @@ def _at_col0(text: str, idx: int) -> bool:
     return ls < len(text) and text[ls] not in " \t#"
 
 
-def extract_definition(name: str, text: str, masked: str | None = None) -> str | None:
-    """The file-scope definition of ``name`` — a ``#define``, a
-    ``name[...] = {...};`` table, a ``name = ...;`` const, or a
-    ``name(...) {...}`` function — brace-matched, or None. Matching runs against
-    a comment/string-masked copy (so uses, and code inside comments, are never
-    mistaken for a definition), but the returned text is sliced from the
-    original. ``masked`` may be passed pre-computed (``lift_symbol`` masks the
-    source once and reuses it — masking a 9.5 MB amalgamation per dependency
-    would otherwise dominate)."""
-    esc = re.escape(name)
+def build_def_index(text: str, masked: str | None = None) -> dict[str, str]:
+    """Map every file-scope definition name -> its source text, in ONE pass over
+    the file. This is :func:`extract_definition` with the loop inverted: rather
+    than scan the whole 9.5 MB source once per *queried* name (~0.65s each — and
+    a single struct function pulls a closure of ~90 names, most of them struct
+    fields/locals that resolve to nothing but still pay a full scan → tens of
+    seconds, and a god-struct like ``Parse`` blows the closure into the
+    thousands → a wedge), scan once and answer every lookup from the dict.
+
+    Population order encodes the same precedence :func:`extract_definition` had
+    by trying its patterns in sequence: object-macro > table > function > const
+    > simple-typedef > struct-typedef > function-macro. First writer wins (a real
+    function beats a ``#define name(args)`` alias for it — the optional-inline
+    idiom, tiny-AES ``Multiply``)."""
     if masked is None:
         masked = _mask_comments(text)
-    # object-like macro: `#define name value` (a constant; name NOT immediately
-    # followed by `(`). Function-like macros are handled LAST, below, so a real
-    # function wins over a `#define name(args) ...` alias for it (the common
-    # optional-inline idiom, e.g. tiny-AES `Multiply`/`getSBoxValue`).
-    m = re.search(rf"^[ \t]*#[ \t]*define[ \t]+{esc}(?=[ \t]).*(?:\\\n.*)*", masked, re.M)
-    if m:
-        return text[m.start() : m.end()]
-    # array/table definition: `... name[...] = { ... };`
-    for m in re.finditer(rf"(?<![\w.>]){esc}\s*\[[^\]]*\]\s*=\s*", masked):
+    idx: dict[str, str] = {}
+
+    def put(name: str, val: str) -> None:
+        if name not in idx:
+            idx[name] = val
+
+    # 1. object-like macro: `#define name value` (name NOT followed by `(`).
+    for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+(\w+)(?=[ \t]).*(?:\\\n.*)*", masked, re.M):
+        put(m.group(1), text[m.start() : m.end()])
+    # 2. array/table: `... name[...] = { ... };`
+    for m in re.finditer(r"(?<![\w.>])(\w+)\s*\[[^\]]*\]\s*=\s*", masked):
         if not _at_col0(masked, m.start()):
-            continue  # a local array inside a function body, not a file-scope table
+            continue
         brace = masked.find("{", m.end())
         semi = masked.find(";", m.end())
         if brace != -1 and (semi == -1 or brace < semi):
             end = _match_braces(masked, brace)
             nsemi = masked.find(";", end)
             end = nsemi + 1 if masked[end:nsemi].strip() == "" else end
-            return text[_line_start(text, m.start()) : end]
-    # function definition: `name(params) {` where the `{` follows the *matched*
-    # close paren directly (only whitespace between). Paren-balanced — so a macro
-    # use like `getSBoxInvert(num)` doesn't run its param scan on into a later
-    # function's `(...) {`.
-    for m in re.finditer(rf"(?<![\w.>]){esc}\s*\(", masked):
-        if not _at_col0(masked, m.start()):
-            continue  # a call nested in a body, not a file-scope definition
+            put(m.group(1), text[_line_start(text, m.start()) : end])
+    # 3. function definition: `name(params) {`, paren-balanced, `{` follows `)`.
+    for m in re.finditer(r"(?<![\w.>])(\w+)\s*\(", masked):
+        if m.group(1) in idx or not _at_col0(masked, m.start()):
+            continue
         close = _match_parens(masked, masked.index("(", m.end() - 1))
         if close == -1:
             continue
-        rest = masked[close:]
-        if re.match(r"\s*\{", rest):
+        if re.match(r"\s*\{", masked[close:]):
             brace = masked.index("{", close)
-            return text[_line_start(text, m.start()) : _match_braces(masked, brace)]
-    # scalar const: `... name = ...;` at file scope (best-effort, single line)
-    for m in re.finditer(rf"(?<![\w.>]){esc}\s*=\s*[^;{{}}]*;", masked):
-        if not _at_col0(masked, m.start()):
-            continue  # a local variable / assignment inside a function body
+            put(m.group(1), text[_line_start(text, m.start()) : _match_braces(masked, brace)])
+    # 4. scalar const: `... name = ...;` at file scope (single line).
+    for m in re.finditer(r"(?<![\w.>])(\w+)\s*=\s*[^;{}]*;", masked):
+        if m.group(1) in idx or not _at_col0(masked, m.start()):
+            continue
         head = masked[_line_start(masked, m.start()) : m.start()]
-        if "(" not in head and "return" not in head:  # not an assignment inside a body
-            return text[_line_start(text, m.start()) : m.end()]
-    # typedef: `typedef unsigned char u8;` / `typedef struct Foo Foo;` (no
-    # braces), or `typedef struct {...} Foo;` (brace-matched body).
-    for m in re.finditer(rf"^typedef[^;{{}}\n]*\b{esc}\s*(?:\[[^\]]*\])?\s*;", masked, re.M):
-        return text[m.start() : m.end()]
+        if "(" not in head and "return" not in head:
+            put(m.group(1), text[_line_start(text, m.start()) : m.end()])
+    # 5. simple typedef: `typedef unsigned char u8;` / `typedef struct Foo Foo;`.
+    for m in re.finditer(r"^typedef[^;{}\n]*\b(\w+)\s*(?:\[[^\]]*\])?\s*;", masked, re.M):
+        put(m.group(1), text[m.start() : m.end()])
+    # 6. struct/union/enum typedef with a body: `typedef struct {...} Foo;` — the
+    # trailing names (`Foo`, `*PFoo`) all resolve to this definition.
     for m in re.finditer(r"^typedef\s+(?:struct|union|enum)\b[^{;]*\{", masked, re.M):
         end = _match_braces(masked, masked.index("{", m.start()))
-        tail = masked[end : masked.find(";", end) + 1]
-        if re.search(rf"\b{esc}\b", tail):
-            return text[m.start() : masked.find(";", end) + 1]
-    # function-like macro: `#define name(args) body` — only reached if no real
-    # function of this name exists (it's then the active definition, e.g. a
-    # commented-out function beside its macro).
-    m = re.search(rf"^[ \t]*#[ \t]*define[ \t]+{esc}\(.*(?:\\\n.*)*", masked, re.M)
-    if m:
-        return text[m.start() : m.end()]
-    return None
+        semi = masked.find(";", end)
+        val = text[m.start() : semi + 1]
+        for tn in re.findall(r"\b(\w+)\b", masked[end : semi + 1]):
+            put(tn, val)
+    # 7. function-like macro: `#define name(args) body` — lowest precedence, so a
+    # real function of the same name (populated in pass 3) already won.
+    for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+(\w+)\(.*(?:\\\n.*)*", masked, re.M):
+        put(m.group(1), text[m.start() : m.end()])
+    return idx
+
+
+def extract_definition(
+    name: str,
+    text: str,
+    masked: str | None = None,
+    index: dict[str, str] | None = None,
+) -> str | None:
+    """The file-scope definition of ``name`` — a ``#define``, a
+    ``name[...] = {...};`` table, a ``name = ...;`` const, a ``name(...) {...}``
+    function, or a typedef — or None.
+
+    Backed by :func:`build_def_index`: a lone call builds a one-shot index (same
+    single-scan cost it always had); callers doing many lookups over the same
+    source (``lift_symbols``, the sweep) build the index once and pass it in via
+    ``index``, making each lookup O(1) instead of a fresh 9.5 MB scan."""
+    if index is None:
+        index = build_def_index(text, masked)
+    return index.get(name)
 
 
 def _referenced_idents(body: str) -> set[str]:
@@ -298,12 +319,22 @@ typedef uint64_t u64; typedef int64_t i64;
 """
 
 
+# A file-scope definition whose transitive in-file closure exceeds this many
+# distinct definitions is treated as unliftable. In practice a leaf/helper lifts
+# with a closure in the low tens; only functions reaching a god-struct (SQLite's
+# `Parse`/`Vdbe`, whose struct graph pulls most of the schema) blow past it, and
+# those aren't isolatable into a standalone TU anyway. The cap keeps lift O(cap),
+# never O(whole symbol table). See tests/unit/test_c_lift.py::test_closure_cap.
+MAX_CLOSURE = 400
+
+
 def lift_symbols(
     source: str,
     symbols: list[str],
     shim: str = "",
     masked: str | None = None,
     cache: dict[str, str | None] | None = None,
+    index: dict[str, str] | None = None,
 ) -> tuple[str | None, list[str], list[str]]:
     """Assemble one standalone TU covering every symbol in ``symbols``: ``shim``
     + the union of their transitive in-file definitions (tables, ``#define``s,
@@ -311,17 +342,22 @@ def lift_symbols(
     (tu_source | None if *no* symbol was found, sorted unresolved identifiers,
     symbols that had no definition).
 
-    ``masked`` and ``cache`` (name -> extracted definition, shared across calls)
-    let a sweep over many symbols of the *same* source pay the 9.5 MB masking
-    and per-name extraction scans once instead of per lift."""
+    ``masked`` and ``index`` (name -> definition text, from
+    :func:`build_def_index`) let a sweep over many symbols of the *same* source
+    pay the 9.5 MB masking and single indexing scan once instead of per lift.
+    ``cache`` is accepted for backward compatibility and kept in sync. A closure
+    exceeding :data:`MAX_CLOSURE` distinct defs aborts the lift (returns None)
+    rather than running away over a god-struct's entire graph."""
     if masked is None:
-        masked = _mask_comments(source)  # mask once; reused for every dependency lookup
+        masked = _mask_comments(source)  # mask once; reused below
+    if index is None:
+        index = build_def_index(source, masked)  # one scan; every lookup O(1)
     if cache is None:
         cache = {}
 
     def _extract(name: str) -> str | None:
         if name not in cache:
-            cache[name] = extract_definition(name, source, masked)
+            cache[name] = index.get(name)
         return cache[name]
 
     defs_by_name: dict[str, str] = {}
@@ -343,6 +379,8 @@ def lift_symbols(
         if name in pulled:
             continue
         pulled[name] = defs_by_name[name]
+        if len(pulled) > MAX_CLOSURE:  # runaway closure (god-struct) — not liftable
+            return None, [], missing
         for ref in _referenced_idents(pulled[name]):
             if ref == name or ref in pulled or ref in shim_names:
                 continue
@@ -365,8 +403,9 @@ def lift_symbol(
     shim: str = "",
     masked: str | None = None,
     cache: dict[str, str | None] | None = None,
+    index: dict[str, str] | None = None,
 ) -> tuple[str | None, list[str]]:
     """Single-symbol :func:`lift_symbols`. Returns (tu_source | None if
     ``symbol`` isn't found, sorted unresolved identifiers)."""
-    tu, unresolved, _ = lift_symbols(source, [symbol], shim, masked, cache)
+    tu, unresolved, _ = lift_symbols(source, [symbol], shim, masked, cache, index)
     return tu, unresolved
