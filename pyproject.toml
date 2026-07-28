@@ -77,6 +77,12 @@ cgir = "cgir.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/cgir"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# The published ComponentSpec contract ships inside the wheel so installed
+# consumers can read it without the source tree (runtime source of truth is
+# still cgir.ir.component_spec.COMPONENT_SPEC_SCHEMA; test_schema_sync pins them).
+"schemas/component_spec.schema.json" = "cgir/schemas/component_spec.schema.json"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

@@ -228,6 +228,234 @@ def test_verify_diff_js_end_to_end(tmp_path):
     assert by["round2"].status == PRESERVING, by["round2"]
 
 
+# --- harness eq: containers with no own enumerable keys ---------------------
+
+
+def test_map_return_divergence_detected(tmp_path):
+    """Maps have no own enumerable keys, so a keys-only deep-compare calls ANY
+    two Maps equal — a changed function returning a different Map verified as
+    'preserving'. Must diverge."""
+    old = "function f() { return new Map([[1, 2]]); }"
+    new = "function f() { return new Map([[1, 3]]); }"
+    assert _run(tmp_path, "f", old, new, [[]]).status == DIVERGED
+
+
+def test_set_and_date_divergence_detected(tmp_path):
+    old = "function f() { return new Set([1]); }"
+    new = "function f() { return new Set([2, 3]); }"
+    assert _run(tmp_path, "f", old, new, [[]]).status == DIVERGED
+    old = "function g() { return new Date(0); }"
+    new = "function g() { return new Date(1e12); }"
+    assert _run(tmp_path, "g", old, new, [[]]).status == DIVERGED
+
+
+def test_regexp_divergence_detected(tmp_path):
+    old = "function f() { return /a+/g; }"
+    new = "function f() { return /b+/i; }"
+    assert _run(tmp_path, "f", old, new, [[]]).status == DIVERGED
+
+
+def test_unchanged_containers_preserving(tmp_path):
+    old = new = (
+        "function f() { return { m: new Map([['k', 1]]), s: new Set([1, 2]),"
+        " d: new Date(1000), r: /x/g }; }"
+    )
+    assert _run(tmp_path, "f", old, new, [[]]).status == PRESERVING
+
+
+def test_different_class_same_shape_diverges(tmp_path):
+    # {} and new Date(0) both have zero own enumerable keys — must not match.
+    old = "function f() { return {}; }"
+    new = "function f() { return new Date(0); }"
+    assert _run(tmp_path, "f", old, new, [[]]).status == DIVERGED
+
+
+def test_cyclic_structures_terminate(tmp_path):
+    old = new = "function f() { const o = { a: 1 }; o.self = o; return o; }"
+    assert _run(tmp_path, "f", old, new, [[]]).status == PRESERVING
+
+
+# --- capture: args must be snapshotted BEFORE the call -----------------------
+
+
+def test_capture_snapshots_args_before_call(tmp_path):
+    """A function that mutates its object argument: serializing args after the
+    call records the post-call state as the 'input', so replays run on the
+    wrong input. The recorded args must be the pre-call values."""
+    (tmp_path / "m.js").write_text(
+        "function total(o) { o.items.push(0); return o.items.length; }\n"
+        "module.exports = { total };\n"
+    )
+    (tmp_path / "m.test.js").write_text(
+        "const test = require('node:test');\n"
+        "const assert = require('node:assert');\n"
+        "const { total } = require('./m.js');\n"
+        "test('total', () => { assert.strictEqual(total({ items: [1, 2] }), 3); });\n"
+    )
+    from cgir.js_verify import capture_js
+
+    rec = capture_js(tmp_path, {"m.js:total": ("m.js", "total")})
+    assert rec.get("m.js:total") == [[{"items": [1, 2]}]]
+
+
+def test_jest_setup_snapshots_args_before_call(tmp_path):
+    """Same pre-call-snapshot contract for the jest setup-file variant, driven
+    under plain node (the setup file is self-contained CommonJS)."""
+    import os
+
+    import cgir.js_verify as jv
+
+    target = tmp_path / "t.js"
+    target.write_text(
+        "function f(o) { o.items.push(99); return o.items.length; }\nmodule.exports = { f };\n"
+    )
+    setup = tmp_path / "setup.cjs"
+    setup.write_text(jv._JS_JEST_SETUP)
+    out = tmp_path / "rec.json"
+    driver = tmp_path / "driver.cjs"
+    driver.write_text(
+        f"require({str(setup)!r});\n"
+        f"const m = require({str(target)!r});\n"
+        "m.f({ items: [1, 2] });\n"
+    )
+    env = {
+        **os.environ,
+        "CGIR_TARGETS": __import__("json").dumps([[str(target), "f"]]),
+        "CGIR_CAP_OUT": str(out),
+    }
+    _sp.run(["node", str(driver)], env=env, check=True, capture_output=True)
+    recs = {}
+    for p in tmp_path.glob("rec.json.*"):
+        recs.update(__import__("json").loads(p.read_text()))
+    assert recs[f"{target}\x00f"] == [[[{"items": [1, 2]}], 3]]
+
+
+def test_arg_mutation_does_not_poison_replay(tmp_path):
+    """End to end: old reads a[0] THEN clears its argument. A broken candidate
+    that reads after clearing is wrong on the real input ([10,20] -> undefined
+    instead of 10) but agrees with old on the post-mutation input ([]). If
+    capture snapshots args after the call, the replay runs on [] and the broken
+    candidate falsely passes. Must diverge."""
+    (tmp_path / "m.js").write_text(
+        "function first(a) { const v = a[0]; a.length = 0; return v; }\n"
+        "module.exports = { first };\n"
+    )
+    (tmp_path / "m.test.js").write_text(
+        "const test = require('node:test');\n"
+        "const assert = require('node:assert');\n"
+        "const { first } = require('./m.js');\n"
+        "test('first', () => { assert.strictEqual(first([10, 20]), 10); });\n"
+    )
+    _init_git(tmp_path)
+    (tmp_path / "m.js").write_text(
+        "function first(a) { a.length = 0; return a[0]; }\nmodule.exports = { first };\n"
+    )
+    verdicts = verify_diff_js(tmp_path, "HEAD")
+    by = {v.qualname.split(":")[-1]: v for v in verdicts}
+    assert by["first"].status == DIVERGED, by["first"]
+
+
+# --- spaced paths in git diff output -----------------------------------------
+
+
+def test_changed_js_functions_handles_spaced_paths(tmp_path):
+    (tmp_path / "a b.js").write_text("function f(x) { return x; }\n")
+    _init_git(tmp_path)
+    (tmp_path / "a b.js").write_text("function f(x) { return x + 1; }\n")
+    changed, _ = changed_js_functions(tmp_path, "HEAD")
+    assert [c.func_name for c in changed] == ["f"]
+    assert changed[0].path == "a b.js"
+
+
+# --- jest detection + setupFilesAfterEnv merge -------------------------------
+
+
+def _fake_capture(monkeypatch, tmp_path):
+    import cgir.js_verify as jv
+
+    seen = {}
+
+    class _R:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = list(cmd)
+        return _R()
+
+    monkeypatch.setattr(jv.subprocess, "run", fake_run)
+    (tmp_path / "x.js").write_text("function f(){return 1} module.exports={f};")
+    return jv, seen, {"x.js:f": ("x.js", "f")}
+
+
+def test_repo_jest_setup_files_package_json(tmp_path):
+    import json as _json
+
+    from cgir.js_verify import _repo_jest_setup_files
+
+    (tmp_path / "package.json").write_text(
+        _json.dumps({"jest": {"setupFilesAfterEnv": ["./jest.setup.js"]}})
+    )
+    assert _repo_jest_setup_files(tmp_path) == ["./jest.setup.js"]
+
+
+def test_repo_jest_setup_files_config_js(tmp_path):
+    from cgir.js_verify import _repo_jest_setup_files
+
+    (tmp_path / "jest.config.js").write_text(
+        "module.exports = {\n"
+        "  verbose: true,\n"
+        "  setupFilesAfterEnv: ['<rootDir>/jest.setup.js', \"./more.js\"],\n"
+        "};\n"
+    )
+    assert _repo_jest_setup_files(tmp_path) == ["<rootDir>/jest.setup.js", "./more.js"]
+
+
+def test_repo_jest_setup_files_absent(tmp_path):
+    from cgir.js_verify import _repo_jest_setup_files
+
+    assert _repo_jest_setup_files(tmp_path) == []
+
+
+def test_jest_setup_merge_preserves_repo_setup_files(monkeypatch, tmp_path):
+    """Our --setupFilesAfterEnv OVERRIDES the repo's config value; theirs must
+    be re-passed first, ours appended — else jest.setup.js / custom matchers
+    vanish, tests fail, and capture records nothing."""
+    jv, seen, tgt = _fake_capture(monkeypatch, tmp_path)
+    (tmp_path / "jest.config.js").write_text(
+        "module.exports = { setupFilesAfterEnv: ['<rootDir>/jest.setup.js'] };\n"
+    )
+    jv.capture_js(tmp_path, tgt, test_cmd=["npx", "jest"])
+    flags = [c for c in seen["cmd"] if c.startswith("--setupFilesAfterEnv=")]
+    assert flags[0] == "--setupFilesAfterEnv=<rootDir>/jest.setup.js"
+    assert len(flags) == 2 and flags[1].endswith("cgir_jest_setup.cjs")
+
+
+def test_jest_detected_via_npm_test_script(monkeypatch, tmp_path):
+    """`npm test` with jest underneath never matched `"jest" in part`; the
+    package.json scripts.test value must be consulted. Flags go after `--` so
+    npm forwards them to jest."""
+    import json as _json
+
+    jv, seen, tgt = _fake_capture(monkeypatch, tmp_path)
+    (tmp_path / "package.json").write_text(_json.dumps({"scripts": {"test": "jest --ci"}}))
+    jv.capture_js(tmp_path, tgt, test_cmd=["npm", "test"])
+    cmd = seen["cmd"]
+    setup_idx = [i for i, c in enumerate(cmd) if c.startswith("--setupFilesAfterEnv=")]
+    assert setup_idx, cmd
+    assert "--" in cmd and cmd.index("--") < setup_idx[0]
+
+
+def test_npm_test_without_jest_script_gets_no_setup(monkeypatch, tmp_path):
+    import json as _json
+
+    jv, seen, tgt = _fake_capture(monkeypatch, tmp_path)
+    (tmp_path / "package.json").write_text(_json.dumps({"scripts": {"test": "mocha"}}))
+    jv.capture_js(tmp_path, tgt, test_cmd=["npm", "test"])
+    assert not any("setupFilesAfterEnv" in c for c in seen["cmd"])
+
+
 def test_jest_cmd_injects_setup_file(monkeypatch, tmp_path):
     """jest sandboxes its module registry, so capture must inject a setup file
     (--setupFilesAfterEnv) that wraps target exports inside jest — the require-

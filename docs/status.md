@@ -98,6 +98,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 | C→Rust whole-program gate (`--gate-build`/`--gate-run`: build+run the real program with each winner replaced, keep only byte-identical-to-stock — catches functions reading hidden runtime state the differential can't model, no name heuristic) | done | `src/cgir/rewrite_c_rust.py:whole_program_gate` |
 | C lifter (`--lift <fn>`: tree-shake a function + its file-scope tables/#defines/typedefs/helpers out of a big single file into a standalone TU, index it, rewrite it — one command, no pre-existing index; comment-masked regex + brace matching, robust to macro noise that defeats a real C parse) | done | `src/cgir/ffi/sources/c_lift.py`, sweep `benchmarks/c_lift_sweep.py` |
 | Capture/replay oracle (rung 5; `cgir rewrite --oracle replay`: trace real I/O from the test run, replay recorded inputs per candidate — covers non-synthesizable inputs) | done | `src/cgir/replay.py` |
+| Behavioral diff verification (`cgir verify-diff [BASE_REF]`): record each changed function's real inputs by running the suite, replay OLD vs NEW on them (`--fuzz N` adds edge-value mutations) → preserving / diverged (with counterexample) / unverified; exits non-zero on divergence (`--strict` also fails on unverified) — a CI merge gate for AI-authored changes. Python via pytest, JS/TS via `node --test`/jest (`--js-test`) | done | `src/cgir/verify_diff.py`, `src/cgir/js_verify.py` |
 | Architecture rules (`cgir lint`: forbid-effect / require-kind / forbid-call) | done | `src/cgir/report/lint.py` |
 | Shared pipeline driver (CLI + API call the same function) | done | `src/cgir/pipeline.py:scan_repo` |
 | HTTP API (`/scan`, `/components`, `/trace`, `/regenerate`, `/stats`) | done | `src/cgir/api/server.py` |
@@ -111,7 +112,7 @@ cgir scan tests/fixtures/python_sample --out /tmp/cgir-out
 
 ## Test coverage
 
-`pytest -q` runs 622 tests, all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
+`pytest -q` runs ~850 tests (as of 2026-07-28), all green (the table below lists the load-bearing files; newer suites — `test_impact.py`, `test_watch.py`, `test_hook.py`, `test_python_di.py`, `test_typescript_adapter.py`, `test_diff.py` — are described by their docstrings):
 
 | File | Covers |
 |---|---|

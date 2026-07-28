@@ -210,7 +210,9 @@ def run_python_rust(
         # the whole function; verify the Rust on the inputs that do cross the FFI.
         usable = usable_traces(e.sig, t)
         if not usable:
-            excluded.append((e.component_id, validate_traces(e.sig, t) or "no representable traces"))
+            excluded.append(
+                (e.component_id, validate_traces(e.sig, t) or "no representable traces")
+            )
             continue
         if len(usable) < min_traces:
             dropped = len(t) - len(usable)
@@ -386,8 +388,7 @@ def apply_python_rust_winners(
     from cgir.report.diff import compute_diff
     from cgir.verify import _find_node, _hard_drift, _splice
 
-    winners: dict[str, str] = {}
-    spliced: list[tuple[Any, str, PyEntry]] = []
+    solved: list[tuple[Any, str, PyEntry]] = []
     for o in report["outcomes"]:
         if o["status"] != "solved":
             continue
@@ -395,10 +396,29 @@ def apply_python_rust_winners(
         node = _find_node(index_dir, o["component_id"])
         if e is None or node is None or node.path is None:
             continue
-        winners[e.symbol] = o["attempts"][-1]["candidate"]
-        spliced.append((node, o["attempts"][-1]["candidate"], e))
+        solved.append((node, o["attempts"][-1]["candidate"], e))
+    # Each candidate exports its BARE symbol name over the C ABI, so two solved
+    # functions with the same name (different modules) cannot coexist in one
+    # cdylib — assembly would keep one and BOTH modules' wrappers would delegate
+    # to the survivor. Skip every collider and say so, rather than apply wrong code.
+    by_symbol: dict[str, list[tuple[Any, str, PyEntry]]] = {}
+    for item in solved:
+        by_symbol.setdefault(item[2].symbol, []).append(item)
+    winners: dict[str, str] = {}
+    spliced: list[tuple[Any, str, PyEntry]] = []
+    skipped_collisions: list[str] = []
+    for sym, group in by_symbol.items():
+        if len(group) > 1:
+            skipped_collisions.extend(sorted(e.component_id for _, _, e in group))
+            continue
+        node, cand, e = group[0]
+        winners[sym] = cand
+        spliced.append((node, cand, e))
     if not winners:
-        return {"applied": 0, "note": "no winners to apply"}
+        note = "no winners to apply"
+        if skipped_collisions:
+            note += f" (symbol collisions skipped: {', '.join(skipped_collisions)})"
+        return {"applied": 0, "note": note}
     entries = [e for _, _, e in spliced]
 
     # 1-2. emit the extension (native PyO3) or wrapper module + cdylib (ctypes).
@@ -428,8 +448,10 @@ def apply_python_rust_winners(
     for node, _cand, e in sorted(spliced, key=lambda t: (t[0].path, -(t[0].start_line or 0))):
         _splice(repo / node.path, node.start_line, node.end_line, render_python_wrapper(e))
 
-    # 4. final gate.
-    rewritten = {cid for cid in (o["component_id"] for o in report["outcomes"])}
+    # 4. final gate. Only the APPLIED set is exempt from the drift check —
+    # exempting every attempted component let real drift on failed-but-attempted
+    # functions slip past the gate.
+    rewritten = {e.component_id for _, _, e in spliced}
     new_index = Path(tempfile.mkdtemp(prefix="cgir-pyrust-gate-")) / "idx"
     from cgir.export.json_export import read_specs
     from cgir.pipeline import scan_repo
@@ -446,6 +468,7 @@ def apply_python_rust_winners(
     )
     return {
         "applied": len(winners),
+        "skipped_symbol_collisions": skipped_collisions,
         "emit": "pyo3" if pyo3 else "ctypes",
         "artifact": artifact,
         "contract_clean_outside_rewritten": not dirty,

@@ -97,10 +97,11 @@ def _driver_source(e: CEntry) -> str:
         call_o = f"ro = fo({', '.join(orig_args)});"
         call_c = f"rc = fc({', '.join(cand_args)});"
         if ret_float:
-            ret_eq = (
-                "((isnan(ro)&&isnan(rc)) || ro==rc || "
-                "fabs((double)ro-(double)rc) <= 1e-9*fmax(fabs((double)ro),fabs((double)rc)))"
-            )
+            # Bitwise, matching replay_ffi's standard: strict where semantics
+            # are observable (0.0 vs -0.0 differ; identical NaN patterns match).
+            # The old 1e-9 relative tolerance was looser than the oracle it
+            # feeds — a candidate could pass here and fail there.
+            ret_eq = "(memcmp(&ro, &rc, sizeof(ro)) == 0)"
             rfmt, ro_a, rc_a = "%g", "(double)ro", "(double)rc"
         else:
             ret_eq = "(ro==rc)"

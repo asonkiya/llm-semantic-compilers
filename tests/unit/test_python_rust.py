@@ -210,7 +210,7 @@ def test_end_to_end_all_solved(fixture_index: Path) -> None:
     from cgir.replay import capture
 
     entries, _ = python_rust_worklist(fixture_index, FIXTURE)
-    traces = capture(FIXTURE, {e.component_id: (Path(e.path), e.symbol) for e in entries})
+    traces = capture(FIXTURE, {e.component_id: (Path(e.path), e.capture_name) for e in entries})
     report = run_python_rust(fixture_index, FIXTURE, sampler=_sampler(), traces=traces, k=1)
     assert report["totals"]["solved"] == _ALL
     assert {o["component_id"] for o in report["results"] if o["status"] == "solved"} == {
@@ -229,7 +229,7 @@ def test_end_to_end_wrong_candidate_rejected(fixture_index: Path) -> None:
     from cgir.replay import capture
 
     entries, _ = python_rust_worklist(fixture_index, FIXTURE)
-    traces = capture(FIXTURE, {e.component_id: (Path(e.path), e.symbol) for e in entries})
+    traces = capture(FIXTURE, {e.component_id: (Path(e.path), e.capture_name) for e in entries})
     wrong = '#[no_mangle]\npub extern "C" fn clamp(x: i64, lo: i64, hi: i64) -> i64 { x }'
     report = run_python_rust(
         fixture_index, FIXTURE, sampler=_sampler({"fn clamp": wrong}), traces=traces, k=1
@@ -244,7 +244,7 @@ def test_end_to_end_panic_candidate_rejected_not_harness_death(fixture_index: Pa
     from cgir.replay import capture
 
     entries, _ = python_rust_worklist(fixture_index, FIXTURE)
-    traces = capture(FIXTURE, {e.component_id: (Path(e.path), e.symbol) for e in entries})
+    traces = capture(FIXTURE, {e.component_id: (Path(e.path), e.capture_name) for e in entries})
     boom = (
         '#[no_mangle]\npub extern "C" fn clamp(x: i64, lo: i64, hi: i64) -> i64 { panic!("boom") }'
     )
@@ -362,7 +362,7 @@ def test_apply_splices_wrappers_and_repo_tests_pass_with_rust_inside(tmp_path: P
     idx = tmp_path / "idx"
     scan_repo(repo, out=idx)
     entries, _ = python_rust_worklist(idx, repo)
-    traces = capture(repo, {e.component_id: (Path(e.path), e.symbol) for e in entries})
+    traces = capture(repo, {e.component_id: (Path(e.path), e.capture_name) for e in entries})
 
     report = run_python_rust(idx, repo, sampler=_sampler(), traces=traces, k=1, apply=True)
     gate = report["final_gate"]
@@ -375,3 +375,36 @@ def test_apply_splices_wrappers_and_repo_tests_pass_with_rust_inside(tmp_path: P
     spliced = (repo / "mathlib.py").read_text()
     assert "from _cgir_rs import area as _rs" in spliced and "_rs(self.h, self.w)" in spliced
     assert "from _cgir_rs import clamp as _rs" in spliced
+
+
+def test_apply_skips_symbol_collisions(tmp_path: Path) -> None:
+    """Two solved functions with the same bare name (different modules) cannot
+    share one cdylib: each candidate exports the bare symbol, assembly keeps one
+    winner, and BOTH wrappers would delegate to it. Apply must skip the whole
+    collision group and say so — not silently merge."""
+    from cgir.rewrite_python_rust import apply_python_rust_winners
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    src = (
+        "def clamp(x: int, lo: int, hi: int) -> int:\n"
+        "    return lo if x < lo else hi if x > hi else x\n"
+    )
+    (repo / "alib.py").write_text(src)
+    (repo / "blib.py").write_text(src)
+    idx = tmp_path / "idx"
+    scan_repo(repo, out=idx)
+    entries, _ = python_rust_worklist(idx, repo)
+    by_id = {e.component_id: e for e in entries}
+    assert {"alib.clamp", "blib.clamp"} <= set(by_id)
+    report = {
+        "outcomes": [
+            {"component_id": "alib.clamp", "status": "solved", "attempts": [{"candidate": "x"}]},
+            {"component_id": "blib.clamp", "status": "solved", "attempts": [{"candidate": "x"}]},
+        ]
+    }
+    gate = apply_python_rust_winners(idx, repo, report, by_id, tmp_path / "wk")
+    assert gate["applied"] == 0
+    assert "collision" in gate["note"]
+    assert (repo / "alib.py").read_text() == src  # nothing spliced
+    assert (repo / "blib.py").read_text() == src

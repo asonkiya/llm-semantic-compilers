@@ -29,6 +29,10 @@ def tool_stats(index_dir: Path) -> str:
 
 def tool_component(index_dir: Path, component_id: str) -> str:
     """One ComponentSpec as JSON."""
+    from cgir.api import valid_component_id
+
+    if not valid_component_id(component_id):
+        return f"invalid component id: {component_id}"
     spec_path = index_dir / "components" / f"{component_id}.json"
     if not spec_path.exists():
         return f"unknown component: {component_id}"

@@ -146,13 +146,17 @@ def _linked_tests(repo: Path, component_id: str) -> list[str]:
     """Test files that name the component (grep fallback until Sprint 25 linkage)."""
     name = component_id.split(".")[-1]
     pattern = re.compile(rf"\b{re.escape(name)}\b")
+    # Recursive under tests/ — a flat glob missed tests/unit/... layouts, so
+    # run_tests=True silently degraded to contract-only acceptance.
+    candidates: list[Path] = []
+    tests_dir = repo / "tests"
+    if tests_dir.is_dir():
+        candidates += sorted(tests_dir.rglob("test_*.py")) + sorted(tests_dir.rglob("*_test.py"))
+    candidates += sorted(repo.glob("test_*.py"))
     hits: list[str] = []
-    for test_dir in (repo / "tests", repo):
-        if not test_dir.is_dir():
-            continue
-        for path in sorted(test_dir.glob("test_*.py")):
-            if pattern.search(path.read_text(errors="replace")):
-                hits.append(str(path.relative_to(repo)))
+    for path in candidates:
+        if pattern.search(path.read_text(errors="replace")):
+            hits.append(str(path.relative_to(repo)))
     return list(dict.fromkeys(hits))
 
 

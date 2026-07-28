@@ -246,11 +246,20 @@ def _check(
         fb = f"contract drift: {contract.drift} violations: {contract.violations}"
         return "contract", fb, False
     if oracle is not None:
-        ok, feedback = oracle(component_id, candidate)
+        try:
+            ok, feedback = oracle(component_id, candidate)
+        except Exception as exc:
+            return "behavioral", f"oracle error: {type(exc).__name__}: {exc}", True
         return ("ok", "", True) if ok else ("behavioral", feedback, True)
     if not run_tests:
         return "ok", "", False
-    tested = verify(index_dir, component_id, candidate, repo, run_tests=True)
+    # A pytest timeout (or any scan error) here is a failed CANDIDATE, not a
+    # dead run — unguarded, it killed the whole search loop (same class as the
+    # SystemExit escape fixed one layer down).
+    try:
+        tested = verify(index_dir, component_id, candidate, repo, run_tests=True)
+    except Exception as exc:
+        return "tests", f"test run did not complete: {type(exc).__name__}: {exc}", True
     if tested.tests_ok is False:
         return "tests", f"tests failed:\n{tested.detail}", True
     return "ok", "", bool(tested.tests_ran)

@@ -106,7 +106,7 @@ function reconstruct(moduleSrc, name) {
   return fn;
 }
 
-function eq(a, b) {
+function eq(a, b, seen) {
   if (typeof a === "number" && typeof b === "number") {
     if (Number.isNaN(a) && Number.isNaN(b)) return true;
     if (!isFinite(a) || !isFinite(b)) return a === b;
@@ -114,15 +114,45 @@ function eq(a, b) {
   }
   if (typeof a !== typeof b) return false;
   if (a === null || b === null || a === undefined || b === undefined) return a === b;
-  const aArr = Array.isArray(a), bArr = Array.isArray(b);
-  if (aArr !== bArr) return false;
-  if (aArr) return a.length === b.length && a.every((x, i) => eq(x, b[i]));
-  if (typeof a === "object") {
-    const ka = Object.keys(a), kb = Object.keys(b);
-    if (ka.length !== kb.length) return false;
-    return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && eq(a[k], b[k]));
+  if (typeof a !== "object") return a === b;
+  // Maps/Sets/Dates have no own enumerable keys — a keys-only walk called ANY
+  // two of them equal, so a changed Map/Set/Date return verified as preserving.
+  // Class identity: builtin tag + constructor NAME (not prototype identity —
+  // old and new module evaluate separately, so identical classes get distinct
+  // prototype objects and identity would false-diverge).
+  if (Object.prototype.toString.call(a) !== Object.prototype.toString.call(b)) return false;
+  const ca = a.constructor ? a.constructor.name : null;
+  const cb = b.constructor ? b.constructor.name : null;
+  if (ca !== cb) return false;
+  if (a instanceof Date) return a.getTime() === b.getTime();
+  if (a instanceof RegExp) return a.source === b.source && a.flags === b.flags;
+  seen = seen || new Map();  // cycle guard: pairs already under comparison
+  let peers = seen.get(a);
+  if (peers && peers.has(b)) return true;
+  if (!peers) { peers = new Set(); seen.set(a, peers); }
+  peers.add(b);
+  if (a instanceof Map) {
+    if (a.size !== b.size) return false;
+    outerM: for (const [k, v] of a) {
+      if (b.has(k) && eq(v, b.get(k), seen)) continue;
+      for (const [k2, v2] of b) { if (eq(k, k2, seen) && eq(v, v2, seen)) continue outerM; }
+      return false;
+    }
+    return true;
   }
-  return a === b;
+  if (a instanceof Set) {
+    if (a.size !== b.size) return false;
+    outerS: for (const x of a) {
+      if (b.has(x)) continue;
+      for (const y of b) { if (eq(x, y, seen)) continue outerS; }
+      return false;
+    }
+    return true;
+  }
+  if (Array.isArray(a)) return a.length === b.length && a.every((x, i) => eq(x, b[i], seen));
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && eq(a[k], b[k], seen));
 }
 
 function show(v) { try { return JSON.stringify(v); } catch (e) { return String(v); } }
@@ -204,6 +234,7 @@ def differential_replay_js(
         v = json.loads(out.splitlines()[-1])
     except json.JSONDecodeError:
         return Verdict(qualname, UNVERIFIED, f"unparseable node verdict: {out[:200]}")
+    shutil.rmtree(work, ignore_errors=True)
     return Verdict(qualname, v["status"], v["detail"], checked=v.get("checked", 0))
 
 
@@ -275,7 +306,10 @@ def changed_js_functions(repo: Path, base_ref: str) -> tuple[list[ChangedJsFunct
     notes: list[str] = []
     globs = [f"*{e}" for e in sorted(_JS_EXTS)]
     try:
-        names = _git(repo, "diff", "--name-only", base_ref, "--", *globs).split()
+        # -z: NUL-separated — whitespace splitting silently dropped any path
+        # with a space (the file then got NO verdict, not even unverified).
+        raw = _git(repo, "diff", "--name-only", "-z", base_ref, "--", *globs)
+        names = [n for n in raw.split("\0") if n]
     except subprocess.CalledProcessError as exc:
         return [], [f"git diff failed (is {base_ref!r} a valid ref?): {exc.stderr.strip()}"]
     for rel in names:
@@ -328,9 +362,10 @@ Module._load = function(request, parent, isMain){
         const fn = m[name];
         const wrapped = function(){
           const args = Array.prototype.slice.call(arguments);
+          const a = jsonSafe(args);  // snapshot BEFORE the call: fn may mutate its args
           const ret = fn.apply(this, args);
           if (!(ret && typeof ret.then === "function")) {  // skip async
-            const a = jsonSafe(args), r = jsonSafe(ret);
+            const r = jsonSafe(ret);
             if (a !== UNSAFE && r !== UNSAFE){ const k = file + "\x00" + name; (records[k] = records[k] || []).push([a, r]); }
           }
           return ret;
@@ -371,9 +406,10 @@ function wrap(){
       const fn = m[name];
       const wrapped = function(){
         const args = Array.prototype.slice.call(arguments);
+        const a = jsonSafe(args);  // snapshot BEFORE the call: fn may mutate its args
         const ret = fn.apply(this, args);
         if (!(ret && typeof ret.then === "function")){
-          const a = jsonSafe(args), r = jsonSafe(ret);
+          const r = jsonSafe(ret);
           if (a !== UNSAFE && r !== UNSAFE){ const k = file + "\x00" + name; (records[k] = records[k] || []).push([a, r]); }
         }
         return ret;
@@ -388,6 +424,46 @@ function flush(){ try { fs.writeFileSync(OUT + "." + process.pid + "." + Math.ra
 if (typeof afterAll === "function") { try { afterAll(flush); } catch(e){} }
 process.on("exit", flush);
 """
+
+
+def _repo_jest_setup_files(repo: Path) -> list[str]:
+    """The repo's own ``setupFilesAfterEnv`` (package.json ``jest`` key, else a
+    light literal parse of jest.config.*). Passing our setup file via the CLI
+    flag OVERRIDES the config value — the repo's must be re-passed first, ours
+    appended, or jest.setup.js / custom matchers vanish, the suite fails, and
+    capture records nothing."""
+    import re
+
+    pkg = repo / "package.json"
+    if pkg.exists():
+        try:
+            data = json.loads(pkg.read_text())
+        except (json.JSONDecodeError, OSError):
+            data = {}
+        v = (data.get("jest") or {}).get("setupFilesAfterEnv") if isinstance(data, dict) else None
+        if isinstance(v, list):
+            return [s for s in v if isinstance(s, str)]
+    for name in ("jest.config.js", "jest.config.cjs", "jest.config.mjs", "jest.config.ts"):
+        p = repo / name
+        if p.exists():
+            m = re.search(
+                r"setupFilesAfterEnv\s*:\s*\[(.*?)\]", p.read_text(errors="replace"), re.S
+            )
+            if m:
+                return re.findall(r"['\"]([^'\"]+)['\"]", m.group(1))
+    return []
+
+
+def _package_test_script(repo: Path) -> str:
+    pkg = repo / "package.json"
+    if not pkg.exists():
+        return ""
+    try:
+        data = json.loads(pkg.read_text())
+    except (json.JSONDecodeError, OSError):
+        return ""
+    script = (data.get("scripts") or {}).get("test") if isinstance(data, dict) else None
+    return script if isinstance(script, str) else ""
 
 
 def capture_js(
@@ -420,9 +496,18 @@ def capture_js(
     # jest/vitest sandbox their module registry, so the require-hook is blind to
     # the target calls. Inject a setup file that wraps exports inside jest's own
     # registry (the require-hook still runs, harmlessly, for anything outside it).
-    if any("jest" in part for part in cmd):
+    is_jest = any("jest" in part for part in cmd)
+    runner = Path(cmd[0]).name if cmd else ""
+    npm_style = not is_jest and runner in ("npm", "yarn", "pnpm") and "test" in cmd[1:]
+    if npm_style and "jest" in _package_test_script(repo):
+        is_jest = True  # `npm test` with jest underneath
+    if is_jest:
         setup = work / "cgir_jest_setup.cjs"
         setup.write_text(_JS_JEST_SETUP)
+        if npm_style and runner in ("npm", "pnpm") and "--" not in cmd:
+            cmd.append("--")  # npm/pnpm forward flags to the script only after --
+        # Repo setup files FIRST (the CLI flag overrides the config), ours last.
+        cmd += [f"--setupFilesAfterEnv={s}" for s in _repo_jest_setup_files(repo)]
         cmd += [f"--setupFilesAfterEnv={setup}"]
     try:
         subprocess.run(cmd, cwd=str(repo), env=env, capture_output=True, text=True, timeout=timeout)
@@ -442,6 +527,7 @@ def capture_js(
         q = key_to_qual.get(key)
         if q is not None and pairs:
             result[q] = [args for args, _ret in pairs]
+    shutil.rmtree(work, ignore_errors=True)
     return result
 
 

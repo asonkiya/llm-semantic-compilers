@@ -1193,6 +1193,7 @@ def _capture_replay_oracle(index_dir: Path, repo: Path, worklist: list[Component
     """Capture real I/O for the worklist by running the repo's tests, then
     return a replay BehavioralOracle (rung 5)."""
     from cgir.replay import capture, make_replay_oracle
+    from cgir.verify_diff import _module_name as _vd_module_name
 
     graph = _load_graph(index_dir)
     path_by_qual = {
@@ -1204,7 +1205,16 @@ def _capture_replay_oracle(index_dir: Path, repo: Path, worklist: list[Component
     for spec in worklist:
         path = path_by_qual.get(spec.id)
         if path:
-            targets[spec.id] = (Path(path), spec.id.rsplit(".", 1)[-1])
+            # Capture keys frames by co_qualname, so a method target must be
+            # "Class.method", not the bare name. Strip the module part derived
+            # from the file path; fall back to the bare name if they disagree.
+            module = _vd_module_name(str(path))
+            in_file = (
+                spec.id[len(module) + 1 :]
+                if spec.id.startswith(module + ".")
+                else spec.id.rsplit(".", 1)[-1]
+            )
+            targets[spec.id] = (Path(path), in_file)
     try:
         traces = capture(repo, targets)
     except RuntimeError as exc:
@@ -1465,7 +1475,7 @@ def _rewrite_python_rust(
     if traces_path:
         traces = load_traces(traces_path)
     elif capture:
-        targets = {e.component_id: (Path(e.path), e.symbol) for e in entries}
+        targets = {e.component_id: (Path(e.path), e.capture_name) for e in entries}
         typer.echo(f"capturing traces from {repo}'s test suite ({len(targets)} targets)...")
         traces = capture_traces(repo, targets)
         if out is not None:
@@ -1586,13 +1596,22 @@ def verify_diff_cmd(
             help="Command to record JS/TS inputs (default 'node --test'); e.g. 'npx mocha'.",
         ),
     ] = None,
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help="Also fail if any changed function is unverified — without this, a broken "
+            "test suite (nothing captured) exits 0, a vacuous pass for a CI gate.",
+        ),
+    ] = False,
 ) -> None:
     """Prove changed functions are behavior-preserving against the repo's tests.
 
     Records each changed function's real inputs by running the suite, then runs
     the OLD and NEW implementations on them (optionally fuzzed) and reports:
     preserving / diverged (with a counterexample) / unverified (with a reason).
-    Exits non-zero if anything diverged — usable directly as a CI merge gate.
+    Exits non-zero if anything diverged (add --strict to also fail on
+    unverified) — usable directly as a CI merge gate.
     """
     import json as _json
 
@@ -1632,6 +1651,9 @@ def verify_diff_cmd(
         raise typer.Exit(code=1)
     if s[UNVERIFIED] and not s[PRESERVING]:
         typer.echo("nothing could be verified (no changed function is covered by a test).")
+    if strict and s[UNVERIFIED]:
+        typer.echo(f"FAIL (--strict): {s[UNVERIFIED]} changed function(s) unverified.")
+        raise typer.Exit(code=2)
 
 
 if __name__ == "__main__":  # pragma: no cover

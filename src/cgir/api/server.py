@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from cgir.api import valid_component_id
 from cgir.export.json_export import read_specs
 from cgir.pipeline import scan_repo
 from cgir.regenerate import regenerate as run_regenerate
@@ -52,6 +53,8 @@ def create_app(index_dir: Path | None = None) -> Any:
         return current
 
     def _spec_path(component_id: str) -> Path:
+        if not valid_component_id(component_id):
+            raise HTTPException(status_code=400, detail=f"Invalid component id: {component_id}")
         path = _index() / "components" / f"{component_id}.json"
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"Unknown component: {component_id}")

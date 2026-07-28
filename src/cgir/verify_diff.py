@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cgir.replay import Trace, _eq, _load_candidate
+from cgir.replay import Trace, _eq, _load_candidate, _load_from_module_source
 
 PRESERVING = "preserving"
 DIVERGED = "diverged"
@@ -47,9 +47,10 @@ class Verdict:
 class ChangedFunction:
     qualname: str  # module.func or module.Class.method
     path: str  # repo-relative
-    func_name: str  # bare name (for trace capture targets)
-    old_src: str  # source at the base ref
-    new_src: str  # source in the working tree
+    func_name: str  # in-file qualname, e.g. "func" or "Class.method" (capture targets)
+    old_src: str  # function source at the base ref
+    new_src: str  # function source in the working tree
+    old_module_src: str = ""  # the whole file at the base ref (old module state)
 
 
 # --- the core differential: two implementations, same inputs ----------------
@@ -61,15 +62,24 @@ def differential_replay(
     old_src: str,
     new_src: str,
     arg_tuples: list[tuple[Any, ...]],
+    *,
+    old_module_src: str | None = None,
 ) -> Verdict:
     """Run ``old_src`` and ``new_src`` (each a function definition) on every
     input in ``arg_tuples`` and require identical results (or identically-typed
     exceptions). Returns the first divergence as a counterexample, else
-    ``preserving``. Reuses the rewrite engine's candidate loader, so the two
-    versions execute in the module's real namespace with args deep-copied per
-    call (mutation can't leak between old and new)."""
+    ``preserving``. Args are deep-copied per call (mutation can't leak between
+    old and new).
+
+    When ``old_module_src`` (the whole file at the base ref) is given, the old
+    function executes against the OLD module state. Without it, both versions
+    exec into the working-tree module — which silently masks divergence caused
+    by a changed module-level constant or helper."""
     try:
-        old_fn = _load_candidate(repo, qualname, old_src)
+        if old_module_src is not None:
+            old_fn = _load_from_module_source(repo, qualname, old_module_src)
+        else:
+            old_fn = _load_candidate(repo, qualname, old_src)
     except Exception as exc:
         return Verdict(qualname, UNVERIFIED, f"old version failed to load: {exc}")
     try:
@@ -199,7 +209,10 @@ def changed_py_functions(repo: Path, base_ref: str) -> tuple[list[ChangedFunctio
     changed: list[ChangedFunction] = []
     notes: list[str] = []
     try:
-        names = _git(repo, "diff", "--name-only", base_ref, "--", "*.py").split()
+        # -z: NUL-separated — whitespace splitting silently dropped any path
+        # with a space (the file then got NO verdict, not even unverified).
+        raw = _git(repo, "diff", "--name-only", "-z", base_ref, "--", "*.py")
+        names = [n for n in raw.split("\0") if n]
     except subprocess.CalledProcessError as exc:
         return [], [f"git diff failed (is {base_ref!r} a valid ref?): {exc.stderr.strip()}"]
     for rel in names:
@@ -213,9 +226,12 @@ def changed_py_functions(repo: Path, base_ref: str) -> tuple[list[ChangedFunctio
         module = _module_name(rel)
         old_defs = _func_defs(old_source, module)
         new_defs = _func_defs(new_file.read_text(errors="replace"), module)
-        for qn, (name, new_src) in new_defs.items():
+        for qn, (_name, new_src) in new_defs.items():
             if qn in old_defs and old_defs[qn][1] != new_src:
-                changed.append(ChangedFunction(qn, rel, name, old_defs[qn][1], new_src))
+                in_file = qn[len(module) + 1 :]  # "func" or "Class.method" (co_qualname)
+                changed.append(
+                    ChangedFunction(qn, rel, in_file, old_defs[qn][1], new_src, old_source)
+                )
     return changed, notes
 
 
@@ -272,7 +288,14 @@ def verify_diff(
                 fuzzed = fuzz_around(recorded, fuzz_rounds)
                 args_all += fuzzed
                 n_fuzz = len(fuzzed)
-            v = differential_replay(repo, cf.qualname, cf.old_src, cf.new_src, args_all)
+            v = differential_replay(
+                repo,
+                cf.qualname,
+                cf.old_src,
+                cf.new_src,
+                args_all,
+                old_module_src=cf.old_module_src,
+            )
             v.fuzzed = n_fuzz if v.status != UNVERIFIED else 0
             report.verdicts.append(v)
 

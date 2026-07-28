@@ -15,6 +15,7 @@ injected assemblers.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import tempfile
 from pathlib import Path
@@ -46,11 +47,15 @@ def _gate_build_run(
     lib = _build_rust_staticlib(subset, d, extern_block([by_name[c] for c in sorted(still_c)]))
     patched = _patch_source(c_source, sorted(subset), d, also_export=still_c)
     prog = d / "prog"
-    build = build_cmd.format(source=str(patched), lib=str(lib), out=str(prog))
+    # The templates may carry real shell syntax, but OUR interpolated paths must
+    # be quoted — an unquoted tempdir with a space shatters the command line.
+    build = build_cmd.format(
+        source=shlex.quote(str(patched)), lib=shlex.quote(str(lib)), out=shlex.quote(str(prog))
+    )
     b = subprocess.run(build, shell=True, capture_output=True, text=True, timeout=600)
     if b.returncode != 0:
         return None, "", b.stderr[-1500:]
-    run = run_cmd.format(out=str(prog))
+    run = run_cmd.format(out=shlex.quote(str(prog)))
     r = subprocess.run(run, shell=True, input=run_input, capture_output=True, timeout=180)
     return r.returncode, r.stdout.decode("utf-8", "replace"), ""
 

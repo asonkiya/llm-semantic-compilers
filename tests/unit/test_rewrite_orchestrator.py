@@ -254,3 +254,51 @@ def test_apply_splices_winners_and_passes_final_gate(tmp_path: Path) -> None:
     assert "y = x + x" in text
     assert report["final_gate"]["contract_clean"] is True
     assert report["final_gate"]["tests_ok"] is True
+
+
+def test_check_survives_oracle_and_test_exceptions(tmp_path, monkeypatch):
+    """A pytest timeout (or any verify/oracle crash) is a failed CANDIDATE, not
+    a dead run — it must come back as a stage verdict, not an exception."""
+    import subprocess
+
+    import cgir.rewrite as rw
+
+    class _Contract:
+        contract_ok = True
+        violations = ()
+
+    monkeypatch.setattr(rw, "verify", lambda *a, **k: _Contract())
+
+    def boom(component_id, candidate):
+        raise subprocess.TimeoutExpired(cmd="pytest", timeout=300)
+
+    stage, feedback, ran = rw._check(tmp_path, tmp_path, "m.f", "def f(): pass", True, boom)
+    assert stage == "behavioral" and "TimeoutExpired" in feedback and ran
+
+    def verify_two_phase(index_dir, component_id, candidate, repo, run_tests):
+        if not run_tests:
+            return _Contract()
+        raise subprocess.TimeoutExpired(cmd="pytest", timeout=300)
+
+    monkeypatch.setattr(rw, "verify", verify_two_phase)
+    stage, feedback, ran = rw._check(tmp_path, tmp_path, "m.f", "def f(): pass", True, None)
+    assert stage == "tests" and "TimeoutExpired" in feedback and ran
+
+
+def test_linked_tests_finds_nested_layouts(tmp_path):
+    from cgir.verify import _linked_tests
+
+    (tmp_path / "tests" / "unit").mkdir(parents=True)
+    (tmp_path / "tests" / "unit" / "test_deep.py").write_text("def test_x():\n    clamp(1)\n")
+    assert _linked_tests(tmp_path, "mathlib.clamp") == ["tests/unit/test_deep.py"]
+
+
+def test_component_id_sanitization():
+    from cgir.api import valid_component_id
+    from cgir.api.mcp_server import tool_component
+
+    assert valid_component_id("pkg.mod.Class.method")
+    assert valid_component_id("a-b_c:d")
+    for bad in ("../x", "a/b", "a\\b", "..", "a..b", ""):
+        assert not valid_component_id(bad), bad
+    assert tool_component(Path("/nonexistent"), "../../etc/passwd").startswith("invalid")

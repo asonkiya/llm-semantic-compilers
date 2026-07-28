@@ -36,6 +36,15 @@ class PyEntry:
     source: str  # the Python source (prompt context)
     path: str  # repo-relative source file (for trace capture targets)
 
+    @property
+    def capture_name(self) -> str:
+        """The in-file qualname capture keys frames by (``co_qualname``):
+        ``clamp`` for a function, ``Rect.area`` for a method — the bare
+        ``symbol`` would miss every method."""
+        module = self.path[:-3].replace("/", ".") if self.path.endswith(".py") else self.path
+        cid = self.component_id
+        return cid[len(module) + 1 :] if cid.startswith(module + ".") else self.symbol
+
 
 def _param(name: str, ty: str) -> Param | None:
     if ty in _SCALAR_KINDS:

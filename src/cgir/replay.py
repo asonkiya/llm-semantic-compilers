@@ -28,6 +28,7 @@ import dataclasses
 import json
 import math
 import pickle
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,9 +36,25 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-# A captured invocation: positional args snapshot + the return value.
+# A captured invocation: positional args snapshot + the outcome. The outcome is
+# the return value, or {_RAISE_KEY: exc_type_name} when the call exited by
+# raising — a raising call is NOT a call that returned None.
 Trace = tuple[tuple[Any, ...], Any]
 
+_RAISE_KEY = "__cgir_raise__"
+
+
+def _is_raise_marker(value: Any) -> bool:
+    return isinstance(value, dict) and set(value) == {_RAISE_KEY}
+
+
+# settrace, not setprofile: the profiler's `return` event fires with arg=None
+# both for `return None` and for an exception exit — indistinguishable, and
+# sys.exc_info() is empty during unwind, so a raising call used to be recorded
+# as (args, None). The tracer disambiguates via event order: an `exception`
+# still pending at `return` means a raising exit; a `line` event after it means
+# the frame caught it and kept executing. Only target frames get a local trace,
+# so overhead stays close to the profiler version.
 _CAPTURE_HARNESS = """\
 import copy, os, pickle, runpy, sys
 from collections import defaultdict
@@ -48,43 +65,68 @@ from collections import defaultdict
 # exactly as a normal `pytest` invocation in the repo would.
 sys.path.insert(0, os.getcwd())
 
-TARGETS = set(tuple(t) for t in {targets!r})  # (abs_filename, func_name)
+TARGETS = set(tuple(t) for t in {targets!r})  # (abs_filename, in-file qualname)
 CAP = {cap!r}
+RAISE_KEY = {raise_key!r}
+# Loop machinery can surface these as trace `exception` events without a
+# visible raise; if one is still pending at return-with-None the exit is
+# ambiguous, so the trace is dropped rather than guessed.
+AMBIGUOUS = ("StopIteration", "StopAsyncIteration", "GeneratorExit")
 records = defaultdict(list)
-stack = []
+snaps = {{}}    # id(frame) -> deep-copied args
+pending = {{}}  # id(frame) -> in-flight exception type name
 
 
-def prof(frame, event, arg):
-    if event == "call":
-        code = frame.f_code
-        key = (code.co_filename, code.co_name)
-        if key in TARGETS:
-            names = code.co_varnames[: code.co_argcount]
-            try:
-                snap = tuple(copy.deepcopy(frame.f_locals[n]) for n in names)
-            except Exception:
-                snap = None
-            stack.append((key, snap))
-        else:
-            stack.append(None)
+def _local(frame, event, arg):
+    fid = id(frame)
+    if event == "exception":
+        pending[fid] = arg[0].__name__
+        frame.f_trace_lines = True  # so a catch inside the frame clears it
+    elif event == "line":
+        pending.pop(fid, None)
+        frame.f_trace_lines = False
     elif event == "return":
-        if stack:
-            top = stack.pop()
-            if top is not None and top[1] is not None:
-                try:
-                    records[top[0]].append((top[1], copy.deepcopy(arg)))
-                except Exception:
-                    pass
+        code = frame.f_code
+        snap = snaps.pop(fid, None)
+        exc = pending.pop(fid, None)
+        if snap is None:
+            return _local
+        try:
+            if exc is None:
+                out = copy.deepcopy(arg)
+            elif arg is None and exc not in AMBIGUOUS:
+                out = {{RAISE_KEY: exc}}
+            else:
+                return _local  # ambiguous exit: drop, never fake
+            records[(code.co_filename, code.co_qualname)].append((snap, out))
+        except Exception:
+            pass
+    return _local
+
+
+def _global(frame, event, arg):
+    if event != "call":
+        return None
+    code = frame.f_code
+    if (code.co_filename, code.co_qualname) not in TARGETS:
+        return None
+    names = code.co_varnames[: code.co_argcount]
+    try:
+        snaps[id(frame)] = tuple(copy.deepcopy(frame.f_locals[n]) for n in names)
+    except Exception:
+        pass
+    frame.f_trace_lines = False
+    return _local
 
 
 sys.argv = {driver_argv!r}
-sys.setprofile(prof)
+sys.settrace(_global)
 try:
     runpy.run_module({driver_module!r}, run_name="__main__", alter_sys=True)
 except SystemExit:
     pass
 finally:
-    sys.setprofile(None)
+    sys.settrace(None)
 
 out = {{}}
 for (fn, name), traces in records.items():
@@ -111,9 +153,11 @@ def capture(
     """Run ``driver_module`` (default pytest) in ``repo`` with the ``targets``
     traced, returning ``{qualname: [(args, result), ...]}``.
 
-    ``targets`` maps qualname -> (source file, function name). Only picklable
-    traces survive (so they can cross back from the subprocess); everything
-    else is dropped rather than faked."""
+    ``targets`` maps qualname -> (source file, in-file qualname) — the in-file
+    qualname is ``co_qualname`` (``f`` for a function, ``Cls.f`` for a method),
+    so two same-named methods in one file stay distinct. Only picklable traces
+    survive (so they can cross back from the subprocess); everything else is
+    dropped rather than faked."""
     repo = repo.resolve()
     key_to_qual = {(str((repo / f).resolve()), name): q for q, (f, name) in targets.items()}
     workdir = Path(tempfile.mkdtemp(prefix="cgir-capture-"))
@@ -123,6 +167,7 @@ def capture(
         _CAPTURE_HARNESS.format(
             targets=[list(k) for k in key_to_qual],
             cap=str(cap),
+            raise_key=_RAISE_KEY,
             driver_argv=driver_argv or [driver_module, "-q", "-p", "no:cacheprovider"],
             driver_module=driver_module,
         )
@@ -138,15 +183,28 @@ def capture(
     if not cap.exists():
         raise RuntimeError(f"capture produced no traces (driver failed?):\n{proc.stderr[-1500:]}")
     # Captured values may be instances of the repo's own classes; make them
-    # importable so the traces unpickle here (replay adds this too).
+    # importable so the traces unpickle here. Evict any same-named module
+    # cached from another path first — unpickling against a foreign module
+    # fails (or worse, resolves to the wrong class).
     if env_repo not in sys.path:
         sys.path.insert(0, env_repo)
+    for target_qual in targets:
+        module_name, _chain = _split_qualname(repo, target_qual)
+        top = module_name.split(".", 1)[0]
+        mod = sys.modules.get(top)
+        origin = getattr(mod, "__file__", None) if mod is not None else None
+        if mod is not None and (
+            origin is None or not str(Path(origin).resolve()).startswith(env_repo)
+        ):
+            for k in [k for k in sys.modules if k == top or k.startswith(top + ".")]:
+                del sys.modules[k]
     raw: dict[tuple[str, str], list[Trace]] = pickle.loads(cap.read_bytes())
     out: dict[str, list[Trace]] = {}
     for key, traces in raw.items():
         q = key_to_qual.get(key)
         if q is not None and traces:
             out[q] = traces
+    shutil.rmtree(workdir, ignore_errors=True)  # kept on failure paths for debugging
     return out
 
 
@@ -155,8 +213,13 @@ def _eq(a: Any, b: Any) -> bool:
         return (math.isnan(a) and math.isnan(b)) or math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-12)
     if isinstance(a, bool) != isinstance(b, bool):
         return False
+    # Ints compare exactly — isclose(float(a), float(b)) collapses values past
+    # 2**53 (hashes, IDs, checksums), exactly where the fuzzer's edge values
+    # probe. int-vs-float is an observable type change, not a rounding matter.
+    if isinstance(a, int) and isinstance(b, int):
+        return a == b
     if isinstance(a, int | float) and isinstance(b, int | float):
-        return math.isclose(float(a), float(b), rel_tol=1e-9, abs_tol=1e-12)
+        return False
     if type(a) is not type(b):
         return False
     if dataclasses.is_dataclass(a) and not isinstance(a, type):
@@ -171,17 +234,75 @@ def _eq(a: Any, b: Any) -> bool:
         return False
 
 
+def _import_repo_module(repo: Path, module_name: str) -> Any:
+    """Import ``module_name`` ensuring it comes from THIS repo. A same-named
+    module cached in ``sys.modules`` from another path would otherwise be
+    silently substituted — the candidate would exec against a stranger's
+    globals, and captured instances would fail to unpickle. Foreign entries
+    are evicted so the repo-local version loads."""
+    import importlib
+
+    repo_s = str(repo.resolve())
+    if repo_s not in sys.path:
+        sys.path.insert(0, repo_s)
+    top = module_name.split(".", 1)[0]
+    mod = sys.modules.get(top)
+    origin = getattr(mod, "__file__", None) if mod is not None else None
+    if mod is not None and (origin is None or not str(Path(origin).resolve()).startswith(repo_s)):
+        for k in [k for k in sys.modules if k == top or k.startswith(top + ".")]:
+            del sys.modules[k]
+        importlib.invalidate_caches()
+    return importlib.import_module(module_name)
+
+
+def _split_qualname(repo: Path, qualname: str) -> tuple[str, list[str]]:
+    """Split ``module.Class.method`` into (module name, attribute chain) by
+    probing the filesystem — the longest prefix that is a module file or
+    package wins. ``rsplit('.', 1)`` guessed wrong for methods: it tried to
+    ``import module.Class``, so no changed method could ever be verified."""
+    parts = qualname.split(".")
+    for i in range(len(parts) - 1, 0, -1):
+        rel = Path(*parts[:i])
+        if (repo / rel.with_suffix(".py")).exists() or (repo / rel / "__init__.py").exists():
+            return ".".join(parts[:i]), parts[i:]
+    return ".".join(parts[:-1]), [parts[-1]]
+
+
 def _load_candidate(repo: Path, qualname: str, candidate: str) -> Callable[..., Any]:
     import copy
-    import importlib
+    import textwrap
+
+    module_name, chain = _split_qualname(repo, qualname)
+    mod = _import_repo_module(repo, module_name)
+    ns = dict(vars(mod))
+    # dedent: a method's source segment arrives indented, which compile rejects.
+    exec(compile(textwrap.dedent(candidate), f"<candidate:{qualname}>", "exec"), ns)
+    fn = ns[chain[-1]]
+    return lambda *a: fn(*copy.deepcopy(list(a)))
+
+
+def _load_from_module_source(repo: Path, qualname: str, module_source: str) -> Callable[..., Any]:
+    """Resolve ``qualname`` from a full module source (e.g. the base-ref version
+    of the file), so the function executes against ITS OWN module state —
+    constants, helpers, class bodies as they were — not the working tree's.
+    Imports of *other* modules still resolve to their working-tree versions;
+    cross-module drift is a documented residual limit, not silently masked
+    same-file drift."""
+    import copy
+    import types
 
     if str(repo.resolve()) not in sys.path:
         sys.path.insert(0, str(repo.resolve()))
-    module_name, func_name = qualname.rsplit(".", 1)
-    mod = importlib.import_module(module_name)
-    ns = dict(vars(mod))
-    exec(compile(candidate, f"<candidate:{qualname}>", "exec"), ns)
-    fn = ns[func_name]
+    module_name, chain = _split_qualname(repo, qualname)
+    mod = types.ModuleType(module_name)
+    mod.__file__ = f"<cgir-old:{module_name}>"
+    if "." in module_name:
+        mod.__package__ = module_name.rsplit(".", 1)[0]
+    exec(compile(module_source, mod.__file__, "exec"), mod.__dict__)
+    obj: Any = mod
+    for name in chain:
+        obj = getattr(obj, name)
+    fn = obj
     return lambda *a: fn(*copy.deepcopy(list(a)))
 
 
@@ -201,7 +322,18 @@ def replay(repo: Path, qualname: str, candidate: str, traces: list[Trace]) -> tu
         # whole rewrite run. A candidate that exits is a failed replay, not a
         # harness death. KeyboardInterrupt is deliberately NOT swallowed.
         except (Exception, SystemExit) as exc:
+            if _is_raise_marker(expected):
+                if type(exc).__name__ == expected[_RAISE_KEY]:
+                    continue
+                return False, (
+                    f"replay raised {type(exc).__name__} on {args!r}, "
+                    f"original raised {expected[_RAISE_KEY]}"
+                )
             return False, f"replay raised on {args!r}: {type(exc).__name__}: {exc}"
+        if _is_raise_marker(expected):
+            return False, (
+                f"replay returned {got!r} on {args!r}, original raised {expected[_RAISE_KEY]}"
+            )
         if not _eq(got, expected):
             return False, f"replay mismatch on {args!r}: expected {expected!r}, got {got!r}"
     return True, ""

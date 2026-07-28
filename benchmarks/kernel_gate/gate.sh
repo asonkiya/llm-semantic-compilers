@@ -10,7 +10,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CAND="${1:?usage: gate.sh <candidate.rs> [out-dir]}"
-OUT="${2:-/Users/aryaman/.claude/jobs/8a8bcefc/tmp/kernel-gate-out}"
+OUT="${2:-./kernel-gate-out}"
 VOL=cgir-kbuild
 IMG=cgir-kernel-gate
 mkdir -p "$OUT"

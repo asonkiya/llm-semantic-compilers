@@ -1,8 +1,8 @@
 # Roadmap
 
-**North star: [`vision-rewrite.md`](./vision-rewrite.md)** — rewriting massive codebases with simple models; the contract layer is its verifier. **Active plan: [`plan-0.3.md`](./plan-0.3.md)** — trust (confidence tiers), reach (go.mod resolution, pre-commit, agents), and the incremental-analysis design. `plan-0.2-0.4.md` is fully landed.
+**North star: [`vision-rewrite.md`](./vision-rewrite.md)** — rewriting massive codebases with simple models; the contract layer is its verifier. That north star is now the product's centre of gravity: the rewrite orchestrator (`cgir rewrite`), the C→Rust pipeline (`--lang c-rust`, `--lift`, whole-program gate), the capture/replay oracle, and the behavioral-diff gate (`cgir verify-diff`) all ship on PyPI as **0.6.3**. `plan-0.2-0.4.md` and `plan-0.3.md` are fully landed.
 
-Forward-looking sequencing. The grouping mirrors `Code-IR.md` §Architecture: **P0** is "you can produce a `ComponentSpec`," **P1** is "you can trust it," **P2** is "you can scale it." Within each tier the order below reflects current dependencies, not strict chronology — feel free to interleave when dependencies allow.
+Forward-looking sequencing. The grouping mirrors `Code-IR.md` §Architecture: **P0** is "you can produce a `ComponentSpec`," **P1** is "you can trust it," **P2** is "you can scale it." P0 and P1 are complete; P2 is the only tier with open milestone tags (`grep -rn "milestone:" src/` → `P2-neo4j`, `P2-joern-bridge`, `P2-codeql-bridge`). Within each tier the order below reflects current dependencies, not strict chronology — feel free to interleave when dependencies allow.
 
 ## Done
 
@@ -22,11 +22,24 @@ Forward-looking sequencing. The grouping mirrors `Code-IR.md` §Architecture: **
 - Reaching-definitions worklist analysis (`analyses/reaching_defs.py`): forward may-analysis over `CONTROLS` edges, with parameters as initial defs and `Assignment.attrs["writes"]` driving gen/kill. First **pure-graph** analysis — does not take `repo_path`, does not re-parse source.
 - First opportunistic step on the grammar-agnostic core refactor: extracted duplicated `_parser` / `_locate_function` from `call_graph`, `effects`, `cfg` into `analyses/_python_ast.py`.
 
-**Sprint 3 (P1, in progress):**
+**Sprint 3 (P1):**
 - CFG extended with per-node `reads` (per-stmt sub-expression: RHS / condition / iterable / returned value), `controlled_by` (id of immediately enclosing Branch/Loop), and Assignment `mutates` (attribute/subscript LHS base names).
 - PDG (`analyses/pdg.py`): emits `FLOWS_TO` (data dependence, gated by reaching-defs) and `DEPENDS_ON` (control dependence from `controlled_by`). Second pure-graph analysis.
 - Slicer recognizes `state_transformer` when any Assignment child has non-empty `mutates`.
 - Reaching-defs and PDG now wired into the CLI scan pipeline.
+
+**P1 complete (Sprints 4–19):** every `ComponentSpec` field has a real classifier; live regeneration (`cgir regenerate --live`) and the FastAPI surface both ship. Milestones — the precision fixes (`with`/`try`/`match`, augmented assignment, mutator tables), the extended effects taxonomy (`net`/`fs`/`nondeterm`/`db`, confidence tiers), visualization (`cgir viz`, GraphML, mermaid), tracing/impact/flow, the diff + pin + drift gates, the pre-commit hook + GitHub Action, `cgir stats`/`search`/`pack`, entrypoint recognition, coverage-grounded test linkage, the LSP server, and the MCP server — are enumerated in [`status.md`](./status.md) ("Recent milestones" + the feature matrix).
+
+**Multi-language & adapter layer:** the grammar-agnostic core refactor landed. A `LanguageAdapter` seam (`languages/`) with a plugin registry (`cgir.languages` entry points) now backs first-class **TypeScript**, **Go**, **Rust**, and **C** adapters — Python's hardcoded tree-sitter node types no longer leak into the passes. An adapter-authoring guide (`docs/writing-an-adapter.md`) was validated by a docs-only agent writing the Rust adapter from scratch.
+
+**The rewrite era (0.4 → 0.6.3, shipped on PyPI):**
+- `cgir decompose` — PDG-sliced functional-core/imperative-shell suggestions.
+- `cgir verify` — splice → rescan → contract-diff → tests, exposed over CLI + MCP.
+- `cgir rewrite` — the orchestrator: query worklist → k cheap candidates → contract verify → shadow tests → escalation → resumable ledger, budget cap, `--apply` + final gate. Rewrite pairs are a plug-and-play registry (like the language layer).
+- **C→Rust** (`--lang c-rust`): pure C leaves → cheap-model Rust → rustc → adapter contract-scan → differential vs the compiled C; `--non-leaf` (dependency-ordered), `--apply --link-out` link-back, and a `--gate-build`/`--gate-run` whole-program gate that keeps only byte-identical-to-stock winners.
+- **C lifter** (`--lift <fn>`): tree-shake a function + its file-scope tables/typedefs/helpers out of a big single file into a standalone TU and rewrite it — one command, no pre-existing index.
+- **Capture/replay oracle** (`--oracle replay`): trace real I/O from the test run, replay recorded inputs per candidate.
+- **`cgir verify-diff`** — a behavior-preservation gate for AI-authored changes: record each changed function's real inputs from the suite, replay OLD vs NEW (with optional `--fuzz`), report preserving / diverged / unverified, exit non-zero on divergence. Python via pytest, JS/TS via `node --test`/jest. This is the contract layer applied to *any* edit, not just a full rewrite.
 
 ## P1 — Trust & explainability
 
@@ -37,52 +50,48 @@ The theme: make every `ComponentSpec` defensible. Today a function is "pure" if 
 | ~~1~~ | ~~`P1-cfg`~~ | **Done (Sprint 1).** Unblocks 2 and 3. | `src/cgir/analyses/cfg.py`; 11 tests (later +4 for `writes` attr) in `tests/unit/test_cfg.py`. |
 | ~~2~~ | ~~`P1-reaching-defs`~~ | **Done (Sprint 2).** Unblocks 3 and `WRITES`/`MUTATES` edges. | `src/cgir/analyses/reaching_defs.py`; 9 tests in `tests/unit/test_reaching_defs.py`. Pure-graph; wired into CLI in Sprint 3 alongside PDG. |
 | ~~3~~ | ~~`P1-pdg`~~ | **Done (Sprint 3).** `FLOWS_TO` (data dep) + `DEPENDS_ON` (control dep). Lights up `state_transformer` in the slicer. | `src/cgir/analyses/pdg.py`; 10 tests in `tests/unit/test_pdg.py`. CFG extended with `reads`/`mutates`/`controlled_by` attrs to drive it. |
-| 4 | Extended effects taxonomy (`net`, `fs`, `nondeterm`) | No milestone tag — drop tags into `effects.DIRECT_EFFECT_TAGS` and teach `_walk_body_for_effects` to detect them. | Start with the obvious imports (`requests`, `urllib`, `socket`, `os.path`, `pathlib.Path.write_text`, `time`, `random`, `datetime.now`). |
-| 5 | Statement-granularity trace map | Today `trace_map.py` indexes function ranges. With the CFG in place we can resolve `path:line` to a specific Statement/Assignment/Branch/Loop node and the spec field that depends on it. | Refines `cgir trace` output. Now unblocked. |
+| 4 | ~~Extended effects taxonomy (`net`, `fs`, `nondeterm`)~~ **done (Sprint 5)** | Dropped into `effects.DIRECT_EFFECT_TAGS` with lexical, alias-aware matching. | Landed for `requests`/`urllib`/`socket`/`os`/`pathlib`/`time`/`random`/`datetime`; later extended with `db` and confidence tiers. |
+| 5 | ~~Statement-granularity trace map~~ **done** | `trace_map.py` resolves `path:line` against the CFG. | Refines `cgir trace` output. |
 | 6 | ~~`P1-regenerate`~~ **done (Sprint 9)** | Turn the prompt-pack into a real Anthropic SDK call. Add prompt caching from day one. | Landed: injectable generator seam; `anthropic_generator()` behind the `cgir[llm]` extra with cache_control on the system prompt. Compile/test round-trip verification before tagging `REGENERATED_AS` is still future work. |
 | 7 | ~~`P1-api`~~ **done (Sprint 8)** | Replace 501 stubs in `api/server.py` with the real endpoints backed by the same passes the CLI uses. | Landed: `cgir/pipeline.py:scan_repo` is the single driver; CLI and FastAPI are thin surfaces over it. |
 
-Acceptance for "P1 done": every `ComponentSpec` field has a real classifier behind it (no `PLACEHOLDER_SCORE` defaults firing in practice), `cgir regenerate` round-trips Python → TypeScript for the fixture, and the FastAPI surface mirrors the CLI.
+**P1 is done.** Every `ComponentSpec` field has a real classifier behind it (no `PLACEHOLDER_SCORE` defaults firing in practice), `cgir regenerate --live` drives a real Anthropic call, and the FastAPI surface mirrors the CLI.
 
 ## P2 — Scale
 
-The theme: stop holding the graph in process memory, and accept secondary analyzers (Joern, CodeQL) for the cases where Tree-sitter alone is too shallow.
+The theme: stop holding the graph in process memory, and accept secondary analyzers (Joern, CodeQL) for the cases where Tree-sitter alone is too shallow. **These three tags are the entire remaining backlog** — everything above this line has shipped.
 
 | # | Milestone tag | Why | Notes |
 |---|---|---|---|
-| 1 | `P2-joern-bridge` | CPG-style overlays give us real interprocedural data-flow without re-implementing it. | Implement as a `GraphSource` that shells out to Joern's CLI and normalizes its CPG into our `Node`/`Edge` vocabulary. |
-| 2 | `P2-codeql-bridge` | Secondary analyzer + export bridge. Useful for differential testing against Joern. | Same pattern as Joern: shell out, normalize. |
+| 1 | `P2-joern-bridge` | CPG-style overlays give us real interprocedural data-flow without re-implementing it. | Stub at `sources/joern_source.py`. Implement as a `GraphSource` that shells out to Joern's CLI and normalizes its CPG into our `Node`/`Edge` vocabulary. |
+| 2 | `P2-codeql-bridge` | Secondary analyzer + export bridge. Useful for differential testing against Joern. | Stub at `sources/codeql_source.py`. Same pattern as Joern: shell out, normalize. |
 | 3 | ~~`P2-graphml`~~ **done (Sprint 6)** | Cheap export for Gephi / yEd / Neo4j importers. | Landed in `export/graphml.py` — flattens attrs to GraphML-safe scalars. `cgir export --format graphml`. |
-| 4 | `P2-neo4j` | Persistent backend for repos that don't fit in process memory. | Translate `to_jsonable()` into Cypher MERGEs; provide a `Neo4jRepoGraph` that implements the same `RepoGraph` interface so passes don't notice. |
+| 4 | `P2-neo4j` | Persistent backend for repos that don't fit in process memory. | Stub at `export/neo4j.py`. Translate `to_jsonable()` into Cypher MERGEs; provide a `Neo4jRepoGraph` that implements the same `RepoGraph` interface so passes don't notice. |
 
 Acceptance for "P2 done": `cgir scan` runs on a 100k-LOC repo with the Neo4j backend in under five minutes, and Joern/CodeQL adapters produce specs that pass differential tests against the Tree-sitter pipeline.
 
 ## Beyond
 
-These are *not* milestone-tagged yet — they're on the horizon but should not block P1/P2 work.
+These are *not* milestone-tagged — they're on the horizon but should not block the P2 backlog.
 
-- **Grammar-agnostic core refactor (architectural debt).** Today the `GraphSource` ABC is the only seam designed for non-tree-sitter parsers (PEG, ANTLR, hand-rolled, Joern, CodeQL). But three downstream modules currently bypass the abstraction and tie us specifically to `tree-sitter-python`:
-  1. **Analyses re-parse source directly.** `analyses/call_graph.py`, `analyses/effects.py`, and `analyses/cfg.py` each import `tree_sitter_python` and walk function bodies themselves (look for the duplicated `_parser()` and `_locate_function()` helpers). A new `GraphSource` like Joern can't satisfy these passes — they'd still try to tree-sitter-parse the files.
-  2. **Hardcoded tree-sitter node-type strings.** `cfg.py` switches on `"if_statement"` / `"for_statement"` / `"function_definition"`; `effects.py` looks for `"raise_statement"` and the `print`/`input`/`open` builtins. Tree-sitter-python's grammar is leaking into language-agnostic passes.
-  3. **Symbol resolution is Python-specific.** `analyses/symbols.py` assumes `from a.b import c` semantics and dotted module names derived from file paths.
+**Landed since this section was first written** (kept here as a record of what the "Beyond" bets became):
 
-  Two refactor moves close this debt: (a) push fine-grained AST extraction down into `GraphSource` so it emits `Call` / `Raise` / `Statement` / `Branch` nodes at ingest time (consistent with the unused `Expr`/`Statement` items in the spec's vocabulary), and (b) introduce a `LanguageAdapter` ABC for genuinely language-specific bits (import resolution, builtin tables, what counts as an effect).
+- **Grammar-agnostic core refactor — done.** The three tree-sitter-python couplings (analyses re-parsing source, hardcoded node-type strings in `cfg.py`/`effects.py`, Python-specific symbol resolution) are gone. A `LanguageAdapter` ABC (`languages/`) owns the language-specific bits (import resolution, builtin tables, what counts as an effect), and a plugin registry (`cgir.languages` entry points) lets third parties add languages out-of-tree.
+- **TypeScript target — done.** Shipped as one adapter (`languages/typescript.py`), exactly as the refactor promised. **Go**, **Rust**, and **C** followed on the same seam.
+- **Incremental indexing — done.** Content-hash parse cache (`languages/cache.py`) + `cgir watch`: unchanged files parse once ever; a single-file edit no longer reparses the world.
+- **Regeneration validation — done (and generalized).** "Real trust" — compile + test the rewritten component before trusting it — is now the whole rewrite/verify stack: contract diff + shadow tests + differential oracle + whole-program gate, and `cgir verify-diff` as the standalone behavior-preservation gate.
 
-  **Cheap path:** opportunistic refactor — when the next milestone touches one of those modules (`P1-reaching-defs` will touch the CFG output; extended-effects will touch `effects.py`), refactor that module to read from `RepoGraph` instead of re-parsing. After 2–3 such cycles the tree-sitter coupling is confined to `TreeSitterSource` only. **Expensive path:** dedicated sprint if a non-tree-sitter backend lands before opportunistic cleanup finishes.
+Still genuinely on the horizon (no tag, no owner):
 
-- **TypeScript target.** Mirror the Python ingester using `tree-sitter-typescript`. **Note:** until the grammar-agnostic refactor above lands, this is *not* "just write a new `GraphSource`" — every Python-specific hardcoded node type in `cfg.py` / `effects.py` would need a TS twin. Doing the refactor first turns TS support into roughly one `GraphSource` + one `LanguageAdapter`.
-- **Regeneration validation.** Real "trust": compile + test the LLM-regenerated component and only emit a `REGENERATED_AS` edge when it passes. Probably ships with `P1-regenerate` v2.
 - **Trace edges as first-class graph data.** Move from a side-car `trace_map.json` to `TRACE_OF` edges on the `RepoGraph` directly, so trace queries are just graph queries.
-- **Incremental indexing.** Tree-sitter is incremental; the ingester is not yet. Once repos get big, add a content-hash cache so a single-file edit doesn't reparse the world.
-- **Differential testing harness.** Run Joern, CodeQL, and Tree-sitter side-by-side on the same fixtures and diff the resulting `ComponentSpec`s. Useful both for precision metrics and for spotting backend regressions.
+- **Differential testing harness across backends.** Once the Joern/CodeQL bridges (P2) land, run them side-by-side with Tree-sitter on the same fixtures and diff the resulting `ComponentSpec`s — a precision metric and a backend-regression guard.
 
 ## How to pick what to work on
 
 In order:
 
-1. Anything that unblocks **other** P1 milestones (CFG → reaching defs → PDG is a strict chain).
-2. Anything with a written user-facing acceptance test that's currently red. There shouldn't be silently red tests on `main` — if you find one, finish it before opening a new front.
-3. P1 items in priority order from the table above.
-4. P2 only after P1 is fully green and the CLI no longer surfaces placeholder values to users.
+1. Anything with a written user-facing acceptance test that's currently red. There shouldn't be silently red tests on `main` — if you find one, finish it before opening a new front.
+2. The three open P2 tags (`P2-neo4j`, `P2-joern-bridge`, `P2-codeql-bridge`) — the last remaining milestone stubs.
+3. Deepening the rewrite north star (`vision-rewrite.md`): more rewrite pairs, more adapters, more oracle coverage. This is where the product's momentum is even though it's un-tagged.
 
 When unsure, run `grep -rn "milestone:\|STUB:" src/` and pick a tag — every tag is a TDD entry point per [`development.md`](./development.md).
